@@ -1,0 +1,6 @@
+build*/
+logs
+.vscode
+__pycache__
+*.dot
+*.png
