@@ -8,11 +8,13 @@ import json
 import argparse
 import os
 import re
+import time
 
 from data_struct.reply import Reply
 from utils import *
 
-EXTRACT_CG = '/home/xiaoyu/cmake-analyzer/cmake-db/build/clang_tool/FunctionCallGraph'
+PWD = Path(".").absolute()
+EXTRACT_CG = str(PWD / 'build/clang_tool/FunctionCallGraph')
 PANDA = '/usr/bin/panda'
 example_compiler_action_plugin = {
     "comment": "Example plugin for Panda driver.",
@@ -23,6 +25,18 @@ example_compiler_action_plugin = {
         "extname": ".d"
     }
 }
+example_clang_tool_plugin = {
+    "comment": "Example plugin for Panda driver",
+    "type": "ClangToolAction",
+    "action": {
+        "title": "Executing static analyzer",
+        "tool": "clang-check",
+        "args": ["-analyze"],
+        "extname": ".clang-check",
+        "stream": "stderr"
+    }
+}
+
 LOG_TAG = ''
 # 查找cmake命令的位置
 CMAKE_PATH = shutil.which('cmake')
@@ -54,11 +68,16 @@ class DiffResult:
     diff_lines: List
     other_file: str
     other_diff_lines: List
+    entire_file: bool # entire file different
 
-    def __init__(self, file: str) -> None:
+    def __init__(self, file: str, entire: bool=False):
         self.file = file
         self.diff_lines = []
         self.other_diff_lines = []
+        if entire:
+            self.entire_file = True
+        else:
+            self.entire_file = False
 
     def add_diff_line(self, start_line:int, line_count:int):
         self.diff_lines.append([start_line, line_count])
@@ -67,6 +86,8 @@ class DiffResult:
         self.other_diff_lines.append([start_line, line_count])
 
     def __repr__(self) -> str:
+        if self.entire_file:
+            return f"Only my_file: {self.file}\n"
         ret = f"my_file: {self.file}\nother_file: {self.other_file}\n"
         for idx, line in enumerate(self.diff_lines):
             ret += f"@@ -{line[0]},{line[1]} +{self.other_diff_lines[idx][0]},{self.other_diff_lines[idx][1]} @@\n"
@@ -80,11 +101,13 @@ class Configuration:
     src_path: Path
     build_path: Path
     reply_path: Path
-    panda_workspace: Path
+    workspace: Path
     compile_database: Path
     reply_database: List[Reply]
     diff_file_and_lines: List[DiffResult]
+    extract_cg: str = EXTRACT_CG
     status: str # {WAIT, SUCCESS, FAILED}
+    incrementable: bool
 
     def __init__(self, name, src_path, options: List[Option], args=None, cmake_path=None, build_path=None):
         self.name = name
@@ -105,6 +128,7 @@ class Configuration:
         self.reply_database = []
         self.diff_file_and_lines = []
         self.status = 'WAIT'
+        self.incrementable = False
         
     def create_configure_script(self, cmake_path):
         commands = [cmake_path]
@@ -131,6 +155,8 @@ class Configuration:
         self.workspace = self.build_path / 'workspace_for_cdb'
         self.preprocess_path = self.workspace / 'preprocess'
         self.edm_path = self.workspace / 'csa-ctu-scan'
+        self.cg_path = self.workspace / 'call_graph'
+        self.diff_files_path = self.workspace / 'diff_files.txt'
 
     def create_cmake_api_file(self):
         if self.cmake_api_path.exists():
@@ -160,37 +186,49 @@ class Configuration:
             self.status = 'FAILED'
             logger.error(f"[Repo Config Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
 
-    def extract_call_graph(self):
+    def extract_call_graph(self, inc:bool=True):
         '''
         use clang_tool/extractCG.cpp to generate call graph
         '''
         if not self.compile_database.exists():
             logger.error(f"[Extract Call Graph] can't extract call graph without file {self.compile_database}")
             return
-        commands = [self.extract_cg, '-o', str(self.build_path / 'call_graph')]
-        commands.append('-p')
-        commands.append(str(self.build_path))
-        # 处理compile_commands.json的每个文件，分别生成CallGraph
-        with open(self.compile_database, 'r') as f:
-            cbd_list = json.load(f)
-            for file in cbd_list:
-                commands.append(file["file"])
+        remake_dir(self.cg_path, "[Call Graph Files DIR exists]")
+        plugin_path = self.cg_path / 'cg_plugin.json'
+        with open(plugin_path, 'w') as f:
+            plugin = example_clang_tool_plugin
+            plugin['action']['title'] = 'Extract Call Graph'
+            plugin['action']['tool'] = self.extract_cg
+            plugin['action']['args'] = []
+            plugin['action']['extname'] = ".cg"
+            plugin['action']['stream'] = 'stdout'
+            json.dump(plugin, f, indent=4)
+
+        commands = [PANDA]
+        commands.extend(['-j', '16', '--print-execution-time', '--verbose'])
+        commands.extend(['--plugin', str(plugin_path)])
+        commands.extend(['-f', str(self.compile_database)])
+        commands.extend(['-o', str(self.cg_path)])
+        if inc and self.incrementable:
+            commands.extend(['--file-list', f"{self.diff_files_path}"])
         
         extract_cg_script = ' '.join(commands)
         logger.debug("[Extract CG Script] " + extract_cg_script)
         try:
             process = run(extract_cg_script, shell=True, capture_output=True, text=True, check=True)
-            logger.info(f"[Extract CG Success] {process.stdout}")
+            # logger.info(f"[Extract CG Success] {process.stdout} {process.stderr}")
         except subprocess.CalledProcessError as e:
             logger.error(f"[Extract CG Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
 
-    def generate_edm(self):
+    def generate_edm(self, inc:bool=True):
         remake_dir(self.edm_path, "[EDM Files DIR exists]")
         commands = [PANDA]
         commands.append('-YM')
         commands.extend(['-j', '16', '--print-execution-time'])
         commands.extend(['-f', str(self.compile_database)])
         commands.extend(['-o', str(self.edm_path)])
+        if inc and self.incrementable:
+            commands.extend(['--file-list', f"{self.diff_files_path}"])
         edm_script = ' '.join(commands)
         logger.debug("[Generating EDM Files Script] " + edm_script)
         try:
@@ -211,7 +249,7 @@ class Configuration:
             json.dump(plugin, f, indent=4)
         commands = [PANDA]
         commands.extend(['-j', '16', '--print-execution-time'])
-        commands.extend(['--cc', 'gcc', '--cxx', 'g++'])
+        # commands.extend(['--cc', 'gcc', '--cxx', 'g++'])
         commands.extend(['--plugin', str(plugin_path)])
         commands.extend(['-f', str(self.compile_database)])
         commands.extend(['-o', str(self.preprocess_path)])
@@ -225,15 +263,23 @@ class Configuration:
             logger.error(f"[Preprocess Files Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
     
     def diff_with_other(self, other):
-        commands = [DIFF_PATH]
         if not self.preprocess_path.exists():
             logger.error(f"Preprocess files DIR {self.preprocess_path} not exists")
             return
         if not other.preprocess_path.exists():
             logger.error(f"Preprocess files DIR {other.preprocess_path} not exists")
             return
+        self.diff_two_dir(self.preprocess_path, other.preprocess_path, other)
+        logger.info(f"[Parse Diff Result Success] diff file number: {len(self.diff_file_and_lines)}")
+        with open(self.diff_files_path, 'w') as f:
+            for i in self.diff_file_and_lines:
+                f.write(i.file + "\n")
+        self.incrementable = True
+
+    def diff_two_dir(self, my_dir: Path, other_dir: Path, other):
+        commands = [DIFF_PATH]
         commands.extend(['-r', '-u0'])
-        commands.extend([str(self.preprocess_path), str(other.preprocess_path)])
+        commands.extend([str(my_dir), str(other_dir)])
         diff_script = ' '.join(commands)
         logger.debug("[Diff Files Script] " + diff_script)
         try:
@@ -243,9 +289,17 @@ class Configuration:
             # diff return no-zero when success
             self.status = 'DIFF'
             logger.info(f"[Diff Files Success] {diff_script}")
-            self.parse_diff_result(e.stdout)
+            self.parse_diff_result(e.stdout, other)
 
-    def parse_diff_result(self, diff_out):
+    def get_origin_file_name(self, file:str, prefix: List[str], extnames: List[str]):
+        file = file[len(prefix):]
+        for ext in extnames:
+            if file.endswith(ext):
+                file = file[:-len(ext)]
+                break
+        return file
+
+    def parse_diff_result(self, diff_out, other):
         diff_line_pattern = re.compile(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@$')
         my_file: str
         other_file: str
@@ -262,14 +316,51 @@ class Configuration:
                     self.diff_file_and_lines[-1].add_diff_line(my_start, my_count)
                     self.diff_file_and_lines[-1].add_other_diff_line(other_start, other_count)
             elif line.startswith('---'):
-                spilt_line = line.split(' ')
+                spilt_line = line.split()
                 my_file = spilt_line[1]
+                my_file = self.get_origin_file_name(my_file, str(self.preprocess_path), ['.i', '.ii'])
                 self.diff_file_and_lines.append(DiffResult(my_file))
             elif line.startswith('+++'):
-                spilt_line = line.split(' ')
+                spilt_line = line.split()
                 other_file = spilt_line[1]
-                self.diff_file_and_lines[-1].other_file = other_file
-        logger.info(f"[Parse Diff Result Success] diff file number: {len(self.diff_file_and_lines)}")
+                self.diff_file_and_lines[-1].other_file = self.get_origin_file_name(other_file, str(other.preprocess_path), ['.i', '.ii'])
+            elif line.startswith("Only in"):
+                spilt_line = line.split()
+                diff = Path(spilt_line[2][:-1]) / spilt_line[3]
+                is_my_file_or_dir = diff.is_relative_to(self.preprocess_path)
+                logger.debug(f"[Parse Diff Result Only in] {diff}")
+                if diff.is_file():
+                    # is file
+                    if is_my_file_or_dir:
+                        # only record new file in my build directory
+                        diff = self.get_origin_file_name(str(diff), str(self.preprocess_path), ['.i', '.ii'])
+                        self.diff_file_and_lines.append(DiffResult(str(diff), True))
+                else:
+                    # is directory
+                    my_build_dir_in_preprocess_path = None
+                    other_build_dir_in_preprocess_path = None
+                    if is_my_file_or_dir:
+                        relative_dir = diff.relative_to(self.preprocess_path)
+                        logger.debug(f"[Parse Diff Result] Find my dir: {diff} relative_dir : {relative_dir} build_path {self.build_path}")
+                        if "/" + str(relative_dir) == str(self.build_path):
+                            my_build_dir_in_preprocess_path = relative_dir
+                    else:
+                        relative_dir = diff.relative_to(other.preprocess_path)
+                        logger.debug(f"[Parse Diff Result] Find other dir: {diff} relative_dir : {relative_dir} build_path {other.build_path}")
+                        if "/" + str(relative_dir) == str(other.build_path):
+                            other_build_dir_in_preprocess_path = relative_dir
+                    if my_build_dir_in_preprocess_path or other_build_dir_in_preprocess_path:
+                            if my_build_dir_in_preprocess_path and other_build_dir_in_preprocess_path:
+                                # eliminate the impact of different build path
+                                logger.debug(f"[Parse Diff Result Recursively] diff build directory {diff} in preprocess path")
+                                my_build_dir_in_preprocess_path = other_build_dir_in_preprocess_path = None
+                                self.diff_two_dir(my_build_dir_in_preprocess_path, other_build_dir_in_preprocess_path, other)
+                    elif is_my_file_or_dir:
+                        logger.debug(f"[Parse Diff Directory] find dir {diff} only in one build path")
+                        for diff_file in diff.rglob("*"):
+                            if diff_file.is_file():
+                                file = self.get_origin_file_name(str(diff_file), str(self.preprocess_path), ['.i', '.ii'])
+                                self.diff_file_and_lines.append(DiffResult(file, True))
 
     def __repr__(self) -> str:
         ret = f"build path: {self.build_path}\n"
@@ -288,7 +379,6 @@ class Repository:
     name: str
     src_path: Path
     cmake_path: str = CMAKE_PATH
-    extract_cg: str = EXTRACT_CG
     default_config: Configuration
     configurations: List[Configuration]
     cmakeFile: Path
@@ -309,19 +399,21 @@ class Repository:
             for idx, options in enumerate(options_list):
                 self.configurations.append(Configuration(self.name, self.src_path, options, build_path=f'build_{idx}'))
 
-    def process_all_session(self):
+    def process_all_session(self, inc:bool=True):
         self.build_every_config()
-        self.extract_cg_every_config()
         self.preprocess_every_config()
+        # if need incremental analyze, please excute diff session after preprocess immediately
         self.diff_every_config()
+        self.extract_cg_every_config(inc)
+        self.generate_edm_for_every_config(inc)
 
     def build_every_config(self):
         for config in self.configurations:
             config.configure()
 
-    def extract_cg_every_config(self):
+    def extract_cg_every_config(self, inc:bool=True):
         for config in self.configurations:
-            config.extract_call_graph()
+            config.extract_call_graph(inc)
 
     def diff_every_config(self):
         for config in self.configurations:
@@ -332,9 +424,9 @@ class Repository:
         for config in self.configurations:
             config.preprocess_repo()
 
-    def generate_edm_for_every_config(self):
+    def generate_edm_for_every_config(self, inc:bool=True):
         for config in self.configurations:
-            config.generate_edm() 
+            config.generate_edm(inc) 
     
     def session_summary(self):
         ret = f"name: {self.name}\nsrc: {self.src_path}\n"
@@ -343,10 +435,12 @@ class Repository:
         return ret
 
 def main():
-    parser = argparse.ArgumentParser(prog='cmake-db', formatter_class=argparse.RawTextHelpFormatter)
+    parser = argparse.ArgumentParser(prog='IncAnalyzer', formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('-d', '--dir', default='.', help="Path of Source Files")
     parser.add_argument('-b', '--build', default='./build', help='Path of Build Directory')
     parser.add_argument('-n', '--name', help='name of the project')
+    parser.add_argument('--inc', action='store_true', dest='inc', help='Incremental analyze all sessions.')
+    opts = parser.parse_args()
 
     repo_info = [
         {
@@ -373,6 +467,8 @@ def main():
         # repo_db.build_every_config()
         # repo_db.preprocess_every_config()
         repo_db.diff_every_config()
+        repo_db.extract_cg_every_config(opts.inc)
+        repo_db.generate_edm_for_every_config(opts.inc)
 
     for repo_db in repo_list:
         logger.TAG = repo_db.name

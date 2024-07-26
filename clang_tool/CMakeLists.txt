@@ -6,6 +6,7 @@ target_link_libraries(FunctionCallGraph
   clangBasic
   clangASTMatchers
   clangAST
+  clangIndex
 )
 
 # clang static checker: dump cfg

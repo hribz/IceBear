@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <iostream>
 #include <fstream>
+#include <llvm-17/llvm/Support/raw_ostream.h>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -15,6 +16,7 @@
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendAction.h"
+#include "clang/Index/USRGeneration.h"
 
 using namespace clang;
 using namespace clang::tooling;
@@ -29,9 +31,11 @@ public:
         if (const FunctionDecl *callee = call->getDirectCallee()) {
             if (!FunctionStack.empty()) {
                 const FunctionDecl *caller = FunctionStack.top();
-                std::string callerName = caller->getQualifiedNameAsString();
-                std::string calleeName = callee->getQualifiedNameAsString();
-                callGraph[callerName].insert(calleeName);
+                SmallString<128> callerName;
+                index::generateUSRForDecl(caller, callerName);
+                SmallString<128> calleeName;
+                index::generateUSRForDecl(callee, calleeName);
+                callGraph[callerName.c_str()].insert(calleeName.c_str());
             }
         }
         return true;
@@ -62,6 +66,17 @@ public:
         } else {
             llvm::errs() << "Translation Unit: <unknown>\n";
             return ;
+        }
+        if (outputPath == "") {
+            llvm::outs() << "digraph CallGraph {\n";
+            for (const auto &entry : callGraph) {
+                for (const auto &callee : entry.second) {
+                    llvm::outs() << entry.first.length() << ":" << entry.first << 
+                        " -> " << callee.length() << ":" << callee << "\n";
+                }
+            }
+            llvm::outs() << "}\n";
+            return;
         }
         std::string DotFileName = outputPath + FE->getName().str() + ".dot";
         std::filesystem::path DotFilePath(DotFileName);
@@ -128,7 +143,7 @@ private:
 
 static llvm::cl::OptionCategory ToolCategory("callgraph-tool");
 static llvm::cl::opt<std::string> OutputPath("o", llvm::cl::desc("Specify output path for dot file"), 
-    llvm::cl::value_desc("graph dir"), llvm::cl::init("callgraph.dot"));
+    llvm::cl::value_desc("graph dir"), llvm::cl::init(""));
 
 int main(int argc, const char **argv) {
     auto ExpectedParser = CommonOptionsParser::create(argc, argv, ToolCategory);
