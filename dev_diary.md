@@ -20,7 +20,7 @@
 ## 待完成功能
 - Configurations类
   - extract_call_graph(): 调用`clang_tools`中基于`libtooling`实现的函数调用图生成工具，提取当前变体所有文件的调用图
-  - generate_edm(): 调用`panda`工具，提取当前变体所有文件的 external function map 和 invocation list
+  - generate_efm(): 调用`panda`工具，提取当前变体所有文件的 external function map 和 invocation list
 
 ## 问题
 - 函数调用图生成工具的生成效率极低，可能因为当前的做法是遍历AST记录`CallExpr->getDirectCallee()`
@@ -38,7 +38,7 @@
 - Configurations类
   - incrementable: 表示当前配置变体能否进行增量分析，在解析diff成功后设置为True
   - extract_call_graph(): 添加增量分析，调用`FunctionCallGraph`工具，提取当前变体`变化`文件的调用图
-  - generate_edm(): 添加增量分析，调用`panda`工具，提取当前变体`变化`文件的 external function map 和 invocation list
+  - generate_efm(): 添加增量分析，调用`panda`工具，提取当前变体`变化`文件的 external function map 和 invocation list
   - parse_diff_result(): 根据"diff -r -u0"的输出格式解析diff的结果，记录了文件修改，文件新增的情况，增量分析仅分析变化和新增的文件
 - clang_tool
   - extractCG.cpp: 函数调用图提取工具的实现，遍历AST，记录访问到的Func节点，遇到CallExpr时，获取它的callee的USR表示，并用该USR表示与Func节点的USR表示构成一条call graph的边，以`<caller-usr-length>:<caller-usr> -> <callee-usr-length>:<callee-usr>`的格式记录。
@@ -50,3 +50,21 @@
 ## 已解决问题
 - 关于函数调用图生成工具的效率问题，目前的解决方案是利用`panda`来并行地调用它，可以很大程度上降低时间开销
 - 因构建目录名不同导致diff指令认为两个目录不同问题(e.g. `build/`和`build_0/`分别是两个变体的构建目录，虽然目录名不同，但是diff时应该当作相同处理)
+
+# 2024/8/27
+## 待完成功能
+- Configurations类
+  - 记录初次CSA分析的结果，包括AnalysisConsumer::FunctionSummarize
+- DiffDB类
+  - 记录diff结果，包括文件修改，文件新增，文件删除
+  - 在AST上分析diff结果，确定哪些函数入口的检测过程将受到影响
+  - 将diff结果以某种形式储存下来
+- clang_tool
+  extractCG.cpp: 读取文件相关的行号级别diff信息，找到所在行发生变化的函数、类型、全局变量，并确定它们之间的依赖关系
+
+# 2024/8/28
+## 问题
+- CSA的AnalysisCosumer::FunctionSummarize并没有记录某个函数被哪些函数inline，只记录了
+
+## 解决方案
+- 修改CSA，添加参数 `-analyzer-dump-fsum=xxx.json`，将内联结果输出到某个文件中

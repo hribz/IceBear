@@ -12,6 +12,7 @@ def ensure_dir(d, verbose=True):
 class Logger(object):
     def __init__(self, timestamp, TAG):
         self.TAG = TAG
+        self.verbose = False
         ensure_dir('logs')
         handler = {
             logging.DEBUG: "logs/debug_{}.log".format(timestamp),

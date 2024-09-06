@@ -17,14 +17,15 @@
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendAction.h"
 #include "clang/Index/USRGeneration.h"
+#include "clang/Analysis/CallGraph.h"
 
 using namespace clang;
 using namespace clang::tooling;
 using namespace clang::ast_matchers;
 
-class CallGraphVisitor : public RecursiveASTVisitor<CallGraphVisitor> {
+class MyCallGraph : public CallGraph {
 public:
-    explicit CallGraphVisitor(ASTContext *Context)
+    explicit MyCallGraph(ASTContext *Context)
         : Context(Context) {}
 
     bool VisitCallExpr(CallExpr *call) {
@@ -37,22 +38,9 @@ public:
                 index::generateUSRForDecl(callee, calleeName);
                 callGraph[callerName.c_str()].insert(calleeName.c_str());
             }
+        } else if (auto callee = call->getCallee()) {
+            
         }
-        return true;
-    }
-
-    bool VisitFunctionDecl(FunctionDecl *func) {
-        FunctionStack.push(func);
-        return true;
-    }
-
-    bool TraverseFunctionDecl(FunctionDecl *func) {
-        if (!func->hasBody())
-            return true;
-
-        FunctionStack.push(func);
-        RecursiveASTVisitor<CallGraphVisitor>::TraverseFunctionDecl(func);
-        FunctionStack.pop();
         return true;
     }
 
@@ -107,14 +95,37 @@ public:
     explicit CallGraphConsumer(ASTContext *Context, const std::string &outputPath)
         : Visitor(Context), OutputPath(outputPath) {}
 
+    bool HandleTopLevelDecl(DeclGroupRef DG) override {
+        storeTopLevelDecls(DG);
+        return true;
+    }
+
+    void HandleTopLevelDeclInObjCContainer(DeclGroupRef DG) override {
+        storeTopLevelDecls(DG);
+    }
+
+    void storeTopLevelDecls(DeclGroupRef DG) {
+        for (auto &I : DG) {
+
+            // Skip ObjCMethodDecl, wait for the objc container to avoid
+            // analyzing twice.
+            if (isa<ObjCMethodDecl>(I))
+                continue;
+
+            LocalTUDecls.push_back(I);
+        }
+    }
+
     void HandleTranslationUnit(clang::ASTContext &Context) override {
-        Visitor.TraverseDecl(Context.getTranslationUnitDecl());
-        Visitor.printCallGraph(OutputPath);
+        Visitor.addToCallGraph(Context.getTranslationUnitDecl());
+        Visitor.print(llvm::outs());
+        // Visitor.printCallGraph(OutputPath);
     }
 
 private:
-    CallGraphVisitor Visitor;
+    MyCallGraph Visitor;
     std::string OutputPath;
+    std::deque<Decl *> LocalTUDecls;
 };
 
 class CallGraphAction : public clang::ASTFrontendAction {
