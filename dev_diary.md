@@ -67,4 +67,27 @@
 - CSA的AnalysisCosumer::FunctionSummarize并没有记录某个函数被哪些函数inline，只记录了
 
 ## 解决方案
-- 修改CSA，添加参数 `-analyzer-dump-fsum=xxx.json`，将内联结果输出到某个文件中
+- 修改CSA，添加参数 `-analyzer-dump-fsum=xxx.fs`，将内联结果输出到某个文件中
+
+# 2024/9/9
+## 待完成功能
+- 通过行号确定函数：构建CG时，顺便判断每个Decl的Loc范围是否包含变化行号
+- 通过行号确定全局常量：通过`VisitDecl`记录所有全局常量声明，通过`ProcessDeclRefExpr`处理全局常量引用，目前考虑`VarDecl, EnumConstantDecl`。首先标记直接发生变化的常量，然后在处理引用时，判断该引用用于全局常量初始化，还是用在函数内部。
+- 通过行号确定类型
+
+## 问题
+- Sometimes line number will change the semantics of the code, such as `enum` object, the different order of enum constant will lead to different value.
+- class和struct中的字段顺序，会影响构造函数初始化时的顺序，因此字段发生变化时，构造函数也必须认为发生了变化
+- 全局常量传播问题：某个常量发生变化后，如何确定哪些其它常量发生了变化
+
+## 解决方案
+- 关于上述因字段顺序影响语义的例子，必须把整个枚举类型作为整体进行分析，不能只分析枚举类型中的某个枚举常量
+
+# 2024/9/11
+## 解决方案
+- class和struct中的字段变化问题：字段顺序确实会影响构造函数，但是没必要字段发生变化就认为构造函数发生变化，因为只有构造函数显式的声明`C1(): field1(xxx) {}`才会按照定义顺序进行初始化。因此可以先找到AST中的`CXXCtorInitializer`判断它本身以及对应的字段是否发生了变化，再决定是否重新分析。
+- 全局常量传播问题：维护一个集合`GlobalConstantSet`，其中包含了发生修改的全局常量，以及经过赋值规则传播到的全局常量。随后，遍历整个AST，将所有使用了这些常量的函数标记为需要重新分析。
+
+# 2024/9/12
+## 问题
+- 不应该将处理的常量局限于全局常量，而是函数/方法外的常量。

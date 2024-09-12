@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 project(FunctionCallGraph)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED True) 
 
 set(MY_LLVM_VERSION 17)
 find_package(LLVM ${MY_LLVM_VERSION} REQUIRED CONFIG)

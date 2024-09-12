@@ -1,11 +1,22 @@
+#include <clang/AST/ASTContext.h>
+#include <clang/AST/ComputeDependence.h>
+#include <clang/AST/Decl.h>
+#include <clang/AST/DeclBase.h>
+#include <clang/AST/DeclCXX.h>
+#include <clang/AST/Expr.h>
+#include <clang/AST/ExprCXX.h>
+#include <clang/AST/Stmt.h>
+#include <clang/Basic/LLVM.h>
 #include <filesystem>
 #include <iostream>
 #include <fstream>
+#include <llvm-17/llvm/Support/Casting.h>
 #include <llvm-17/llvm/Support/raw_ostream.h>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <stack>
+#include <vector>
 
 #include "clang/AST/AST.h"
 #include "clang/AST/RecursiveASTVisitor.h"
@@ -18,15 +29,218 @@
 #include "clang/Frontend/FrontendAction.h"
 #include "clang/Index/USRGeneration.h"
 #include "clang/Analysis/CallGraph.h"
+#include "llvm/ADT/PostOrderIterator.h"
 
 using namespace clang;
 using namespace clang::tooling;
 using namespace clang::ast_matchers;
 
-class MyCallGraph : public CallGraph {
+bool isChangedLine(std::vector<std::pair<int, int>> DiffLines, unsigned int line) {
+    if (DiffLines.empty()) {
+        return false;
+    }
+    // 使用 lambda 表达式来定义比较函数
+    auto it = std::lower_bound(DiffLines.begin(), DiffLines.end(), std::make_pair(line + 1, 0),
+                            [](const std::pair<int, int> &a, const std::pair<int, int> &b) {
+                                return a.first < b.first;
+                            });
+
+    // 检查前一个范围（如果存在）是否覆盖了给定的行号
+    if (it != DiffLines.begin()) {
+        --it;  // 找到第一个不大于 line 的区间
+        if (line >= it->first && line <= it->first + it->second) {
+            return true;  // 如果 line 在这个区间内，返回 true
+        }
+    }
+
+    return false;  // 如果没有找到，返回 false
+}
+
+void dumpFunctionsNeedReanalyze(std::unordered_set<const Decl *> FunctionsNeedReanalyze,
+        std::unordered_map<const Decl *, std::pair<unsigned int, unsigned int>> CG_to_range) {
+    llvm::outs() << "--- Functions Need to Reanalyze ---\n";
+    for (auto &D : FunctionsNeedReanalyze) {
+        llvm::outs() << "  ";
+        if (const NamedDecl *ND = llvm::dyn_cast_or_null<NamedDecl>(D)) {
+            llvm::outs() << ND->getQualifiedNameAsString();
+        } else {
+            llvm::outs() << "Unnamed declaration";
+        }
+        llvm::outs() << ": " << "<" << D->getDeclKindName() << "> ";
+        llvm::outs() << CG_to_range[D].first << "-" << CG_to_range[D].second;
+        llvm::outs() << "\n";
+    }
+}
+
+std::optional<std::pair<int, int>> StartAndEndLineOfDecl(SourceManager &SM, const Decl * D) {
+    SourceLocation Loc = D->getLocation();
+    if (!(Loc.isValid() && Loc.isFileID())) {
+        return std::nullopt;
+    }
+    auto StartLoc = SM.getSpellingLineNumber(D->getBeginLoc());
+    auto EndLoc = SM.getSpellingLineNumber(D->getEndLoc());
+    return std::make_pair(StartLoc, EndLoc);
+}
+
+class DeclRefFinder : public RecursiveASTVisitor<DeclRefFinder> {
 public:
-    explicit MyCallGraph(ASTContext *Context)
+    // 覆盖 VisitDeclRefExpr 方法
+    bool VisitDeclRefExpr(DeclRefExpr *DRE) {
+        // 遇到 DeclRefExpr 时，将 FoundDeclRef 设置为 true
+        FoundedDeclRefExprs.push_back(DRE);
+        return false; // 停止进一步遍历，因为已经找到了目标
+    }
+
+    // 检查是否找到了 DeclRefExpr
+    std::vector<DeclRefExpr *> getFoundedDeclRef() const { return FoundedDeclRefExprs; }
+
+    void clearDREs() {
+        FoundedDeclRefExprs.clear();
+    }
+
+private:
+    std::vector<DeclRefExpr *> FoundedDeclRefExprs; // 记录是否找到了 DeclRefExpr
+};
+
+class IncInfoCollectASTVisitor : public RecursiveASTVisitor<IncInfoCollectASTVisitor> {
+public:
+    explicit IncInfoCollectASTVisitor(ASTContext *Context)
         : Context(Context) {}
+
+    explicit IncInfoCollectASTVisitor(ASTContext *Context, std::vector<std::pair<int, int>> DiffLines)
+        : Context(Context), DiffLines(DiffLines) {}
+    
+    bool isGlobalConstant(const Decl *D) {
+        if (D->getDeclContext()->isFunctionOrMethod()) {
+            return false;
+        }
+        if (auto VD = dyn_cast_or_null<VarDecl>(D)) {
+            if (VD->getType().isConstQualified()) {
+                return true;
+            }
+            return false;
+        }
+        if (auto EC = dyn_cast_or_null<EnumConstantDecl>(D)) {
+            return true;
+        }
+        if (auto FD = dyn_cast_or_null<FieldDecl>(D)) {
+            if (FD->getType().isConstQualified()) {
+                return true;
+            }
+            return false;
+        }
+        return false;
+    }
+
+    bool VisitDecl(Decl *D) {
+        // record all changed global constants def
+        if (isGlobalConstant(D)) {
+            auto loc = StartAndEndLineOfDecl(Context->getSourceManager(), D);
+            if (loc && isChangedLine(DiffLines, loc->first)) {
+                GlobalConstantSet.insert(D);
+            } else {
+                // this global constant is not changed, but maybe propogate by changed global constant
+                DRFinder.TraverseDecl(D);
+                for (auto DR: DRFinder.getFoundedDeclRef()) {
+                    if (GlobalConstantSet.count(DR->getFoundDecl())) {
+                        GlobalConstantSet.insert(D);
+                        break;
+                    }
+                }
+                DRFinder.clearDREs();
+                // no need to traverse this decl node and its children
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // process all global constants use
+    bool ProcessDeclRefExpr(Expr * const E, NamedDecl * const ND) {
+        if (GlobalConstantSet.count(ND)) {
+            bool find_use = false;
+            int depth = 0;
+            do {
+                const DynTypedNodeList Parents = Context->getParents(E);
+                if (Parents.empty()) {
+                    break;
+                }
+                // for (auto Parent: Parents) {
+                auto Parent = Parents[0];
+                if (const Decl *ParentDecl = Parent.get<Decl>()) {
+                    if (isGlobalConstant(ParentDecl)) {
+                        // const type ParentDecl = ND;
+                        GlobalConstantSet.insert(ParentDecl);
+                        find_use = true;
+                    } else if (ParentDecl->getDeclContext()->isFunctionOrMethod()) {
+                        // Use Global Constant in local context, reanalyze this function/method
+                        const Decl *D = dyn_cast<Decl>(ParentDecl->getDeclContext());
+                        FunctionsNeedReanalyze.insert(D);
+                        find_use = true;
+                    }
+                } else if (const CXXCtorInitializer *ParentCtor = dyn_cast_or_null<CXXCtorInitializer>(ParentDecl)) {
+                    
+                } else if (const Stmt *ParentS = Parent.get<Stmt>()) {
+                    if (const BinaryOperator *BO = dyn_cast_or_null<BinaryOperator>(ParentS)) {
+                        // Global Const will not be used as assignment's LHS, so we can ignore it
+                    } else if (const CXXConstructExpr *ParentCst = dyn_cast_or_null<CXXConstructExpr>(ParentS)) {
+                        // CXXConstructor(ND)
+
+                    } else if (const CompoundStmt *ParentCompound = dyn_cast_or_null<CompoundStmt>(ParentS)) {
+                        // Unused Global Constant, ignore it
+                        find_use = true;
+                    }
+                } 
+                // }
+                depth++;
+            } while (!find_use);
+        }
+        return true;
+    }
+
+    bool VisitDeclRefExpr(DeclRefExpr *DR) {
+        auto ND = DR->getFoundDecl();
+        auto DC = ND->getDeclContext();
+        llvm::outs() << "DeclRefExpr " << ND->getQualifiedNameAsString();
+        if (DC->isFileContext()) {
+            // TranslationUnitDecl or NamespaceDecl
+            llvm::outs() <<" is in the Global scope\n";
+            // Propogate changed global constants
+        } else if (DC->isFunctionOrMethod()) {
+            // FunctionDecl or CXXMethodDecl
+            llvm::outs() <<" is in the function scope\n";
+        } else if (DC->isRecord()) {
+            // CXXRecordDecl or RecordDecl
+            llvm::outs() << " is in a class/struct scope\n";
+        } else {
+            // Other cases
+            llvm::outs() << " is in an unknown or nested scope\n";
+        }
+        return ProcessDeclRefExpr(DR, ND);
+    }
+
+    bool VisitMemberExpr(MemberExpr *ME) {
+        auto member = ME->getMemberDecl();
+        // member could be VarDecl, EnumConstantDecl, CXXMethodDecl, FieldDecl, etc.
+        if (isa<VarDecl, EnumConstantDecl>(member)) {
+            ProcessDeclRefExpr(ME, member);
+        } else {
+            if (isa<CXXMethodDecl>(member)) {
+            }
+        }
+        return true;
+    }
+
+    ASTContext *Context;
+    std::unordered_set<const Decl *> GlobalConstantSet;
+    std::unordered_set<const Decl *> FunctionsNeedReanalyze;
+    std::vector<std::pair<int, int>> DiffLines;
+    DeclRefFinder DRFinder;
+};
+
+class MyCallGraph : public CallGraph, IncInfoCollectASTVisitor {
+public:
+    explicit MyCallGraph(ASTContext *Context): IncInfoCollectASTVisitor(Context) {}
 
     bool VisitCallExpr(CallExpr *call) {
         if (const FunctionDecl *callee = call->getDirectCallee()) {
@@ -85,7 +299,6 @@ public:
     }
 
 private:
-    ASTContext *Context;
     std::stack<const FunctionDecl *> FunctionStack;
     std::unordered_map<std::string, std::unordered_set<std::string>> callGraph;
 };
@@ -93,7 +306,9 @@ private:
 class CallGraphConsumer : public clang::ASTConsumer {
 public:
     explicit CallGraphConsumer(ASTContext *Context, const std::string &outputPath)
-        : Visitor(Context), OutputPath(outputPath) {}
+        : CG(), OutputPath(outputPath), DiffLines{{1, 100000000}}, IncVisitor(Context) {
+            IncVisitor.DiffLines = DiffLines;
+        }
 
     bool HandleTopLevelDecl(DeclGroupRef DG) override {
         storeTopLevelDecls(DG);
@@ -106,7 +321,6 @@ public:
 
     void storeTopLevelDecls(DeclGroupRef DG) {
         for (auto &I : DG) {
-
             // Skip ObjCMethodDecl, wait for the objc container to avoid
             // analyzing twice.
             if (isa<ObjCMethodDecl>(I))
@@ -117,15 +331,38 @@ public:
     }
 
     void HandleTranslationUnit(clang::ASTContext &Context) override {
-        Visitor.addToCallGraph(Context.getTranslationUnitDecl());
-        Visitor.print(llvm::outs());
-        // Visitor.printCallGraph(OutputPath);
+        CG.addToCallGraph(Context.getTranslationUnitDecl());
+        CG.print(llvm::outs());
+        llvm::ReversePostOrderTraversal<clang::CallGraph*> RPOT(&CG);
+        SourceManager &SM = Context.getSourceManager();
+        for (CallGraphNode *N : RPOT) {
+            if (N == CG.getRoot()) continue;
+            Decl *D = N->getDecl();
+            auto loc = StartAndEndLineOfDecl(SM, D);
+            if (!loc) continue;
+            auto StartLoc = loc->first;
+            auto EndLoc = loc->second;
+            CG_to_range[D] = std::make_pair(StartLoc, EndLoc);
+            if (isChangedLine(DiffLines, StartLoc)) {
+                FunctionsNeedReanalyze.insert(D);
+            }
+        }
+        dumpFunctionsNeedReanalyze(FunctionsNeedReanalyze, CG_to_range);
+        IncVisitor.TraverseDecl(Context.getTranslationUnitDecl());
+        // process Global Constant
+        for (auto D: IncVisitor.GlobalConstantSet) {
+
+        }
     }
 
 private:
-    MyCallGraph Visitor;
+    CallGraph CG;
+    IncInfoCollectASTVisitor IncVisitor;
+    std::unordered_map<const Decl *, std::pair<unsigned int, unsigned int>> CG_to_range;
     std::string OutputPath;
     std::deque<Decl *> LocalTUDecls;
+    std::vector<std::pair<int, int>> DiffLines;
+    std::unordered_set<const Decl *> FunctionsNeedReanalyze;
 };
 
 class CallGraphAction : public clang::ASTFrontendAction {
@@ -150,11 +387,15 @@ public:
 
 private:
     std::string OutputPath;
+    std::string DiffPath;
 };
 
 static llvm::cl::OptionCategory ToolCategory("callgraph-tool");
 static llvm::cl::opt<std::string> OutputPath("o", llvm::cl::desc("Specify output path for dot file"), 
-    llvm::cl::value_desc("graph dir"), llvm::cl::init(""));
+    llvm::cl::value_desc("call graph dir"), llvm::cl::init(""));
+static llvm::cl::opt<std::string> DiffInfo("diff", llvm::cl::desc("Specify diff info files"),
+    llvm::cl::value_desc("diff info files"), llvm::cl::init(""));
+static llvm::cl::opt<bool> IncMode("inc", llvm::cl::desc("Active incremental mode"), llvm::cl::value_desc("incremental mode"), llvm::cl::init(false));
 
 int main(int argc, const char **argv) {
     auto ExpectedParser = CommonOptionsParser::create(argc, argv, ToolCategory);

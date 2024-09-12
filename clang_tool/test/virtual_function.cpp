@@ -1,4 +1,7 @@
 class Base {
+private:
+    int a;
+    int b;
 public:
     virtual int foo() {
         return 0;

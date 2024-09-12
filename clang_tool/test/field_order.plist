@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
  <key>clang_version</key>
-<string>Ubuntu clang version 17.0.6 (++20231209124227+6009708b4367-1~exp1~20231209124336.77)</string>
+<string>clang version 20.0.0git (https://github.com/llvm/llvm-project.git 62e5b6e817cd4d2dd1fd8193453660d77b41acc9)</string>
  <key>diagnostics</key>
  <array>
   <dict>
@@ -95,6 +95,142 @@
     <integer>8</integer>
     <integer>9</integer>
     <integer>10</integer>
+   </array>
+  </dict>
+  </dict>
+  <dict>
+   <key>path</key>
+   <array>
+    <dict>
+     <key>kind</key><string>control</string>
+     <key>edges</key>
+      <array>
+       <dict>
+        <key>start</key>
+         <array>
+          <dict>
+           <key>line</key><integer>21</integer>
+           <key>col</key><integer>11</integer>
+           <key>file</key><integer>0</integer>
+          </dict>
+          <dict>
+           <key>line</key><integer>21</integer>
+           <key>col</key><integer>11</integer>
+           <key>file</key><integer>0</integer>
+          </dict>
+         </array>
+        <key>end</key>
+         <array>
+          <dict>
+           <key>line</key><integer>21</integer>
+           <key>col</key><integer>9</integer>
+           <key>file</key><integer>0</integer>
+          </dict>
+          <dict>
+           <key>line</key><integer>21</integer>
+           <key>col</key><integer>9</integer>
+           <key>file</key><integer>0</integer>
+          </dict>
+         </array>
+       </dict>
+      </array>
+    </dict>
+    <dict>
+     <key>kind</key><string>event</string>
+     <key>location</key>
+     <dict>
+      <key>line</key><integer>21</integer>
+      <key>col</key><integer>9</integer>
+      <key>file</key><integer>0</integer>
+     </dict>
+     <key>depth</key><integer>0</integer>
+     <key>extended_message</key>
+     <string>The value 0 is assigned to field &apos;a&apos;</string>
+     <key>message</key>
+     <string>The value 0 is assigned to field &apos;a&apos;</string>
+    </dict>
+    <dict>
+     <key>kind</key><string>control</string>
+     <key>edges</key>
+      <array>
+       <dict>
+        <key>start</key>
+         <array>
+          <dict>
+           <key>line</key><integer>21</integer>
+           <key>col</key><integer>9</integer>
+           <key>file</key><integer>0</integer>
+          </dict>
+          <dict>
+           <key>line</key><integer>21</integer>
+           <key>col</key><integer>9</integer>
+           <key>file</key><integer>0</integer>
+          </dict>
+         </array>
+        <key>end</key>
+         <array>
+          <dict>
+           <key>line</key><integer>21</integer>
+           <key>col</key><integer>18</integer>
+           <key>file</key><integer>0</integer>
+          </dict>
+          <dict>
+           <key>line</key><integer>21</integer>
+           <key>col</key><integer>18</integer>
+           <key>file</key><integer>0</integer>
+          </dict>
+         </array>
+       </dict>
+      </array>
+    </dict>
+    <dict>
+     <key>kind</key><string>event</string>
+     <key>location</key>
+     <dict>
+      <key>line</key><integer>21</integer>
+      <key>col</key><integer>18</integer>
+      <key>file</key><integer>0</integer>
+     </dict>
+     <key>ranges</key>
+     <array>
+       <array>
+        <dict>
+         <key>line</key><integer>21</integer>
+         <key>col</key><integer>17</integer>
+         <key>file</key><integer>0</integer>
+        </dict>
+        <dict>
+         <key>line</key><integer>21</integer>
+         <key>col</key><integer>19</integer>
+         <key>file</key><integer>0</integer>
+        </dict>
+       </array>
+     </array>
+     <key>depth</key><integer>0</integer>
+     <key>extended_message</key>
+     <string>Division by zero</string>
+     <key>message</key>
+     <string>Division by zero</string>
+    </dict>
+   </array>
+   <key>description</key><string>Division by zero</string>
+   <key>category</key><string>Logic error</string>
+   <key>type</key><string>Division by zero</string>
+   <key>check_name</key><string>core.DivideZero</string>
+   <!-- This hash is experimental and going to change! -->
+   <key>issue_hash_content_of_line_in_context</key><string>75feeeb179eeec843a03b88d711c0dee</string>
+  <key>issue_hash_function_offset</key><string>0</string>
+  <key>location</key>
+  <dict>
+   <key>line</key><integer>21</integer>
+   <key>col</key><integer>18</integer>
+   <key>file</key><integer>0</integer>
+  </dict>
+  <key>ExecutedLines</key>
+  <dict>
+   <key>0</key>
+   <array>
+    <integer>21</integer>
    </array>
   </dict>
   </dict>
