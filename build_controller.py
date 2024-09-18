@@ -59,6 +59,20 @@ if EXTRACT_CG:
 else:
     print('please build cg extractor firstly') 
     exit(1)
+if os.path.exists(MY_CLANG):
+    print(f'use clang={MY_CLANG}')
+else:
+    MY_CLANG = shutil.which('clang')
+    if not MY_CLANG:
+        print('please ensure there is clang in your environment')
+        exit(1)
+if os.path.exists(MY_CLANG_PLUS_PLUS):
+    print(f'use clang++={MY_CLANG_PLUS_PLUS}')
+else:
+    MY_CLANG = shutil.which('clang++')
+    if not MY_CLANG:
+        print('please ensure there is clang++ in your environment')
+        exit(1)
 
 class Option:
     def __init__(self, name: str, value: str):
