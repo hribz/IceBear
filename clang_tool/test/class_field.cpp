@@ -22,8 +22,6 @@ float const f = (float)(s1.b);
 int const ONE = 10;
 
 int main() {
-    int a[s1.b];
-    a[ONE] = 1;
     *(ptr) = 0;
     1 / s1.b;
     Example ex(5);

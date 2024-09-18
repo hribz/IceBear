@@ -3,6 +3,7 @@
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclBase.h>
 #include <clang/AST/DeclCXX.h>
+#include <clang/AST/DeclTemplate.h>
 #include <clang/AST/Expr.h>
 #include <clang/AST/ExprCXX.h>
 #include <clang/AST/Stmt.h>
@@ -84,22 +85,30 @@ std::optional<std::pair<int, int>> StartAndEndLineOfDecl(SourceManager &SM, cons
 
 class DeclRefFinder : public RecursiveASTVisitor<DeclRefFinder> {
 public:
-    // 覆盖 VisitDeclRefExpr 方法
     bool VisitDeclRefExpr(DeclRefExpr *DRE) {
-        // 遇到 DeclRefExpr 时，将 FoundDeclRef 设置为 true
-        FoundedDeclRefExprs.push_back(DRE);
-        return false; // 停止进一步遍历，因为已经找到了目标
+        FoundedDecls.push_back(DRE->getFoundDecl());
+        return true;
     }
 
-    // 检查是否找到了 DeclRefExpr
-    std::vector<DeclRefExpr *> getFoundedDeclRef() const { return FoundedDeclRefExprs; }
+    bool VisitMemberExpr(MemberExpr *E) {
+        auto member = E->getMemberDecl();
+        FoundedDecls.push_back(member);
+        return true;
+    }
 
-    void clearDREs() {
-        FoundedDeclRefExprs.clear();
+    bool VisitCXXConstructExpr(CXXConstructExpr *E) {
+        // Global constant will not propogate through CXXConstructExpr
+        return false;
+    }
+
+    std::vector<const Decl *> getFoundedRefDecls() const { return FoundedDecls; }
+
+    void clearRefDecls() {
+        FoundedDecls.clear();
     }
 
 private:
-    std::vector<DeclRefExpr *> FoundedDeclRefExprs; // 记录是否找到了 DeclRefExpr
+    std::vector<const Decl *> FoundedDecls;
 };
 
 class IncInfoCollectASTVisitor : public RecursiveASTVisitor<IncInfoCollectASTVisitor> {
@@ -107,8 +116,8 @@ public:
     explicit IncInfoCollectASTVisitor(ASTContext *Context)
         : Context(Context) {}
 
-    explicit IncInfoCollectASTVisitor(ASTContext *Context, std::vector<std::pair<int, int>> DiffLines)
-        : Context(Context), DiffLines(DiffLines) {}
+    explicit IncInfoCollectASTVisitor(ASTContext *Context, std::vector<std::pair<int, int>> DiffLines, CallGraph *CG)
+        : Context(Context), DiffLines(DiffLines), CG(CG) {}
     
     bool isGlobalConstant(const Decl *D) {
         if (D->getDeclContext()->isFunctionOrMethod()) {
@@ -138,83 +147,64 @@ public:
             auto loc = StartAndEndLineOfDecl(Context->getSourceManager(), D);
             if (loc && isChangedLine(DiffLines, loc->first)) {
                 GlobalConstantSet.insert(D);
+                TaintDecls.insert(D);
             } else {
                 // this global constant is not changed, but maybe propogate by changed global constant
                 DRFinder.TraverseDecl(D);
-                for (auto DR: DRFinder.getFoundedDeclRef()) {
-                    if (GlobalConstantSet.count(DR->getFoundDecl())) {
+                for (auto RefD: DRFinder.getFoundedRefDecls()) {
+                    if (GlobalConstantSet.count(RefD)) {
                         GlobalConstantSet.insert(D);
+                        TaintDecls.insert(D);
                         break;
                     }
                 }
-                DRFinder.clearDREs();
+                DRFinder.clearRefDecls();
                 // no need to traverse this decl node and its children
-                return false;
+                // return false;
+            }
+        }
+        
+        if (isa<RecordDecl>(D)) {
+            // RecordDecl *RD = dyn_cast<RecordDecl>(D);
+            // auto loc = StartAndEndLineOfDecl(Context->getSourceManager(), RD);
+        } else if (isa<FieldDecl>(D)) {
+            FieldDecl *FD = dyn_cast<FieldDecl>(D);
+            auto loc = StartAndEndLineOfDecl(Context->getSourceManager(), FD);
+            // record changed field
+            if ((loc && isChangedLine(DiffLines, loc->first))) {
+                TaintDecls.insert(FD);
+            }
+            // TODO: if this field is used in `CXXCtorInitializer`, the correspond `CXXCtor` should be reanalyze
+            
+        } else {
+            if (CG->getNode(D)) {
+                inFunctionOrMethodStack.push_back(D);
             }
         }
         return true;
     }
 
+    bool TraverseDecl(Decl *D) {
+        bool Result = clang::RecursiveASTVisitor<IncInfoCollectASTVisitor>::TraverseDecl(D);
+        if (!inFunctionOrMethodStack.empty() && inFunctionOrMethodStack.back() == D) {
+            inFunctionOrMethodStack.pop_back(); // exit function/method
+        }
+        return Result;
+    }
+
     // process all global constants use
     bool ProcessDeclRefExpr(Expr * const E, NamedDecl * const ND) {
         if (GlobalConstantSet.count(ND)) {
-            bool find_use = false;
-            int depth = 0;
-            do {
-                const DynTypedNodeList Parents = Context->getParents(E);
-                if (Parents.empty()) {
-                    break;
-                }
-                // for (auto Parent: Parents) {
-                auto Parent = Parents[0];
-                if (const Decl *ParentDecl = Parent.get<Decl>()) {
-                    if (isGlobalConstant(ParentDecl)) {
-                        // const type ParentDecl = ND;
-                        GlobalConstantSet.insert(ParentDecl);
-                        find_use = true;
-                    } else if (ParentDecl->getDeclContext()->isFunctionOrMethod()) {
-                        // Use Global Constant in local context, reanalyze this function/method
-                        const Decl *D = dyn_cast<Decl>(ParentDecl->getDeclContext());
-                        FunctionsNeedReanalyze.insert(D);
-                        find_use = true;
-                    }
-                } else if (const CXXCtorInitializer *ParentCtor = dyn_cast_or_null<CXXCtorInitializer>(ParentDecl)) {
-                    
-                } else if (const Stmt *ParentS = Parent.get<Stmt>()) {
-                    if (const BinaryOperator *BO = dyn_cast_or_null<BinaryOperator>(ParentS)) {
-                        // Global Const will not be used as assignment's LHS, so we can ignore it
-                    } else if (const CXXConstructExpr *ParentCst = dyn_cast_or_null<CXXConstructExpr>(ParentS)) {
-                        // CXXConstructor(ND)
-
-                    } else if (const CompoundStmt *ParentCompound = dyn_cast_or_null<CompoundStmt>(ParentS)) {
-                        // Unused Global Constant, ignore it
-                        find_use = true;
-                    }
-                } 
-                // }
-                depth++;
-            } while (!find_use);
+            
         }
         return true;
     }
 
     bool VisitDeclRefExpr(DeclRefExpr *DR) {
         auto ND = DR->getFoundDecl();
-        auto DC = ND->getDeclContext();
-        llvm::outs() << "DeclRefExpr " << ND->getQualifiedNameAsString();
-        if (DC->isFileContext()) {
-            // TranslationUnitDecl or NamespaceDecl
-            llvm::outs() <<" is in the Global scope\n";
-            // Propogate changed global constants
-        } else if (DC->isFunctionOrMethod()) {
-            // FunctionDecl or CXXMethodDecl
-            llvm::outs() <<" is in the function scope\n";
-        } else if (DC->isRecord()) {
-            // CXXRecordDecl or RecordDecl
-            llvm::outs() << " is in a class/struct scope\n";
-        } else {
-            // Other cases
-            llvm::outs() << " is in an unknown or nested scope\n";
+        if (!inFunctionOrMethodStack.empty() && TaintDecls.count(ND)) {
+            // use changed decl, reanalyze this function
+            FunctionsNeedReanalyze.insert(inFunctionOrMethodStack.back());
         }
         return ProcessDeclRefExpr(DR, ND);
     }
@@ -231,11 +221,28 @@ public:
         return true;
     }
 
+    void DumpGlobalConstantSet() {
+        llvm::outs() << "--- Decls in GlobalConstantSet ---\n";
+        for (auto &D : GlobalConstantSet) {
+            llvm::outs() << "  ";
+            if (const NamedDecl *ND = llvm::dyn_cast_or_null<NamedDecl>(D)) {
+                llvm::outs() << ND->getQualifiedNameAsString();
+            } else {
+                llvm::outs() << "Unnamed declaration";
+            }
+            llvm::outs() << ": " << "<" << D->getDeclKindName() << "> ";
+            llvm::outs() << "\n";
+        }
+    }
+
     ASTContext *Context;
     std::unordered_set<const Decl *> GlobalConstantSet;
+    std::unordered_set<const Decl *> TaintDecls; // Decls have changed, the function/method use these should reanalyze
     std::unordered_set<const Decl *> FunctionsNeedReanalyze;
     std::vector<std::pair<int, int>> DiffLines;
+    CallGraph *CG;
     DeclRefFinder DRFinder;
+    std::vector<const Decl *> inFunctionOrMethodStack;
 };
 
 class MyCallGraph : public CallGraph, IncInfoCollectASTVisitor {
@@ -349,6 +356,7 @@ public:
         }
         dumpFunctionsNeedReanalyze(FunctionsNeedReanalyze, CG_to_range);
         IncVisitor.TraverseDecl(Context.getTranslationUnitDecl());
+        IncVisitor.DumpGlobalConstantSet();
         // process Global Constant
         for (auto D: IncVisitor.GlobalConstantSet) {
 
