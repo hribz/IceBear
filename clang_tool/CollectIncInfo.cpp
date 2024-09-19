@@ -11,12 +11,14 @@
 #include <filesystem>
 #include <iostream>
 #include <fstream>
-#include <llvm-17/llvm/Support/Casting.h>
-#include <llvm-17/llvm/Support/raw_ostream.h>
+#include <llvm-17/llvm/Support/Error.h>
+#include <llvm-17/llvm/Support/JSON.h>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <stack>
+#include <utility>
 #include <vector>
 
 #include "clang/AST/AST.h"
@@ -31,27 +33,48 @@
 #include "clang/Index/USRGeneration.h"
 #include "clang/Analysis/CallGraph.h"
 #include "llvm/ADT/PostOrderIterator.h"
+#include "llvm/Support/JSON.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace clang;
 using namespace clang::tooling;
 using namespace clang::ast_matchers;
 
-bool isChangedLine(std::vector<std::pair<int, int>> DiffLines, unsigned int line) {
-    if (DiffLines.empty()) {
+bool isChangedLine(const std::optional<std::vector<std::pair<int, int>>>& DiffLines, unsigned int line, unsigned int end_line) {
+    if (!DiffLines) {
+        return true;
+    }
+    if (DiffLines->empty()) {
         return false;
     }
     // 使用 lambda 表达式来定义比较函数
-    auto it = std::lower_bound(DiffLines.begin(), DiffLines.end(), std::make_pair(line + 1, 0),
+    auto it = std::lower_bound(DiffLines->begin(), DiffLines->end(), std::make_pair(line + 1, 0),
                             [](const std::pair<int, int> &a, const std::pair<int, int> &b) {
                                 return a.first < b.first;
                             });
 
     // 检查前一个范围（如果存在）是否覆盖了给定的行号
-    if (it != DiffLines.begin()) {
-        --it;  // 找到第一个不大于 line 的区间
-        if (line >= it->first && line <= it->first + it->second) {
+    if (it != DiffLines->begin()) {
+        --it;  // 找到最后一个不大于 line 的区间
+        if (line <= it->first + it->second - 1) {
             return true;  // 如果 line 在这个区间内，返回 true
         }
+        ++it;
+    }
+
+    while (it != DiffLines->end()) {
+        if (it->first > end_line) {
+            break;  // 当前区间的起始行号大于 EndLine，说明之后都不会有交集
+        }
+        if (it->second == 0) {
+            continue;
+        }
+
+        // 检查是否存在交集
+        if (it->first <= end_line && it->first + it->second - 1 >= line) {
+            return true;  // 存在交集
+        }
+        ++it;
     }
 
     return false;  // 如果没有找到，返回 false
@@ -81,6 +104,41 @@ std::optional<std::pair<int, int>> StartAndEndLineOfDecl(SourceManager &SM, cons
     auto StartLoc = SM.getSpellingLineNumber(D->getBeginLoc());
     auto EndLoc = SM.getSpellingLineNumber(D->getEndLoc());
     return std::make_pair(StartLoc, EndLoc);
+}
+
+const static void printJsonObject(const llvm::json::Object &obj) {
+    for (const auto &pair : obj) {
+        llvm::errs() << pair.first << ": ";
+        if (auto str = pair.second.getAsString()) {
+            llvm::errs() << *str << "\n";
+        } else if (auto num = pair.second.getAsInteger()) {
+            llvm::errs() << *num << "\n";
+        } else if (auto boolean = pair.second.getAsBoolean()) {
+            llvm::errs() << (*boolean ? "true" : "false") << "\n";
+        } else if (auto *arr = pair.second.getAsArray()) {
+            llvm::errs() << "[";
+            for (const auto &elem : *arr) {
+                if (auto str = elem.getAsString()) {
+                    llvm::errs() << *str << " ";
+                } else if (auto i = elem.getAsInteger()) {
+                    llvm::errs() << *i << " ";
+                }
+            }
+            llvm::errs() << "]" << "\n";
+        } else {
+            llvm::errs() << "Unknown type" << "\n";
+        }
+    }
+}
+
+const static void printJsonValue(const llvm::json::Value &jsonValue) {
+    // 打印 jsonValue 的内容
+    if (auto *obj = jsonValue.getAsObject()) {
+        // 查看并打印对象内的键值对
+        printJsonObject(*obj);
+    } else {
+        std::cerr << "Failed to get JSON object" << "\n";
+    }
 }
 
 class DeclRefFinder : public RecursiveASTVisitor<DeclRefFinder> {
@@ -113,13 +171,14 @@ private:
 
 class IncInfoCollectASTVisitor : public RecursiveASTVisitor<IncInfoCollectASTVisitor> {
 public:
-    explicit IncInfoCollectASTVisitor(ASTContext *Context)
-        : Context(Context) {}
-
-    explicit IncInfoCollectASTVisitor(ASTContext *Context, std::vector<std::pair<int, int>> DiffLines, CallGraph *CG)
+    explicit IncInfoCollectASTVisitor(ASTContext *Context, const std::optional<std::vector<std::pair<int, int>>>& DiffLines, CallGraph &CG)
         : Context(Context), DiffLines(DiffLines), CG(CG) {}
     
     bool isGlobalConstant(const Decl *D) {
+        if (!D->getDeclContext()) {
+            // Top level Decl Context
+            return false;
+        }
         if (D->getDeclContext()->isFunctionOrMethod()) {
             return false;
         }
@@ -145,7 +204,7 @@ public:
         // record all changed global constants def
         if (isGlobalConstant(D)) {
             auto loc = StartAndEndLineOfDecl(Context->getSourceManager(), D);
-            if (loc && isChangedLine(DiffLines, loc->first)) {
+            if (loc && isChangedLine(DiffLines, loc->first, loc->second)) {
                 GlobalConstantSet.insert(D);
                 TaintDecls.insert(D);
             } else {
@@ -171,13 +230,13 @@ public:
             FieldDecl *FD = dyn_cast<FieldDecl>(D);
             auto loc = StartAndEndLineOfDecl(Context->getSourceManager(), FD);
             // record changed field
-            if ((loc && isChangedLine(DiffLines, loc->first))) {
+            if ((loc && isChangedLine(DiffLines, loc->first, loc->second))) {
                 TaintDecls.insert(FD);
             }
             // TODO: if this field is used in `CXXCtorInitializer`, the correspond `CXXCtor` should be reanalyze
             
         } else {
-            if (CG->getNode(D)) {
+            if (CG.getNode(D)) {
                 inFunctionOrMethodStack.push_back(D);
             }
         }
@@ -234,20 +293,25 @@ public:
             llvm::outs() << "\n";
         }
     }
-
     ASTContext *Context;
     std::unordered_set<const Decl *> GlobalConstantSet;
     std::unordered_set<const Decl *> TaintDecls; // Decls have changed, the function/method use these should reanalyze
     std::unordered_set<const Decl *> FunctionsNeedReanalyze;
-    std::vector<std::pair<int, int>> DiffLines;
-    CallGraph *CG;
+    const std::optional<std::vector<std::pair<int, int>>>& DiffLines;
+    CallGraph &CG;
     DeclRefFinder DRFinder;
     std::vector<const Decl *> inFunctionOrMethodStack;
+private:
+    // 提供一个静态的 std::optional 对象，表示 std::nullopt 的引用
+    static const std::optional<std::vector<std::pair<int, int>>>& getNullOptReference() {
+        static const std::optional<std::vector<std::pair<int, int>>> nulloptRef = std::nullopt;
+        return nulloptRef;
+    }
 };
 
-class MyCallGraph : public CallGraph, IncInfoCollectASTVisitor {
+class MyCallGraph : public CallGraph {
 public:
-    explicit MyCallGraph(ASTContext *Context): IncInfoCollectASTVisitor(Context) {}
+    explicit MyCallGraph(ASTContext *Context) {}
 
     bool VisitCallExpr(CallExpr *call) {
         if (const FunctionDecl *callee = call->getDirectCallee()) {
@@ -306,16 +370,37 @@ public:
     }
 
 private:
+    ASTContext *Context;
     std::stack<const FunctionDecl *> FunctionStack;
     std::unordered_map<std::string, std::unordered_set<std::string>> callGraph;
 };
 
-class CallGraphConsumer : public clang::ASTConsumer {
+class IncInfoCollectConsumer : public clang::ASTConsumer {
 public:
-    explicit CallGraphConsumer(ASTContext *Context, const std::string &outputPath)
-        : CG(), OutputPath(outputPath), DiffLines{{1, 100000000}}, IncVisitor(Context) {
-            IncVisitor.DiffLines = DiffLines;
+    explicit IncInfoCollectConsumer(ASTContext *Context, const std::string &outputPath, const std::optional<llvm::json::Object> GlobalDiffLines)
+        : CG(), OutputPath(outputPath), DiffLines(std::nullopt), IncVisitor(Context, DiffLines, CG) {
+        if (GlobalDiffLines) {
+            const SourceManager &SM = Context->getSourceManager();
+            FileID MainFileID = SM.getMainFileID();
+            const FileEntry *FE = SM.getFileEntryForID(MainFileID);
+            // printJsonObject(*GlobalDiffLines);
+            auto diff_array = GlobalDiffLines->getArray(FE->getName());
+            if (diff_array) {
+                DiffLines = std::vector<std::pair<int, int>>();
+                for (auto line: *diff_array) {
+                    auto line_arr = line.getAsArray();
+                    auto line_start = (*line_arr)[0].getAsInteger();
+                    auto line_count = (*line_arr)[1].getAsInteger();
+                    if (line_start && line_count) {
+                        auto pair = std::make_pair<int, int>(*line_start, *line_count);
+                        DiffLines->push_back(pair);
+                    }
+                }
+            } else {
+                llvm::errs() << FE->getName() << " has no diff lines information.\n";
+            }
         }
+    }
 
     bool HandleTopLevelDecl(DeclGroupRef DG) override {
         storeTopLevelDecls(DG);
@@ -350,7 +435,7 @@ public:
             auto StartLoc = loc->first;
             auto EndLoc = loc->second;
             CG_to_range[D] = std::make_pair(StartLoc, EndLoc);
-            if (isChangedLine(DiffLines, StartLoc)) {
+            if (isChangedLine(DiffLines, StartLoc, EndLoc)) {
                 FunctionsNeedReanalyze.insert(D);
             }
         }
@@ -369,28 +454,57 @@ private:
     std::unordered_map<const Decl *, std::pair<unsigned int, unsigned int>> CG_to_range;
     std::string OutputPath;
     std::deque<Decl *> LocalTUDecls;
-    std::vector<std::pair<int, int>> DiffLines;
+    std::optional<std::vector<std::pair<int, int>>> DiffLines; // empty means no change, nullopt means new file
     std::unordered_set<const Decl *> FunctionsNeedReanalyze;
 };
 
-class CallGraphAction : public clang::ASTFrontendAction {
+class IncInfoCollectAction : public clang::ASTFrontendAction {
 public:
-    CallGraphAction(const std::string &outputPath) : OutputPath(outputPath) {}
+    IncInfoCollectAction(const std::string &outputPath, const std::string &diffPath) :
+    OutputPath(outputPath), DiffLines(std::nullopt) {
+        initDiffLines(diffPath);
+    }
+
+    void initDiffLines(const std::string &diffPath) {
+        if (diffPath.empty()) {
+            llvm::errs() << "No diff lines information.\n";
+            return ;
+        }
+        std::ifstream file(diffPath);
+         if (!file.is_open()) {
+            llvm::errs() << "Failed to open file.\n";
+            return ;
+        }
+        std::string jsonStr((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        file.close();
+        llvm::Expected<llvm::json::Value> jsonValue = llvm::json::parse(jsonStr);
+        if (!jsonValue) {
+            llvm::errs() << "Failed to parse JSON.\n";
+            return ;
+        }
+
+        DiffLines = *(jsonValue->getAsObject());
+        // printJsonObject(*DiffLines);
+    }
 
     std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &CI, llvm::StringRef file) override {
-        return std::make_unique<CallGraphConsumer>(&CI.getASTContext(), OutputPath);
+        return std::make_unique<IncInfoCollectConsumer>(&CI.getASTContext(), OutputPath, DiffLines);
     }
 
 private:
     std::string OutputPath;
+    // Don't use pointer, because jsonStr is declared at function `initDiffLines`, 
+    // and it will be freed automatically while exiting the function.
+    std::optional<llvm::json::Object> DiffLines;
 };
 
-class CallGraphActionFactory : public FrontendActionFactory {
+class IncInfoCollectActionFactory : public FrontendActionFactory {
 public:
-    CallGraphActionFactory(const std::string &outputPath) : OutputPath(outputPath) {}
+    IncInfoCollectActionFactory(const std::string &outputPath, const std::string &diffPath):
+     OutputPath(outputPath), DiffPath(diffPath) {}
 
     std::unique_ptr<FrontendAction> create() override {
-        return std::make_unique<CallGraphAction>(OutputPath);
+        return std::make_unique<IncInfoCollectAction>(OutputPath, DiffPath);
     }
 
 private:
@@ -398,12 +512,11 @@ private:
     std::string DiffPath;
 };
 
-static llvm::cl::OptionCategory ToolCategory("callgraph-tool");
+static llvm::cl::OptionCategory ToolCategory("Collect Inc Info Options");
 static llvm::cl::opt<std::string> OutputPath("o", llvm::cl::desc("Specify output path for dot file"), 
     llvm::cl::value_desc("call graph dir"), llvm::cl::init(""));
-static llvm::cl::opt<std::string> DiffInfo("diff", llvm::cl::desc("Specify diff info files"),
+static llvm::cl::opt<std::string> DiffPath("diff", llvm::cl::desc("Specify diff info files"),
     llvm::cl::value_desc("diff info files"), llvm::cl::init(""));
-static llvm::cl::opt<bool> IncMode("inc", llvm::cl::desc("Active incremental mode"), llvm::cl::value_desc("incremental mode"), llvm::cl::init(false));
 
 int main(int argc, const char **argv) {
     auto ExpectedParser = CommonOptionsParser::create(argc, argv, ToolCategory);
@@ -415,6 +528,6 @@ int main(int argc, const char **argv) {
     CommonOptionsParser& OptionsParser = ExpectedParser.get();
 
     ClangTool Tool(OptionsParser.getCompilations(), OptionsParser.getSourcePathList());
-    CallGraphActionFactory Factory(OutputPath);
+    IncInfoCollectActionFactory Factory(OutputPath, DiffPath);
     return Tool.run(&Factory);
 }

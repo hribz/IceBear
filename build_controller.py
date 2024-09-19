@@ -14,7 +14,7 @@ from data_struct.reply import Reply
 from utils import *
 
 PWD = Path(".").absolute()
-EXTRACT_CG = str(PWD / 'build/clang_tool/FunctionCallGraph')
+EXTRACT_II = str(PWD / 'build/clang_tool/collectIncInfo')
 PANDA = 'panda'
 MY_CLANG = '/home/xiaoyu/llvm/llvm-project/build/bin/clang'
 MY_CLANG_PLUS_PLUS = '/home/xiaoyu/llvm/llvm-project/build/bin/clang++'
@@ -54,8 +54,8 @@ if DIFF_PATH:
 else:
     print('diff not found in the system path')
     exit(1)
-if EXTRACT_CG:
-    print(f'cg extractor found at: {EXTRACT_CG}')
+if EXTRACT_II:
+    print(f'cg extractor found at: {EXTRACT_II}')
 else:
     print('please build cg extractor firstly') 
     exit(1)
@@ -165,7 +165,7 @@ class Configuration:
     compile_database: Path
     reply_database: List[Reply]
     diff_file_and_lines: List[DiffResult]
-    extract_cg: str = EXTRACT_CG
+    extract_ii: str = EXTRACT_II
     status: str # {WAIT, SUCCESS, FAILED}
     incrementable: bool
     session_times: dict
@@ -220,8 +220,9 @@ class Configuration:
         self.preprocess_path = self.workspace / 'preprocess'
         self.edm_path = self.workspace / 'csa-ctu-scan'
         self.csa_path = self.workspace / 'csa-ctu-scan'
-        self.cg_path = self.workspace / 'call_graph'
-        self.diff_files_path = self.workspace / 'diff_files.json'
+        self.inc_info_path = self.workspace / 'inc_info'
+        self.diff_files_path = self.workspace / 'diff_files.txt'
+        self.diff_lines_path = self.workspace / 'diff_lines.json'
 
     def create_cmake_api_file(self):
         if self.cmake_api_path.exists():
@@ -254,21 +255,21 @@ class Configuration:
             self.session_times['Configure'] = 'FAILED'
             logger.error(f"[Repo Config Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
 
-    def extract_call_graph(self, inc:bool=True):
+    def extract_inc_info(self, inc:bool=True):
         '''
-        use clang_tool/extractCG.cpp to generate call graph
+        use clang_tool/CollectIncInfo.cpp to generate information used by incremental analysis
         '''
         if not self.compile_database.exists():
-            logger.error(f"[Extract Call Graph] can't extract call graph without file {self.compile_database}")
+            logger.error(f"[Extract Inc Info] can't extract inc info without file {self.compile_database}")
             return
         start_time = time.time()
-        remake_dir(self.cg_path, "[Call Graph Files DIR exists]")
-        plugin_path = self.cg_path / 'cg_plugin.json'
+        remake_dir(self.inc_info_path, "[Inc Info Files DIR exists]")
+        plugin_path = self.inc_info_path / 'cg_plugin.json'
         with open(plugin_path, 'w') as f:
             plugin = example_clang_tool_plugin
-            plugin['action']['title'] = 'Extract Call Graph'
-            plugin['action']['tool'] = self.extract_cg
-            plugin['action']['args'] = []
+            plugin['action']['title'] = 'Extract Inc Info'
+            plugin['action']['tool'] = self.extract_ii
+            plugin['action']['args'] = ['-diff', str(self.diff_lines_path)]
             plugin['action']['extname'] = ".cg"
             plugin['action']['stream'] = 'stdout'
             json.dump(plugin, f, indent=4)
@@ -279,14 +280,14 @@ class Configuration:
             commands.extend(['--print-execution-time', '--verbose'])
         commands.extend(['--plugin', str(plugin_path)])
         commands.extend(['-f', str(self.compile_database)])
-        commands.extend(['-o', str(self.cg_path)])
+        commands.extend(['-o', str(self.inc_info_path)])
         if inc and self.incrementable:
             commands.extend(['--file-list', f"{self.diff_files_path}"])
         
-        extract_cg_script = ' '.join(commands)
-        logger.debug("[Extract CG Script] " + extract_cg_script)
+        extract_ii_script = ' '.join(commands)
+        logger.debug("[Extract CG Script] " + extract_ii_script)
         try:
-            process = run(extract_cg_script, shell=True, capture_output=True, text=True, check=True)
+            process = run(extract_ii_script, shell=True, capture_output=True, text=True, check=True)
             self.session_times['Extract CG'] = time.time() - start_time
             logger.info(f"[Extract CG Success] {process.stdout} {process.stderr}")
         except subprocess.CalledProcessError as e:
@@ -428,9 +429,12 @@ class Configuration:
         if self.status == 'DIFF':
             logger.info(f"[Parse Diff Result Success] diff file number: {len(self.diff_file_and_lines)}")
             with open(self.diff_files_path, 'w') as f:
-                diff_json = []
                 for i in self.diff_file_and_lines:
-                    diff_json.append({"file": i.file, "diff_lines": i.diff_lines})
+                    f.write(self.get_origin_file_name(i.file, str(self.preprocess_path), ['.i', '.ii']) + '\n')
+            with open(self.diff_lines_path, 'w') as f:
+                diff_json = {}
+                for i in self.diff_file_and_lines:
+                    diff_json[i.file] = i.diff_lines
                 json.dump(diff_json, f, indent=4)
             self.incrementable = True
             self.session_times['Diff'] = time.time() - start_time
@@ -599,11 +603,11 @@ class Repository:
         self.preprocess_every_config()
         # if need incremental analyze, please excute diff session after preprocess immediately
         self.diff_every_config()
-        self.extract_cg_every_config(inc)
+        self.extract_ii_every_config(inc)
         self.generate_efm_for_every_config(inc)
 
     def is_incremental_session(self, session):
-        incremental_sessions = [Configuration.extract_call_graph, Configuration.generate_efm, Configuration.execute_csa]
+        incremental_sessions = [Configuration.extract_inc_info, Configuration.generate_efm, Configuration.execute_csa]
         if session in incremental_sessions:
             return True
         return False
@@ -618,8 +622,8 @@ class Repository:
     def build_every_config(self):
         self.process_every_config(Configuration.configure)
 
-    def extract_cg_every_config(self):
-        self.process_every_config(Configuration.extract_call_graph, inc=self.analyze_opts.inc)
+    def extract_ii_every_config(self):
+        self.process_every_config(Configuration.extract_inc_info, inc=self.analyze_opts.inc)
 
     def diff_every_config(self):
         self.process_every_config(Configuration.diff_with_other, other=self.default_config)
@@ -688,7 +692,7 @@ def main():
         # repo_db.build_every_config()
         # repo_db.preprocess_every_config()
         repo_db.diff_every_config()
-        # repo_db.extract_cg_every_config()
+        # repo_db.extract_ii_every_config()
         # repo_db.generate_efm_for_every_config()
         # repo_db.execute_csa_for_every_config()
         # repo_db.generate_global_fsum()
