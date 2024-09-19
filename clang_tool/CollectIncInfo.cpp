@@ -67,6 +67,7 @@ bool isChangedLine(const std::optional<std::vector<std::pair<int, int>>>& DiffLi
             break;  // 当前区间的起始行号大于 EndLine，说明之后都不会有交集
         }
         if (it->second == 0) {
+            ++it;
             continue;
         }
 
