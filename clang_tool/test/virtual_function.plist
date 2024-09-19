@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
  <key>clang_version</key>
-<string>Ubuntu clang version 17.0.6 (++20231209124227+6009708b4367-1~exp1~20231209124336.77)</string>
+<string>clang version 20.0.0git (https://github.com/llvm/llvm-project.git 62e5b6e817cd4d2dd1fd8193453660d77b41acc9)</string>
  <key>diagnostics</key>
  <array>
  </array>

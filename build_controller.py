@@ -88,14 +88,14 @@ class Option:
 class DiffResult:
     file: str
     diff_lines: List
-    other_file: str
-    other_diff_lines: List
+    origin_file: str
+    origin_diff_lines: List
     entire_file: bool # entire file different
 
-    def __init__(self, file: str, entire: bool=False):
+    def __init__(self, file: str='', entire: bool=False):
         self.file = file
         self.diff_lines = []
-        self.other_diff_lines = []
+        self.origin_diff_lines = []
         if entire:
             self.entire_file = True
         else:
@@ -104,15 +104,15 @@ class DiffResult:
     def add_diff_line(self, start_line:int, line_count:int):
         self.diff_lines.append([start_line, line_count])
 
-    def add_other_diff_line(self, start_line:int, line_count:int):
-        self.other_diff_lines.append([start_line, line_count])
+    def add_origin_diff_line(self, start_line:int, line_count:int):
+        self.origin_diff_lines.append([start_line, line_count])
 
     def __repr__(self) -> str:
         if self.entire_file:
             return f"Only my_file: {self.file}\n"
-        ret = f"my_file: {self.file}\nother_file: {self.other_file}\n"
+        ret = f"my_file: {self.file}\norigin_file: {self.origin_file}\n"
         for idx, line in enumerate(self.diff_lines):
-            ret += f"@@ -{line[0]},{line[1]} +{self.other_diff_lines[idx][0]},{self.other_diff_lines[idx][1]} @@\n"
+            ret += f"@@ -{self.origin_diff_lines[idx][0]},{self.origin_diff_lines[idx][1]} +{line[0]},{line[1]} @@\n"
         return ret
 
 class GlobalFunctionSummaries:
@@ -221,7 +221,7 @@ class Configuration:
         self.edm_path = self.workspace / 'csa-ctu-scan'
         self.csa_path = self.workspace / 'csa-ctu-scan'
         self.cg_path = self.workspace / 'call_graph'
-        self.diff_files_path = self.workspace / 'diff_files.txt'
+        self.diff_files_path = self.workspace / 'diff_files.json'
 
     def create_cmake_api_file(self):
         if self.cmake_api_path.exists():
@@ -303,12 +303,16 @@ class Configuration:
         commands.extend(['-o', str(self.edm_path)])
         if inc and self.incrementable:
             commands.extend(['--file-list', f"{self.diff_files_path}"])
+        if self.analyze_opts.verbose:
+            commands.extend(['--verbose'])
         edm_script = ' '.join(commands)
         logger.debug("[Generating EFM Files Script] " + edm_script)
         try:
             process = run(edm_script, shell=True, capture_output=True, text=True, check=True)
             self.session_times['Generate EFM'] = time.time() - start_time
             logger.info(f"[Generating EFM Files Success] {edm_script}")
+            if self.analyze_opts.verbose:
+                logger.debug(f"[Panda EFM Info]\nstdout: \n{process.stdout}\n stderr: \n{process.stderr}")
         except subprocess.CalledProcessError as e:
             # self.session_times['Generate EFM'] = 'FAILED'
             # TODO: 由于panda此处可能返回failed，待修复后再储存为FAILED
@@ -424,26 +428,28 @@ class Configuration:
         if self.status == 'DIFF':
             logger.info(f"[Parse Diff Result Success] diff file number: {len(self.diff_file_and_lines)}")
             with open(self.diff_files_path, 'w') as f:
+                diff_json = []
                 for i in self.diff_file_and_lines:
-                    f.write(i.file + "\n")
+                    diff_json.append({"file": i.file, "diff_lines": i.diff_lines})
+                json.dump(diff_json, f, indent=4)
             self.incrementable = True
             self.session_times['Diff'] = time.time() - start_time
 
     def diff_two_dir(self, my_dir: Path, other_dir: Path, other):
         commands = [DIFF_PATH]
         commands.extend(['-r', '-u0'])
-        commands.extend([str(my_dir), str(other_dir)])
+        commands.extend([str(other_dir), str(my_dir)])
         diff_script = ' '.join(commands)
         logger.debug("[Diff Files Script] " + diff_script)
-        try:
-            self.status = 'DIFF FAILED'
-            process = run(diff_script, shell=True, capture_output=True, text=True, check=True)
-            logger.error(f"[Diff Files Failed] stdout: {process.stdout}\n stderr: {process.stderr}")
-        except subprocess.CalledProcessError as e:
-            # diff return no-zero when success
+        self.status = 'DIFF FAILED'
+        process = run(diff_script, shell=True, capture_output=True, text=True)
+        if process.returncode == 0 or process.returncode == 1:
             self.status = 'DIFF'
             logger.info(f"[Diff Files Success] {diff_script}")
-            self.parse_diff_result(e.stdout, other)
+            self.parse_diff_result(process.stdout, other)
+            # logger.debug(f"[Diff Files Output] \n{process.stdout}")
+        else:
+            logger.error(f"[Diff Files Failed] stdout: {process.stdout}\n stderr: {process.stderr}")
 
     def get_origin_file_name(self, file:str, prefix: List[str], extnames: List[str]):
         file = file[len(prefix):]
@@ -455,29 +461,33 @@ class Configuration:
 
     def parse_diff_result(self, diff_out, other):
         diff_line_pattern = re.compile(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@$')
-        my_file: str
-        other_file: str
+        file: str
+        origin_file: str
+        my_build_dir_in_preprocess_path = None
+        other_build_dir_in_preprocess_path = None
         for line in (diff_out).split('\n'):
             line: str
             if line.startswith('@@'):
                 match = diff_line_pattern.match(line)
                 if match:
                     # diff lines range [my_start, my_start + my_count)
-                    my_start = int(match.group(1))
-                    my_count = int(match.group(2)) if match.group(2) else 1
-                    other_start = int(match.group(3))
-                    other_count = int(match.group(4)) if match.group(4) else 1
-                    self.diff_file_and_lines[-1].add_diff_line(my_start, my_count)
-                    self.diff_file_and_lines[-1].add_other_diff_line(other_start, other_count)
+                    origin_start = int(match.group(1))
+                    origin_count = int(match.group(2)) if match.group(2) else 1
+                    start = int(match.group(3))
+                    count = int(match.group(4)) if match.group(4) else 1
+                    self.diff_file_and_lines[-1].add_diff_line(start, count)
+                    self.diff_file_and_lines[-1].add_origin_diff_line(origin_start, origin_count)
             elif line.startswith('---'):
                 spilt_line = line.split()
-                my_file = spilt_line[1]
-                my_file = self.get_origin_file_name(my_file, str(self.preprocess_path), ['.i', '.ii'])
-                self.diff_file_and_lines.append(DiffResult(my_file))
+                origin_file = spilt_line[1]
+                # origin_file = self.get_origin_file_name(origin_file, str(other.preprocess_path), ['.i', '.ii'])
+                self.diff_file_and_lines.append(DiffResult())
+                self.diff_file_and_lines[-1].origin_file = origin_file
             elif line.startswith('+++'):
                 spilt_line = line.split()
-                other_file = spilt_line[1]
-                self.diff_file_and_lines[-1].other_file = self.get_origin_file_name(other_file, str(other.preprocess_path), ['.i', '.ii'])
+                file = spilt_line[1]
+                # file = self.get_origin_file_name(file, str(self.preprocess_path), ['.i', '.ii'])
+                self.diff_file_and_lines[-1].file = file
             elif line.startswith("Only in"):
                 spilt_line = line.split()
                 diff = Path(spilt_line[2][:-1]) / spilt_line[3]
@@ -492,33 +502,36 @@ class Configuration:
                     # is file
                     if is_my_file_or_dir:
                         # only record new file in my build directory
-                        diff = self.get_origin_file_name(str(diff), str(self.preprocess_path), ['.i', '.ii'])
+                        # diff = self.get_origin_file_name(str(diff), str(self.preprocess_path), ['.i', '.ii'])
                         self.diff_file_and_lines.append(DiffResult(str(diff), True))
                 else:
                     # is directory
-                    my_build_dir_in_preprocess_path = None
-                    other_build_dir_in_preprocess_path = None
                     if is_my_file_or_dir:
+                        # diff = /path_to_preprocess/path_to_build0
+                        # relative_dir = path_to_build0
                         relative_dir = diff.relative_to(self.preprocess_path)
                         logger.debug(f"[Parse Diff Result] Find my dir: {diff} relative_dir : {relative_dir} build_path {self.build_path}")
                         if "/" + str(relative_dir) == str(self.build_path):
-                            my_build_dir_in_preprocess_path = relative_dir
+                            my_build_dir_in_preprocess_path = str(diff)
                     else:
+                        # diff = /path_to_preprocess/path_to_build
+                        # relative_dir = path_to_build
                         relative_dir = diff.relative_to(other.preprocess_path)
                         logger.debug(f"[Parse Diff Result] Find other dir: {diff} relative_dir : {relative_dir} build_path {other.build_path}")
                         if "/" + str(relative_dir) == str(other.build_path):
-                            other_build_dir_in_preprocess_path = relative_dir
+                            other_build_dir_in_preprocess_path = str(diff)
                     if my_build_dir_in_preprocess_path or other_build_dir_in_preprocess_path:
-                            if my_build_dir_in_preprocess_path and other_build_dir_in_preprocess_path:
-                                # eliminate the impact of different build path
-                                logger.debug(f"[Parse Diff Result Recursively] diff build directory {diff} in preprocess path")
-                                my_build_dir_in_preprocess_path = other_build_dir_in_preprocess_path = None
-                                self.diff_two_dir(my_build_dir_in_preprocess_path, other_build_dir_in_preprocess_path, other)
+                        if my_build_dir_in_preprocess_path and other_build_dir_in_preprocess_path:
+                            # eliminate the impact of different build path
+                            logger.debug(f"[Parse Diff Result Recursively] diff build directory {diff} in preprocess path")
+                            self.diff_two_dir(my_build_dir_in_preprocess_path, other_build_dir_in_preprocess_path, other)
+                            my_build_dir_in_preprocess_path = other_build_dir_in_preprocess_path = None
                     elif is_my_file_or_dir:
                         logger.debug(f"[Parse Diff Directory] find dir {diff} only in one build path")
                         for diff_file in diff.rglob("*"):
                             if diff_file.is_file():
-                                file = self.get_origin_file_name(str(diff_file), str(self.preprocess_path), ['.i', '.ii'])
+                                file = str(diff_file)
+                                # file = self.get_origin_file_name(str(diff_file), str(self.preprocess_path), ['.i', '.ii'])
                                 self.diff_file_and_lines.append(DiffResult(file, True))
 
     def generate_global_function_summaries(self):
@@ -644,12 +657,12 @@ def main():
 
 
     repo_info = [
-        {
-            'name': 'json', 
-            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/json', 
-            'options_list': [
-            ]
-        },
+        # {
+        #     'name': 'json', 
+        #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/json', 
+        #     'options_list': [
+        #     ]
+        # },
         {
             'name': 'xgboost', 
             'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/xgboost', 
@@ -657,13 +670,13 @@ def main():
                 [Option('GOOGLE_TEST', 'ON')]
             ]
         },
-        # {
-        #     'name': 'opencv', 
-        #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/opencv', 
-        #     'options_list': [
-        #         [Option('WITH_CLP', 'ON')]
-        #     ]
-        # }
+        {
+            'name': 'opencv', 
+            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/opencv', 
+            'options_list': [
+                [Option('WITH_CLP', 'ON')]
+            ]
+        }
     ]
 
     repo_list: List[Repository] = []
@@ -672,8 +685,8 @@ def main():
         repo_db = Repository(repo['name'], repo['src_path'], options_list=repo['options_list'], opts=opts)
         repo_list.append(repo_db)
         logger.info('-------------BEGIN SUMMARY-------------\n'+repo_db.session_summary())
-        repo_db.build_every_config()
-        repo_db.preprocess_every_config()
+        # repo_db.build_every_config()
+        # repo_db.preprocess_every_config()
         repo_db.diff_every_config()
         # repo_db.extract_cg_every_config()
         # repo_db.generate_efm_for_every_config()
