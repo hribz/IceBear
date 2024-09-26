@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <iostream>
 #include <fstream>
+#include <llvm-17/llvm/ADT/StringRef.h>
 #include <llvm-17/llvm/Support/Error.h>
 #include <llvm-17/llvm/Support/JSON.h>
 #include <optional>
@@ -31,6 +32,7 @@
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendAction.h"
 #include "clang/Index/USRGeneration.h"
+#include "clang/Analysis/AnalysisDeclContext.h"
 #include "clang/Analysis/CallGraph.h"
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/Support/JSON.h"
@@ -40,7 +42,7 @@ using namespace clang;
 using namespace clang::tooling;
 using namespace clang::ast_matchers;
 
-bool isChangedLine(const std::optional<std::vector<std::pair<int, int>>>& DiffLines, unsigned int line, unsigned int end_line) {
+static bool isChangedLine(const std::optional<std::vector<std::pair<int, int>>>& DiffLines, unsigned int line, unsigned int end_line) {
     if (!DiffLines) {
         return true;
     }
@@ -52,27 +54,29 @@ bool isChangedLine(const std::optional<std::vector<std::pair<int, int>>>& DiffLi
                             [](const std::pair<int, int> &a, const std::pair<int, int> &b) {
                                 return a.first < b.first;
                             });
-
+    auto it_begin = it->first;
+    auto it_end = it->first + it->second - 1;
+    // it->second 是变化的行数，但是 it->second == 0 并不意味着没有发生变化，而是 it->first 行之后发生了删除
+    // 这种情况可以视为 [it->first+1, 1]
+    if (!it->second) {
+        it_begin = it_end = it->first + 1;
+    }
     // 检查前一个范围（如果存在）是否覆盖了给定的行号
     if (it != DiffLines->begin()) {
         --it;  // 找到最后一个不大于 line 的区间
-        if (line <= it->first + it->second - 1) {
+        if (line <= it_end) {
             return true;  // 如果 line 在这个区间内，返回 true
         }
         ++it;
     }
 
     while (it != DiffLines->end()) {
-        if (it->first > end_line) {
+        if (it_begin > end_line) {
             break;  // 当前区间的起始行号大于 EndLine，说明之后都不会有交集
-        }
-        if (it->second == 0) {
-            ++it;
-            continue;
         }
 
         // 检查是否存在交集
-        if (it->first <= end_line && it->first + it->second - 1 >= line) {
+        if (it_begin<= end_line && it_end >= line) {
             return true;  // 存在交集
         }
         ++it;
@@ -81,23 +85,68 @@ bool isChangedLine(const std::optional<std::vector<std::pair<int, int>>>& DiffLi
     return false;  // 如果没有找到，返回 false
 }
 
-void dumpFunctionsNeedReanalyze(std::unordered_set<const Decl *> FunctionsNeedReanalyze,
-        std::unordered_map<const Decl *, std::pair<unsigned int, unsigned int>> CG_to_range) {
-    llvm::outs() << "--- Functions Need to Reanalyze ---\n";
-    for (auto &D : FunctionsNeedReanalyze) {
-        llvm::outs() << "  ";
-        if (const NamedDecl *ND = llvm::dyn_cast_or_null<NamedDecl>(D)) {
-            llvm::outs() << ND->getQualifiedNameAsString();
-        } else {
-            llvm::outs() << "Unnamed declaration";
+static void DumpCallGraph(CallGraph &CG, llvm::StringRef MainFilePath, 
+    std::unordered_map<const Decl *, std::pair<unsigned int, unsigned int>>& CGToRange) {
+    if (!CG.size()) {
+        return;
+    }
+    std::string CGFile = MainFilePath.str() + ".cg";
+    std::ofstream outFile(CGFile);
+    if (!outFile.is_open()) {
+        llvm::errs() << "Error: Could not open file " << CGFile << " for writing.\n";
+        return;
+    }
+    llvm::ReversePostOrderTraversal<clang::CallGraph*> RPOT(&CG);
+    for (CallGraphNode *N : RPOT) {
+        if (N == CG.getRoot()) continue;
+        Decl *D = N->getDecl();
+        outFile << AnalysisDeclContext::getFunctionName(D) << " -> " 
+            << "<" << CGToRange[D].first << "-" << CGToRange[D].second << ">" << "\n";
+        for (CallGraphNode::CallRecord &CR : N->callees()) {
+            Decl *Callee = CR.Callee->getDecl();
+            outFile << "    " << AnalysisDeclContext::getFunctionName(Callee) 
+                << ": " << "<" << CGToRange[Callee].first << "-" << CGToRange[Callee].second << ">" << "\n";
         }
-        llvm::outs() << ": " << "<" << D->getDeclKindName() << "> ";
-        llvm::outs() << CG_to_range[D].first << "-" << CG_to_range[D].second;
-        llvm::outs() << "\n";
     }
 }
 
-std::optional<std::pair<int, int>> StartAndEndLineOfDecl(SourceManager &SM, const Decl * D) {
+static void DumpFunctionsNeedReanalyze(std::unordered_set<const Decl *> FunctionsNeedReanalyze,
+        std::unordered_map<const Decl *, std::pair<unsigned int, unsigned int>>& CGToRange, llvm::StringRef MainFilePath) {
+    if (FunctionsNeedReanalyze.empty()) {
+        return;
+    }
+    std::string ReanalyzeFunctionsFile = MainFilePath.str() + ".rf";
+    std::ofstream outFile(ReanalyzeFunctionsFile);
+    if (!outFile.is_open()) {
+        llvm::errs() << "Error: Could not open file " << ReanalyzeFunctionsFile << " for writing.\n";
+        return;
+    }
+    llvm::outs() << "--- Functions Need to Reanalyze ---\n";
+    for (auto &D : FunctionsNeedReanalyze) {
+        SmallString<128> usr;
+        std::string ret;
+        index::generateUSRForDecl(D, usr);
+        ret += std::to_string(usr.size());
+        ret += ":";
+        ret += usr.c_str();
+        const std::string &fname = AnalysisDeclContext::getFunctionName(D);
+        outFile << ret << " " << fname << "\n";
+        llvm::outs() << "  ";
+        llvm::outs() << fname;
+        llvm::outs() << ": " << "<" << D->getDeclKindName() << "> ";
+        llvm::outs() << CGToRange[D].first << "-" << CGToRange[D].second;
+        llvm::outs() << "\n";
+    }
+    
+}
+
+static std::optional<std::pair<int, int>> StartAndEndLineOfDecl(SourceManager &SM, const Decl * D) {
+    if (auto FD = D->getAsFunction()) {
+        // Just care about changes in function definition
+        if (auto Definition = FD->getDefinition())
+            D = FD->getDefinition();
+    }
+    
     SourceLocation Loc = D->getLocation();
     if (!(Loc.isValid() && Loc.isFileID())) {
         return std::nullopt;
@@ -133,9 +182,7 @@ const static void printJsonObject(const llvm::json::Object &obj) {
 }
 
 const static void printJsonValue(const llvm::json::Value &jsonValue) {
-    // 打印 jsonValue 的内容
     if (auto *obj = jsonValue.getAsObject()) {
-        // 查看并打印对象内的键值对
         printJsonObject(*obj);
     } else {
         std::cerr << "Failed to get JSON object" << "\n";
@@ -176,6 +223,7 @@ public:
         : Context(Context), DiffLines(DiffLines), CG(CG) {}
     
     bool isGlobalConstant(const Decl *D) {
+        D = D->getCanonicalDecl();
         if (!D->getDeclContext()) {
             // Top level Decl Context
             return false;
@@ -206,6 +254,7 @@ public:
         if (isGlobalConstant(D)) {
             auto loc = StartAndEndLineOfDecl(Context->getSourceManager(), D);
             if (loc && isChangedLine(DiffLines, loc->first, loc->second)) {
+                // Should we just record canonical decl?
                 GlobalConstantSet.insert(D);
                 TaintDecls.insert(D);
             } else {
@@ -282,6 +331,9 @@ public:
     }
 
     void DumpGlobalConstantSet() {
+        if (GlobalConstantSet.empty()) {
+            return;
+        }
         llvm::outs() << "--- Decls in GlobalConstantSet ---\n";
         for (auto &D : GlobalConstantSet) {
             llvm::outs() << "  ";
@@ -379,15 +431,14 @@ private:
 class IncInfoCollectConsumer : public clang::ASTConsumer {
 public:
     explicit IncInfoCollectConsumer(ASTContext *Context, const std::string &outputPath, const std::optional<llvm::json::Object> GlobalDiffLines)
-        : CG(), OutputPath(outputPath), DiffLines(std::nullopt), IncVisitor(Context, DiffLines, CG) {
+    : CG(), OutputPath(outputPath), DiffLines(std::vector<std::pair<int, int>>()), IncVisitor(Context, DiffLines, CG) {
+        const SourceManager &SM = Context->getSourceManager();
+        FileID MainFileID = SM.getMainFileID();
+        const FileEntry *FE = SM.getFileEntryForID(MainFileID);
+        MainFilePath = FE->getName();
         if (GlobalDiffLines) {
-            const SourceManager &SM = Context->getSourceManager();
-            FileID MainFileID = SM.getMainFileID();
-            const FileEntry *FE = SM.getFileEntryForID(MainFileID);
             // printJsonObject(*GlobalDiffLines);
-            auto diff_array = GlobalDiffLines->getArray(FE->getName());
-            if (diff_array) {
-                DiffLines = std::vector<std::pair<int, int>>();
+            if (auto diff_array = GlobalDiffLines->getArray(MainFilePath)) {
                 for (auto line: *diff_array) {
                     auto line_arr = line.getAsArray();
                     auto line_start = (*line_arr)[0].getAsInteger();
@@ -397,6 +448,9 @@ public:
                         DiffLines->push_back(pair);
                     }
                 }
+            } else if (auto new_file = GlobalDiffLines->getInteger(MainFilePath)) {
+                DiffLines = std::nullopt;
+                llvm::outs() << FE->getName() << " is new file.\n";
             } else {
                 llvm::errs() << FE->getName() << " has no diff lines information.\n";
             }
@@ -418,14 +472,12 @@ public:
             // analyzing twice.
             if (isa<ObjCMethodDecl>(I))
                 continue;
-
             LocalTUDecls.push_back(I);
         }
     }
 
     void HandleTranslationUnit(clang::ASTContext &Context) override {
         CG.addToCallGraph(Context.getTranslationUnitDecl());
-        CG.print(llvm::outs());
         llvm::ReversePostOrderTraversal<clang::CallGraph*> RPOT(&CG);
         SourceManager &SM = Context.getSourceManager();
         for (CallGraphNode *N : RPOT) {
@@ -435,12 +487,13 @@ public:
             if (!loc) continue;
             auto StartLoc = loc->first;
             auto EndLoc = loc->second;
-            CG_to_range[D] = std::make_pair(StartLoc, EndLoc);
+            CGToRange[D] = std::make_pair(StartLoc, EndLoc);
             if (isChangedLine(DiffLines, StartLoc, EndLoc)) {
                 FunctionsNeedReanalyze.insert(D);
             }
         }
-        dumpFunctionsNeedReanalyze(FunctionsNeedReanalyze, CG_to_range);
+        DumpCallGraph(CG, MainFilePath, CGToRange);
+        DumpFunctionsNeedReanalyze(FunctionsNeedReanalyze, CGToRange, MainFilePath);
         IncVisitor.TraverseDecl(Context.getTranslationUnitDecl());
         IncVisitor.DumpGlobalConstantSet();
         // process Global Constant
@@ -452,11 +505,12 @@ public:
 private:
     CallGraph CG;
     IncInfoCollectASTVisitor IncVisitor;
-    std::unordered_map<const Decl *, std::pair<unsigned int, unsigned int>> CG_to_range;
+    std::unordered_map<const Decl *, std::pair<unsigned int, unsigned int>> CGToRange;
     std::string OutputPath;
     std::deque<Decl *> LocalTUDecls;
     std::optional<std::vector<std::pair<int, int>>> DiffLines; // empty means no change, nullopt means new file
     std::unordered_set<const Decl *> FunctionsNeedReanalyze;
+    llvm::StringRef MainFilePath;
 };
 
 class IncInfoCollectAction : public clang::ASTFrontendAction {
@@ -473,7 +527,7 @@ public:
         }
         std::ifstream file(diffPath);
          if (!file.is_open()) {
-            llvm::errs() << "Failed to open file.\n";
+            llvm::errs() << "Failed to open " << diffPath << ".\n";
             return ;
         }
         std::string jsonStr((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());

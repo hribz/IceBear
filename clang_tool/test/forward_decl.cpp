@@ -16,11 +16,15 @@ struct S1 {
     char *ch;
     int *a;
 
-    S1(): a(nullptr) {
-    }
+    S1();
 };
 
+S1::S1(): a(nullptr) {}
+
 const S1 s1;
+
+// member can't redeclared out of class scope
+// int C2::foo(int *);
 
 int C2::foo(int *ptr = s1.a) {
     this->c1 = (C1 *)new C1;
@@ -30,6 +34,9 @@ int C2::foo(int *ptr = s1.a) {
     delete this->c1;
     return ret;
 }
+
+// redecleared in same/outer scope is valid
+// int main();
 
 int main() {
     C2 c2;

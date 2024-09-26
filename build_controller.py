@@ -11,7 +11,8 @@ import re
 import time
 
 from data_struct.reply import Reply
-from utils import *
+from utils import * 
+from compile_command import CompileCommand
 
 PWD = Path(".").absolute()
 EXTRACT_II = str(PWD / 'build/clang_tool/collectIncInfo')
@@ -73,6 +74,12 @@ else:
     if not MY_CLANG:
         print('please ensure there is clang++ in your environment')
         exit(1)
+DEFAULT_PANDA_COMMANDS = [
+    PANDA, 
+    '-j', '16', '--print-execution-time',
+    '--cc', MY_CLANG, 
+    '--cxx', MY_CLANG_PLUS_PLUS
+]
 
 class Option:
     def __init__(self, name: str, value: str):
@@ -153,6 +160,24 @@ class GlobalFunctionSummaries:
             ret += (']\n')
         return ret
 
+class FunctionsNeedToBeReanalyzed:
+    functions: set
+
+    def __init__(self, fs_file_list: List[str]):
+        self.functions = set()
+        for fs_file in fs_file_list:
+            if not os.path.exists(fs_file):
+                continue
+            with open(fs_file, 'r') as f:
+                for line in f.readlines():
+                    self.functions.add(line)
+
+    def __repr__(self) -> str:
+        ret = ""
+        for fname in self.functions:
+            ret += (f'{fname}\n')
+        return ret
+
 class Configuration:
     name: str
     options: List[Option]
@@ -166,16 +191,18 @@ class Configuration:
     reply_database: List[Reply]
     diff_file_and_lines: List[DiffResult]
     extract_ii: str = EXTRACT_II
-    status: str # {WAIT, SUCCESS, FAILED}
     incrementable: bool
     session_times: dict
+    file_list: List[str] # files in workspace
     global_function_summaries: GlobalFunctionSummaries
+    functions_need_to_be_reanalyzed: FunctionsNeedToBeReanalyzed
 
     def __init__(self, name, src_path, options: List[Option], opts, args=None, cmake_path=None, build_path=None):
         self.name = name
         self.analyze_opts = opts
         self.src_path = src_path
         self.update_build_path(build_path)
+        self.file_list = None
         if args:
             self.args = args
         else:
@@ -183,6 +210,8 @@ class Configuration:
         self.options = []
         self.options.append(Option('CMAKE_EXPORT_COMPILE_COMMANDS', '1'))
         self.options.append(Option('CMAKE_BUILD_TYPE', 'Release'))
+        # self.options.append(Option('CMAKE_C_COMPILER', MY_CLANG))
+        # self.options.append(Option('CMAKE_CXX_COMPILER', MY_CLANG_PLUS_PLUS))
         self.options.extend(options)
         if cmake_path:
             self.create_configure_script(cmake_path)
@@ -196,7 +225,7 @@ class Configuration:
         
     def create_configure_script(self, cmake_path):
         commands = [cmake_path]
-        commands.append('..')
+        commands.append(str(self.src_path))
         for option in self.options:
             commands.append(f"-D{option.name}={option.value}")
         if self.args:
@@ -205,7 +234,7 @@ class Configuration:
     
     def update_build_path(self, build_path=None):
         if build_path is None:
-            self.build_path = self.src_path / 'build'
+            self.build_path = self.src_path / 'build/build_0'
         else:
             tmp_path = Path(build_path)
             if tmp_path.is_absolute():
@@ -218,6 +247,8 @@ class Configuration:
         self.compile_database = self.build_path / 'compile_commands.json'
         self.workspace = self.build_path / 'workspace_for_cdb'
         self.preprocess_path = self.workspace / 'preprocess'
+        self.preprocess_compile_database = self.preprocess_path / 'preprocess_compile_commands.json'
+        self.preprocess_diff_files_path = self.preprocess_path / 'preprocess_diff_files.txt'
         self.edm_path = self.workspace / 'csa-ctu-scan'
         self.csa_path = self.workspace / 'csa-ctu-scan'
         self.inc_info_path = self.workspace / 'inc_info'
@@ -242,8 +273,7 @@ class Configuration:
             os.chdir(self.build_path)
             process = run(self.configure_script, shell=True, capture_output=True, text=True, check=True)
             logger.info(f"[Repo Config Success] {process.stdout}")
-            self.status = 'SUCCESS'
-            self.session_times['Configure'] = time.time() - start_time
+            self.session_times['configure'] = time.time() - start_time
             with open(self.build_path / 'options.json', 'w') as f:
                 tmp_json_data = {"options": []}
                 for option in self.options:
@@ -251,10 +281,22 @@ class Configuration:
                 json.dump(tmp_json_data, f, indent=4)
             # self.reply_database.append(Reply(self.reply_path, logger))
         except subprocess.CalledProcessError as e:
-            self.status = 'FAILED'
-            self.session_times['Configure'] = 'FAILED'
+            self.session_times['configure'] = SessionStatus.Failed
             logger.error(f"[Repo Config Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
 
+    def get_file_list(self):
+        if not os.path.exists(self.compile_database):
+            logger.error(f"[Get File List] can't get file list without file {self.compile_database}, make sure configure successfully")
+            return
+        if self.file_list is not None:
+            return
+        self.file_list  = []
+        with open(self.compile_database, 'r') as f:
+            files = json.load(f)
+            for file in files:
+                file_path = str(self.csa_path) + file['file']
+                self.file_list.append(file_path)
+    
     def extract_inc_info(self, inc:bool=True):
         '''
         use clang_tool/CollectIncInfo.cpp to generate information used by incremental analysis
@@ -270,36 +312,36 @@ class Configuration:
             plugin['action']['title'] = 'Extract Inc Info'
             plugin['action']['tool'] = self.extract_ii
             plugin['action']['args'] = ['-diff', str(self.diff_lines_path)]
-            plugin['action']['extname'] = ".cg"
-            plugin['action']['stream'] = 'stdout'
+            plugin['action']['extname'] = ""
+            plugin['action']['stream'] = ''
             json.dump(plugin, f, indent=4)
 
-        commands = [PANDA]
-        commands.extend(['-j', '16'])
+        commands = DEFAULT_PANDA_COMMANDS.copy()
         if self.analyze_opts.verbose:
-            commands.extend(['--print-execution-time', '--verbose'])
+            commands.extend(['--verbose'])
         commands.extend(['--plugin', str(plugin_path)])
-        commands.extend(['-f', str(self.compile_database)])
+        commands.extend(['-f', str(self.preprocess_compile_database)])
         commands.extend(['-o', str(self.inc_info_path)])
         if inc and self.incrementable:
-            commands.extend(['--file-list', f"{self.diff_files_path}"])
+            commands.extend(['--file-list', f"{self.preprocess_diff_files_path}"])
         
         extract_ii_script = ' '.join(commands)
-        logger.debug("[Extract CG Script] " + extract_ii_script)
+        logger.debug("[Extract Inc Info Script] " + extract_ii_script)
         try:
             process = run(extract_ii_script, shell=True, capture_output=True, text=True, check=True)
-            self.session_times['Extract CG'] = time.time() - start_time
-            logger.info(f"[Extract CG Success] {process.stdout} {process.stderr}")
+            self.session_times['extract_inc_info'] = time.time() - start_time
+            if self.incrementable and inc:
+                self.generate_functions_need_reanalyzed()
+            logger.info(f"[Extract Inc Info Success] {process.stdout} {process.stderr}")
         except subprocess.CalledProcessError as e:
-            self.session_times['Extract CG'] = 'FAILED'
-            logger.error(f"[Extract CG Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
+            self.session_times['extract_inc_info'] = SessionStatus.Failed
+            logger.error(f"[Extract Inc Info Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
 
     def generate_efm(self, inc:bool=True):
         start_time = time.time()
         remake_dir(self.edm_path, "[EDM Files DIR exists]")
-        commands = [PANDA]
+        commands = DEFAULT_PANDA_COMMANDS.copy()
         commands.append('-YM')
-        commands.extend(['-j', '16', '--print-execution-time'])
         commands.extend(['-f', str(self.compile_database)])
         commands.extend(['-o', str(self.edm_path)])
         if inc and self.incrementable:
@@ -310,22 +352,21 @@ class Configuration:
         logger.debug("[Generating EFM Files Script] " + edm_script)
         try:
             process = run(edm_script, shell=True, capture_output=True, text=True, check=True)
-            self.session_times['Generate EFM'] = time.time() - start_time
+            self.session_times['generate_efm'] = time.time() - start_time
             logger.info(f"[Generating EFM Files Success] {edm_script}")
             if self.analyze_opts.verbose:
                 logger.debug(f"[Panda EFM Info]\nstdout: \n{process.stdout}\n stderr: \n{process.stderr}")
         except subprocess.CalledProcessError as e:
-            # self.session_times['Generate EFM'] = 'FAILED'
+            # self.session_times['generate_efm'] = SessionStatus.Failed
             # TODO: 由于panda此处可能返回failed，待修复后再储存为FAILED
-            self.session_times['Generate EFM'] = time.time() - start_time
+            self.session_times['generate_efm'] = time.time() - start_time
             logger.error(f"[Generating EFM Files Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
 
     def execute_csa(self, inc:bool=True):
         start_time = time.time()
-        commands = [PANDA]
-        commands.extend(['-j', '16'])
+        commands = DEFAULT_PANDA_COMMANDS.copy()
         if self.analyze_opts.verbose:
-            commands.extend(['--print-execution-time', '--verbose'])
+            commands.extend(['--verbose'])
 
         if self.analyze_opts.fsum:
             args = ['--analyze', '-Xanalyzer', '-analyzer-output=html',
@@ -357,6 +398,7 @@ class Configuration:
                 json.dump(plugin, f, indent=4)
             commands.extend(['--plugin', str(plugin_path)])
         else:
+            # just use panda to execute CSA
             commands.append('--analyze')
             if self.analyze_opts.analyze == 'ctu':
                 commands.append('ctu')
@@ -365,8 +407,6 @@ class Configuration:
 
         commands.extend(['-f', str(self.compile_database)])
         commands.extend(['-o', str(self.csa_path)])
-        commands.extend(['--cc', MY_CLANG])
-        commands.extend(['--cxx', MY_CLANG_PLUS_PLUS])
         
         if inc and self.incrementable:
             commands.extend(['--file-list', f"{self.diff_files_path}"])
@@ -374,15 +414,15 @@ class Configuration:
         logger.debug("[Executing CSA Files Script] " + csa_script)
         try:
             process = run(csa_script, shell=True, capture_output=True, text=True, check=True)
-            self.session_times['Executing CSA'] = time.time() - start_time
+            self.session_times['execute_csa'] = time.time() - start_time
             logger.info(f"[Executing CSA Files Success] {csa_script}")
             self.generate_global_function_summaries()
             if self.analyze_opts.verbose:
                 logger.debug(f"[Panda Debug Info]\nstdout: \n{process.stdout}\n stderr: \n{process.stderr}")
         except subprocess.CalledProcessError as e:
-            # self.session_times['Generate CSA'] = 'FAILED'
+            # self.session_times['execute_csa'] = SessionStatus.Failed
             # TODO: 由于panda此处可能返回failed，待修复后再储存为FAILED
-            self.session_times['Executing CSA'] = time.time() - start_time
+            self.session_times['execute_csa'] = time.time() - start_time
             logger.error(f"[Executing CSA Files Failed]\nstdout: \n{e.stdout}\n stderr: \n{e.stderr}")
         
     def preprocess_repo(self):
@@ -396,27 +436,47 @@ class Configuration:
             plugin['action']['args'] = ['-E', "-P"] 
             plugin['action']['extname'] = ['.i', '.ii']
             json.dump(plugin, f, indent=4)
-        commands = [PANDA]
-        commands.extend(['-j', '16', '--print-execution-time'])
-        # commands.extend(['--cc', 'gcc', '--cxx', 'g++'])
+        commands = DEFAULT_PANDA_COMMANDS.copy()
         commands.extend(['--plugin', str(plugin_path)])
         commands.extend(['-f', str(self.compile_database)])
         commands.extend(['-o', str(self.preprocess_path)])
+        if self.analyze_opts.verbose:
+            commands.extend(['--verbose'])
         preprocess_script = ' '.join(commands)
         logger.debug("[Preprocess Files Script] " + preprocess_script)
         try:
             process = run(preprocess_script, shell=True, capture_output=True, text=True, check=True)
             self.status = 'PREPROCESSED'
-            self.session_times['Preprocess'] = time.time() - start_time
+            self.session_times['preprocess_repo'] = time.time() - start_time
+            with open(self.compile_database, 'r') as f:
+                json_file = json.load(f)
+                for file_command in json_file:
+                    compile_command = CompileCommand(file_command)
+                    if compile_command.language == 'c++':
+                        extname = '.ii'
+                    elif compile_command.language == 'c':
+                        extname = '.i'
+                    else:
+                        extname = ''
+                    file_command["file"] = str(self.preprocess_path) + compile_command.file + extname
+                    # preprocessed file does not need compile flags
+                    if file_command.get("command"):
+                        file_command["command"] = compile_command.compiler + " -x " + compile_command.language
+                    else:
+                        file_command["arguments"] = [compile_command.compiler, "-x" + compile_command.language]
+                pre_cdb = open(self.preprocess_compile_database, 'w')
+                json.dump(json_file, pre_cdb, indent=4)
+                pre_cdb.close()
             logger.info(f"[Preprocess Files Success] {preprocess_script}")
+            logger.debug(f"[Preprocess Files Success] stdout: {process.stdout}\n stderr: {process.stderr}")
         except subprocess.CalledProcessError as e:
-            self.session_times['Preprocess'] = 'FAILED'
+            self.session_times['preprocess_repo'] = SessionStatus.Failed
             logger.error(f"[Preprocess Files Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
     
     def diff_with_other(self, other):
         if self == other:
             logger.info(f"[Skip Diff] Repo {str(self.build_path)} is the same as {str(other.build_path)}")
-            self.session_times['Diff'] = 'skip'
+            self.session_times['diff_with_other'] = SessionStatus.Skipped
             return
         start_time = time.time()
         if not self.preprocess_path.exists():
@@ -431,17 +491,29 @@ class Configuration:
             with open(self.diff_files_path, 'w') as f:
                 for i in self.diff_file_and_lines:
                     f.write(self.get_origin_file_name(i.file, str(self.preprocess_path), ['.i', '.ii']) + '\n')
+            with open(self.preprocess_diff_files_path, 'w') as f:
+                for i in self.diff_file_and_lines:
+                    f.write(i.file + '\n')
             with open(self.diff_lines_path, 'w') as f:
                 diff_json = {}
                 for i in self.diff_file_and_lines:
-                    diff_json[i.file] = i.diff_lines
+                    if i.entire_file:
+                        diff_json[i.file] = 1
+                    else:
+                        diff_json[i.file] = i.diff_lines
                 json.dump(diff_json, f, indent=4)
             self.incrementable = True
-            self.session_times['Diff'] = time.time() - start_time
+            self.session_times['diff_with_other'] = time.time() - start_time
+        else:
+            self.session_times['diff_with_other'] = SessionStatus.Failed
 
     def diff_two_dir(self, my_dir: Path, other_dir: Path, other):
         commands = [DIFF_PATH]
         commands.extend(['-r', '-u0'])
+        # -d: Use the diff algorithm which may find smaller set of change
+        # -r: Recursively compare any subdirectories found.
+        # -x: Don't compare files or directories matching the given patterns.
+        commands.extend(['-d', '--exclude=*.json'])
         commands.extend([str(other_dir), str(my_dir)])
         diff_script = ' '.join(commands)
         logger.debug("[Diff Files Script] " + diff_script)
@@ -539,22 +611,30 @@ class Configuration:
                                 self.diff_file_and_lines.append(DiffResult(file, True))
 
     def generate_global_function_summaries(self):
-        file_list = []
-        with open(self.compile_database, 'r') as f:
-            files = json.load(f)
-            for file in files:
-                file_path = str(self.csa_path) + file['file'] + ".fs"
-                file_list.append(file_path)
+        start_time = time.time()
+        self.session_times['generate_global_function_summaries'] = SessionStatus.Failed
+        self.get_file_list()
+        assert (self.file_list is not None)
+        file_list = [(i + '.fs') for i in self.file_list]
         self.global_function_summaries = GlobalFunctionSummaries(file_list)
         with open(str(self.csa_path / "global_function_summaries.fs"), 'w') as f:
             f.write(self.global_function_summaries.__repr__())
+        self.session_times['generate_global_function_summaries'] = time.time() - start_time
+
+    def generate_functions_need_reanalyzed(self):
+        self.get_file_list()
+        assert (self.file_list is not None)
+        file_list = [(i + '.rf') for i in self.file_list]
+        self.functions_need_reanalyzed = FunctionsNeedToBeReanalyzed(file_list)
+        with open(str(self.inc_info_path / "functions_need_reanalyzed.rf"), 'w') as f:
+            f.write(self.functions_need_reanalyzed.__repr__())
 
     def get_session_times(self):
         ret = "{\n"
         for session in self.session_times.keys():
             exe_time = self.session_times[session]
-            if isinstance(exe_time, str):
-                ret += ("   %s: %s\n" % (session, exe_time))
+            if isinstance(exe_time, SessionStatus):
+                ret += ("   %s: %s\n" % (session, exe_time._name_))
             else:
                 ret += ("   %s: %.3lf sec\n" % (session, exe_time))
         ret += "}\n"
@@ -580,12 +660,14 @@ class Repository:
     default_config: Configuration
     configurations: List[Configuration]
     cmakeFile: Path
+    running_status: bool # whether the repository sessions should keep running
 
     def __init__(self, name, src_path, opts, options_list:List[List[Option]]=None, cmake_path=None):
         self.name = name
         self.analyze_opts = opts
         self.src_path = Path(src_path)
         self.cmakeFile = self.src_path / 'CMakeLists.txt'
+        self.running_status = True
         if not self.cmakeFile.exists():
             print(f'Please make sure there is CMakeLists.txt in {self.src_path}')
             exit(1)
@@ -596,7 +678,7 @@ class Repository:
         self.configurations = [self.default_config]
         if options_list:
             for idx, options in enumerate(options_list):
-                self.configurations.append(Configuration(self.name, self.src_path, options, build_path=f'build_{idx}', opts=self.analyze_opts))
+                self.configurations.append(Configuration(self.name, self.src_path, options, build_path=f'build/build_{idx + 1}', opts=self.analyze_opts))
 
     def process_all_session(self, inc:bool=True):
         self.build_every_config()
@@ -613,11 +695,17 @@ class Repository:
         return False
 
     def process_every_config(self, session, inc:bool=True, **kwargs):
+        if not self.running_status:
+            return
         for config in self.configurations:
             if self.is_incremental_session(session):
                 getattr(config, session.__name__)(inc, **kwargs)
             else:
                 getattr(config, session.__name__)(**kwargs)
+            if config.session_times[session.__name__] == SessionStatus.Failed:
+                print(f"Session {session.__name__} failed, stop all sessions.")
+                self.running_status = False
+                return
 
     def build_every_config(self):
         self.process_every_config(Configuration.configure)
@@ -667,18 +755,30 @@ def main():
         #     'options_list': [
         #     ]
         # },
+        # {
+        #     'name': 'xgboost', 
+        #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/xgboost', 
+        #     'options_list': [
+        #         [Option('GOOGLE_TEST', 'ON')]
+        #     ]
+        # },
+        # {
+        #     'name': 'opencv', 
+        #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/opencv', 
+        #     'options_list': [
+        #         [Option('WITH_CLP', 'ON')]
+        #     ]
+        # },
         {
-            'name': 'xgboost', 
-            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/xgboost', 
+            'name': 'ica-demo',
+            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/ica-demo',
             'options_list': [
-                [Option('GOOGLE_TEST', 'ON')]
-            ]
-        },
-        {
-            'name': 'opencv', 
-            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/opencv', 
-            'options_list': [
-                [Option('WITH_CLP', 'ON')]
+                [Option('CHANGE_ALL', 'ON')],
+                # [Option('GLOBAL_CONSTANT', 'ON')],
+                # [Option('VIRTUAL_FUNCTION', 'ON')],
+                # [Option('RECORD_FIELD', 'ON')],
+                # [Option('FEATURE_UPGRADE', 'ON')],
+                # [Option('COMMON_CHANGE', 'ON')],
             ]
         }
     ]
@@ -688,14 +788,14 @@ def main():
     for repo in repo_info:
         repo_db = Repository(repo['name'], repo['src_path'], options_list=repo['options_list'], opts=opts)
         repo_list.append(repo_db)
-        logger.info('-------------BEGIN SUMMARY-------------\n'+repo_db.session_summary())
-        # repo_db.build_every_config()
-        # repo_db.preprocess_every_config()
+        logger.info('-------------BEGIN SUMMARY-------------\n')
+        repo_db.build_every_config()
+        repo_db.preprocess_every_config()
         repo_db.diff_every_config()
-        # repo_db.extract_ii_every_config()
-        # repo_db.generate_efm_for_every_config()
-        # repo_db.execute_csa_for_every_config()
-        # repo_db.generate_global_fsum()
+        repo_db.extract_ii_every_config()
+        repo_db.generate_efm_for_every_config()
+        repo_db.execute_csa_for_every_config()
+        repo_db.generate_global_fsum()
 
     for repo_db in repo_list:
         logger.TAG = repo_db.name

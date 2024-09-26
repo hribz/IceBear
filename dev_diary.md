@@ -95,3 +95,13 @@
 # 2024/9/18
 ## 问题
 - 突然发现用panda执行`generate-efm`任务时非常缓慢，例如json项目原来只需要20s左右，现在需要500s。后来尝试给panda添加`--efmer /usr/bin/clang-17`参数，恢复正常。原因是之前使用了自己编译的`Debug`版本的llvm，所以运行时间非常长。
+
+# 2024/9/25
+## 问题 & 解决方案
+- 先用`compile_commands.json`中储存的编译选项生成预处理后文件`xx.cpp.ii`，再用`clang-tool`和同样的编译选项处理`xx.cpp.ii`时出现了大量报错：
+  - `unable to handle compilation, expected exactly one compiler job in ...`: 这个报错的原因是未指定文件语言类型，因为无法识别后缀为`.ii`的文件，解决方法是添加`-x c++`（或`-x c`）选项
+  - `error: constexpr function never produces a constant expression [-Winvalid-constexpr] floor(long double __x) { return __builtin_floorl(__x); }`: 该报错的原因推测是constexpr函数中调用了内置函数。这个报错似乎并不来自于生成AST的阶段，目前将这种报错忽略，因为似乎不影响`collectIncInfo`工具分析AST。但这可能是一个隐患，因为目前无法说明对预处理文件和原文件的AST进行分析是等价的。
+
+# 2024/9/26
+## 问题
+- 

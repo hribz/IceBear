@@ -1,0 +1,11 @@
+main() -> <41-47>
+    C2::C2(): <3-3>
+    S1::S1(): <22-22>
+    C2::foo(int *): <29-36>
+C2::foo(int *) -> <29-36>
+    operator new(unsigned long): <0-0>
+    C1::C1(): <10-10>
+operator new(unsigned long) -> <0-0>
+S1::S1() -> <22-22>
+C1::C1() -> <10-10>
+C2::C2() -> <3-3>

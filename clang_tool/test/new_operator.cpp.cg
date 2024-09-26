@@ -1,0 +1,5 @@
+main() -> <6-10>
+    operator new(unsigned long): <0-0>
+    C1::C1(): <1-1>
+operator new(unsigned long) -> <0-0>
+C1::C1() -> <1-1>

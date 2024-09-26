@@ -1,0 +1,5 @@
+main()
+C1::C1()
+C1::foo()
+Base::Base()
+Base::foo()

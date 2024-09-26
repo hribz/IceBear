@@ -18,10 +18,12 @@ public:
 int main() {
     C1 c1;
     Base *b1 = &c1;
+    // CallGraph: main -> Base::foo
+    //    CSA:    main -> C1::foo()
     int div = b1->foo();
     // 1 / div;
     // div = Base().foo();
     // div = C1().foo();
-    1 / div;
+    div = 1 / div;
     return 0;
 }
