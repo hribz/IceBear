@@ -294,7 +294,7 @@
  </array>
  <key>files</key>
  <array>
-  <string>global_variable.cpp</string>
+  <string>/home/xiaoyu/cmake-analyzer/IncAnalyzer/clang_tool/test/global_variable.cpp</string>
  </array>
 </dict>
 </plist>

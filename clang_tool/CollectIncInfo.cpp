@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <iostream>
 #include <fstream>
+#include <iterator>
 #include <llvm-17/llvm/ADT/StringRef.h>
 #include <llvm-17/llvm/Support/Error.h>
 #include <llvm-17/llvm/Support/JSON.h>
@@ -54,16 +55,20 @@ static bool isChangedLine(const std::optional<std::vector<std::pair<int, int>>>&
                             [](const std::pair<int, int> &a, const std::pair<int, int> &b) {
                                 return a.first < b.first;
                             });
-    auto it_begin = it->first;
-    auto it_end = it->first + it->second - 1;
-    // it->second 是变化的行数，但是 it->second == 0 并不意味着没有发生变化，而是 it->first 行之后发生了删除
-    // 这种情况可以视为 [it->first+1, 1]
-    if (!it->second) {
-        it_begin = it_end = it->first + 1;
-    }
+    auto it_begin_and_end = [] (__gnu_cxx::__normal_iterator<const std::pair<int, int> *, std::vector<std::pair<int, int>>> it) {
+        auto it_begin = it->first;
+        auto it_end = it->first + it->second - 1;
+        // it->second 是变化的行数，但是 it->second == 0 并不意味着没有发生变化，而是 it->first 行之后发生了删除
+        // 这种情况可以视为 [it->first+1, 1]
+        if (!it->second) {
+            it_begin = it_end = it->first + 1;
+        }
+        return std::make_pair(it_begin, it_end);
+    };
     // 检查前一个范围（如果存在）是否覆盖了给定的行号
     if (it != DiffLines->begin()) {
         --it;  // 找到最后一个不大于 line 的区间
+        auto [it_begin, it_end] = it_begin_and_end(it);
         if (line <= it_end) {
             return true;  // 如果 line 在这个区间内，返回 true
         }
@@ -71,10 +76,10 @@ static bool isChangedLine(const std::optional<std::vector<std::pair<int, int>>>&
     }
 
     while (it != DiffLines->end()) {
+        auto [it_begin, it_end] = it_begin_and_end(it);
         if (it_begin > end_line) {
             break;  // 当前区间的起始行号大于 EndLine，说明之后都不会有交集
         }
-
         // 检查是否存在交集
         if (it_begin<= end_line && it_end >= line) {
             return true;  // 存在交集
@@ -219,8 +224,11 @@ private:
 
 class IncInfoCollectASTVisitor : public RecursiveASTVisitor<IncInfoCollectASTVisitor> {
 public:
-    explicit IncInfoCollectASTVisitor(ASTContext *Context, const std::optional<std::vector<std::pair<int, int>>>& DiffLines, CallGraph &CG)
-        : Context(Context), DiffLines(DiffLines), CG(CG) {}
+    explicit IncInfoCollectASTVisitor(
+        ASTContext *Context, 
+        const std::optional<std::vector<std::pair<int, int>>>& DiffLines, 
+        CallGraph &CG, std::unordered_set<const Decl *> &FuncsNeedRA)
+        : Context(Context), DiffLines(DiffLines), CG(CG), FunctionsNeedReanalyze(FuncsNeedRA) {}
     
     bool isGlobalConstant(const Decl *D) {
         D = D->getCanonicalDecl();
@@ -349,7 +357,7 @@ public:
     ASTContext *Context;
     std::unordered_set<const Decl *> GlobalConstantSet;
     std::unordered_set<const Decl *> TaintDecls; // Decls have changed, the function/method use these should reanalyze
-    std::unordered_set<const Decl *> FunctionsNeedReanalyze;
+    std::unordered_set<const Decl *> &FunctionsNeedReanalyze;
     const std::optional<std::vector<std::pair<int, int>>>& DiffLines;
     CallGraph &CG;
     DeclRefFinder DRFinder;
@@ -431,7 +439,7 @@ private:
 class IncInfoCollectConsumer : public clang::ASTConsumer {
 public:
     explicit IncInfoCollectConsumer(ASTContext *Context, const std::string &outputPath, const std::optional<llvm::json::Object> GlobalDiffLines)
-    : CG(), OutputPath(outputPath), DiffLines(std::vector<std::pair<int, int>>()), IncVisitor(Context, DiffLines, CG) {
+    : CG(), OutputPath(outputPath), DiffLines(std::vector<std::pair<int, int>>()), IncVisitor(Context, DiffLines, CG, FunctionsNeedReanalyze) {
         const SourceManager &SM = Context->getSourceManager();
         FileID MainFileID = SM.getMainFileID();
         const FileEntry *FE = SM.getFileEntryForID(MainFileID);
@@ -493,13 +501,13 @@ public:
             }
         }
         DumpCallGraph(CG, MainFilePath, CGToRange);
-        DumpFunctionsNeedReanalyze(FunctionsNeedReanalyze, CGToRange, MainFilePath);
         IncVisitor.TraverseDecl(Context.getTranslationUnitDecl());
         IncVisitor.DumpGlobalConstantSet();
         // process Global Constant
         for (auto D: IncVisitor.GlobalConstantSet) {
 
         }
+        DumpFunctionsNeedReanalyze(FunctionsNeedReanalyze, CGToRange, MainFilePath);
     }
 
 private:

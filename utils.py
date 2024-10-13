@@ -15,3 +15,11 @@ class SessionStatus(Enum):
     Skipped = auto()
     Success = auto()
     Failed = auto()
+
+class FileKind(Enum):
+    Preprocessed = auto()
+    AST = auto()
+    EFM = auto()
+    CG = auto()
+    RF = auto()
+    FS = auto()
