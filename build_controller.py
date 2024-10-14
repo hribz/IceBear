@@ -123,19 +123,92 @@ class DiffResult:
             ret += f"@@ -{self.origin_diff_lines[idx][0]},{self.origin_diff_lines[idx][1]} +{line[0]},{line[1]} @@\n"
         return ret
 
+class CallGraphNode:
+    # Maybe we could ignore callees, just care about caller relationship.
+    fname: str   # Function name
+    callees: List # GraphNode list contains callees
+    callers: List # GraphNode list contains callers
+    inline_callers: set # Callers which had inline this function during CSA analysis
+    is_entry: bool
+    should_reanalyze: bool
+
+    def __init__(self, fname):
+        self.fname = fname
+        self.callees = []
+        self.callers = []
+        self.inline_callers = set()
+        self.is_entry = True
+        self.should_reanalyze = True
+        
+    def add_callee(self, callee):
+        assert isinstance(callee, CallGraphNode)
+        self.callees.append(callee)
+    
+    def add_caller(self, caller):
+        assert isinstance(caller, CallGraphNode)
+        self.callers.append(caller)
+
+    def add_inline_caller(self, caller_name: str):
+        self.inline_callers.add(caller_name)
+
+    def is_in_callers(self, fname):
+        for caller in self.callers:
+            if caller.fname == fname:
+                return True
+        return False
+
+class CallGraph:
+    root: CallGraphNode
+    fname_to_cg: Dict[str, CallGraphNode]
+    is_baseline: bool
+    functions_need_reanalyzed: set
+
+    def __init__(self, is_baseline = False):
+        self.root = CallGraphNode('')
+        self.fname_to_cg = {}
+        self.is_baseline = is_baseline
+        self.functions_need_reanalyzed = set()
+
+    def get_node_if_exist(self, fname:str):
+        if fname in self.fname_to_cg:
+            return self.fname_to_cg[fname]
+        return None
+
+    def get_or_insert_node(self, fname: str):
+        if fname not in self.fname_to_cg:
+            self.fname_to_cg[fname] = CallGraphNode(fname)
+        return self.fname_to_cg.get(fname)
+
+    def add_node(self, caller, callee):
+        caller_node = self.get_or_insert_node(caller)
+        callee_node = self.get_or_insert_node(callee)
+        caller_node.add_callee(callee_node)
+        callee_node.add_caller(caller_node)
+
+    def add_fs_node(self, caller, callee):
+        # precondition: callee is in fname_to_cg
+        callee_node = self.fname_to_cg[callee]
+        callee_node.add_inline_caller(caller)
+
+    def mark_as_reanalye(self, node: CallGraphNode):
+        node.should_reanalyze = True
+        self.functions_need_reanalyzed.add(node.fname)
 
 class FileInCDB:
     parent = None # the Configuration instance
     file_name: str
     csa_file: str
     prep_file: str
-    functions_need_reanalyzed: set
+    functions_need_reanalyzed_from_rf: set
     diff_info: DiffResult
+    call_graph: CallGraph
 
     def __init__(self, parent, file_name: str, extname: str = None):
         self.parent = parent
         self.file_name = file_name
         self.csa_file = str(parent.csa_path) + self.file_name
+        self.functions_need_reanalyzed_from_rf = None
+        self.call_graph = None
         if extname:
             self.prep_file = str(parent.preprocess_path) + self.file_name + extname
     
@@ -152,6 +225,121 @@ class FileInCDB:
             return (self.prep_file) + '.rf'
         elif kind == FileKind.FS:
             return (self.csa_file) + '.fs'
+        else:
+            logger.error(f"[Get File Path] Unknown file kind {kind}")
+
+    def parse_cg_file(self):
+        # .cg file format: 
+        # caller
+        # [
+        # callees
+        # ]
+        cg_file = self.get_file_path(FileKind.CG)
+        if not os.path.exists(cg_file):
+            return
+        self.call_graph = CallGraph()
+        with open(cg_file, 'r') as f:
+            caller, callee = None, None
+            is_caller = True
+            for line in f.readlines():
+                line = line.strip()
+                if line.startswith('['):
+                    is_caller = False
+                elif line.startswith(']'):
+                    is_caller = True
+                else:
+                    if is_caller:
+                        caller = line
+                    else:
+                        callee = line
+                        self.call_graph.add_node(caller, callee)
+
+    def parse_rf_file(self):
+        rf_file = self.get_file_path(FileKind.RF)
+        if not os.path.exists(rf_file):
+            return
+        self.functions_need_reanalyzed_from_rf = set()
+        with open(rf_file, 'r') as f:
+            for line in f.readlines():
+                line = line.strip()
+                self.functions_need_reanalyzed_from_rf.add(line)
+    
+    def parse_fs_file(self):
+        # .fs file format
+        # callee
+        # [
+        # callers
+        # ]
+        fs_file = self.get_file_path(FileKind.FS)
+        if not os.path.exists(fs_file):
+            return
+        with open(fs_file, 'r') as f:
+            caller, callee = None, None
+            is_caller = False
+            for line in f.readlines():
+                line = line.strip()
+                if line.startswith('['):
+                    is_caller = True
+                elif line.startswith(']'):
+                    is_caller = False
+                else:
+                    if is_caller:
+                        caller = line
+                        self.call_graph.add_fs_node(caller, callee)
+                    else:
+                        callee = line
+
+    def propagate_reanalyze_attribute(self):
+        # Without function summary information, we have to mark all caller as reanalyzed.
+        # And the terminative rule is cannot find caller anymore, or caller has been mark as reanalyzed.
+        for fname in self.functions_need_reanalyzed_from_rf:
+            # Propagate to all callers
+            node_in_current_cg = self.call_graph.get_node_if_exist(fname)
+            if not node_in_current_cg:
+                logger.error(f"[Propagate Func Reanalyze] Can not found {fname} in call graph")
+                continue
+            worklist = [node_in_current_cg]
+            while len(worklist) is not 0:
+                node = worklist.pop()
+                if node.should_reanalyze:
+                    continue
+                self.call_graph.mark_as_reanalye(node)
+                for caller in node.callers:
+                    worklist.append(caller)
+
+    def propagate_reanalyze_attribute(self, baseline_cg_with_fs: CallGraph):
+        # Make sure function_need_reanalyzed_from_rf sorted by reverse post order.
+        # This means there are two more terminative rules when node is in baseline call graph:
+        # 1. Caller is in baseline call graph, we just need to traverse upward it when it is 
+        #    in inline_callers.
+        # 2. Caller is not in baseline call graph, which means it is a new function. Because we 
+        #    traverse `fname` by reverse post order, this kind of callers have been processed before,
+        #    it's ok to terminate at these callers.
+        for fname in self.functions_need_reanalyzed_from_rf:
+            node_in_current_cg = self.call_graph.get_node_if_exist(fname)
+            if not node_in_current_cg:
+                logger.error(f"[Propagate Func Reanalyze] Can not found {fname} in call graph")
+                continue
+            worklist = [node_in_current_cg]
+            while len(worklist) is not 0:
+                node = worklist.pop()
+                if node.should_reanalyze:
+                    continue
+                self.call_graph.mark_as_reanalye(node)
+                node_in_baseline_cg = baseline_cg_with_fs.get_node_if_exist(node.fname)
+                if node_in_baseline_cg:
+                    for caller in node.callers:
+                        caller: CallGraphNode
+                        if node_in_baseline_cg.is_in_callers(caller.fname):
+                            if caller.fname in node_in_baseline_cg.inline_callers:
+                                worklist.append(caller)
+                        # If caller isn't node_in_baseline_cg's caller, it must be mark as reanalyze before.
+                else:
+                    # New function node, don't need to consider its inline information.
+                    for caller in node.callers:
+                        worklist.append(caller)
+
+
 
 class GlobalFunctionSummaries:
     fs: Dict[str, set]
@@ -193,22 +381,24 @@ class GlobalFunctionSummaries:
         return ret
 
 class FunctionsNeedToBeReanalyzed:
-    functions: set
+    files: List[FileInCDB] # Files that have functions to reanalyze
 
     def __init__(self, file_list: List[FileInCDB]):
-        self.functions = set()
+        self.files = []
         for file in file_list:
             rf_file = file.get_file_path(FileKind.RF)
             if not os.path.exists(rf_file):
                 continue
+            self.files.append(file)
             with open(rf_file, 'r') as f:
                 for line in f.readlines():
-                    self.functions.add(line)
+                    file.functions_need_reanalyzed.add(line)
 
     def __repr__(self) -> str:
         ret = ""
-        for fname in self.functions:
-            ret += (f'{fname}\n')
+        for file in self.files:
+            for fname in file.functions_need_reanalyzed:
+                ret += (f'{fname}')
         return ret
 
 def getExtDefMap(efmfile): return open(efmfile).read()
@@ -320,7 +510,9 @@ class Configuration:
     
     def get_file(self, file_path: str) -> FileInCDB:
         idx = self.file_list_index.get(file_path, None)
-        assert (idx)
+        if not idx:
+            logger.error(f"[Get File] {file_path} not exists")
+            return None
         return self.file_list[idx]
 
     def get_file_path(self, kind: FileKind, file_path: str) -> str:
@@ -392,9 +584,9 @@ class Configuration:
                     file_command["file"] = str(self.preprocess_path) + compile_command.file + extname
                     # preprocessed file does not need compile flags
                     if file_command.get("command"):
-                        file_command["command"] += (" -x " + compile_command.language)
+                        file_command["command"] = (compile_command.compiler + " -x " + compile_command.language)
                     else:
-                        file_command["arguments"].extend(["-x", compile_command.language])
+                        file_command["arguments"] = ([compile_command.compiler, "-x", compile_command.language])
                 pre_cdb = open(self.preprocess_compile_database, 'w')
                 json.dump(json_file, pre_cdb, indent=4)
                 pre_cdb.close()
@@ -483,25 +675,35 @@ class Configuration:
                 output = os.path.join(str(self.csa_path), 'externalDefMap.txt')
                 print('Generating global external function map: ' + output)
                 efm = {}
+                def parse_efm(efmline: str):
+                    efmline = efmline.strip()
+                    if not efmline:
+                        return None, None
+                    try: # The new "<usr-length>:<usr> <path>" format (D102669).
+                        lenlen = efmline.find(':')
+                        usrlen = int(efmline[:lenlen])
+                        usr = efmline[:lenlen + usrlen + 1]
+                        path = efmline[lenlen + usrlen + 2:]
+                        return usr, path
+                    except ValueError: # When <usr-length> is not available.
+                        efmitem = efmline.split(' ')
+                        if len(efmitem) == 2:
+                            return efmitem[0], \
+                                self.get_file(self.get_origin_file_name(efmitem[1], self.csa_path, [".ast"])).get_file_path(FileKind.AST)
+                        logger.error(f"[Parse EFM] efmline {efmline} format error.")
+                        return None, None
                 # copy origin efm
                 if origin_edm:
                     with open(origin_edm, 'r') as f:
                         for line in f.readlines():
-                            usr, path = line.split(' ')
-                            efm[usr] = path.split('\n')[0]
+                            usr, path = parse_efm(line)
+                            if usr and path:
+                                efm[usr] = path
                 with mp.Pool(opts.jobs) as p:
                     for efmcontent in p.map(getExtDefMap, [i.get_file_path(FileKind.EFM) for i in file_list]):
                         for efmline in efmcontent.split('\n'):
-                            try: # The new "<usr-length>:<usr> <path>" format (D102669).
-                                lenlen = efmline.find(':')
-                                usrlen = int(efmline[:lenlen])
-                                usr = efmline[:lenlen + usrlen + 1]
-                                path = efmline[lenlen + usrlen + 2:]
-                                efm[usr] = self.get_file_path(FileKind.AST, path)
-                            except ValueError: # When <usr-length> is not available.
-                                efmitem = efmline.split(' ')
-                                if len(efmitem) == 2:
-                                    efm[efmitem[0]] = self.get_file_path(FileKind.AST, efmitem[1])
+                            usr, path = parse_efm(efmline)
+                            efm[usr] = path
                 with open(output, 'w') as fout:
                     for usr in efm:
                         fout.write('%s %s\n' % (usr, efm[usr]))
@@ -540,7 +742,8 @@ class Configuration:
                 plugin['action']['title'] = 'Execute CSA'
                 plugin['action']['args'] = args
                 plugin['action']['extname'] = '.fs'
-                # incompatiable with panda, because panda consider this as one parameter
+                # Incompatiable with panda, because panda consider this as one parameter.
+                # So we need to revise panda to support two parameters.
                 plugin['action']['outopt'] = ['-Xanalyzer', '-analyzer-dump-fsum=']
                 json.dump(plugin, f, indent=4)
             commands.extend(['--plugin', str(plugin_path)])
@@ -650,6 +853,8 @@ class Configuration:
         for line in (diff_out).split('\n'):
             line: str
             if line.startswith('@@'):
+                if not file_in_cdb:
+                    continue
                 match = diff_line_pattern.match(line)
                 if match:
                     # diff lines range [my_start, my_start + my_count)
@@ -657,21 +862,23 @@ class Configuration:
                     origin_count = int(match.group(2)) if match.group(2) else 1
                     start = int(match.group(3))
                     count = int(match.group(4)) if match.group(4) else 1
-                    self.diff_file_list[-1].diff_info.add_diff_line(start, count)
-                    self.diff_file_list[-1].diff_info.add_origin_diff_line(origin_start, origin_count)
+                    file_in_cdb.diff_info.add_diff_line(start, count)
+                    file_in_cdb.diff_info.add_origin_diff_line(origin_start, origin_count)
             elif line.startswith('---'):
+                file_in_cdb = None
                 spilt_line = line.split()
                 origin_file = spilt_line[1]
             elif line.startswith('+++'):
                 spilt_line = line.split()
                 file = spilt_line[1]
-                file = self.get_origin_file_name(file, str(self.preprocess_path), ['.i', '.ii'])
-                file_in_cdb = self.get_file(file)
-                self.diff_file_list.append(file_in_cdb)
-                file_in_cdb.diff_info = DiffResult(file_in_cdb.prep_file)
-                file_in_cdb.diff_info.origin_file = origin_file
+                file_in_cdb = self.get_file(self.get_origin_file_name(file, str(self.preprocess_path), ['.i', '.ii']))
+                if file_in_cdb:
+                    self.diff_file_list.append(file_in_cdb)
+                    file_in_cdb.diff_info = DiffResult(file_in_cdb.prep_file)
+                    file_in_cdb.diff_info.origin_file = origin_file
             elif line.startswith("Only in"):
                 spilt_line = line.split()
+                file_in_cdb = None
                 diff = Path(spilt_line[2][:-1]) / spilt_line[3]
                 logger.debug(f"[Parse Diff Result Only in] {diff}")
                 try:
@@ -685,9 +892,10 @@ class Configuration:
                     if is_my_file_or_dir:
                         # only record new file in my build directory
                         # diff = self.get_origin_file_name(str(diff), str(self.preprocess_path), ['.i', '.ii'])
-                        file_in_cdb = self.get_file(str(diff))
-                        file_in_cdb.diff_info = DiffResult(str(diff), True)
-                        self.diff_file_list.append(file_in_cdb)
+                        file_in_cdb = self.get_file(self.get_origin_file_name(str(diff), str(self.preprocess_path), ['.i', '.ii']))
+                        if file_in_cdb:
+                            file_in_cdb.diff_info = DiffResult(str(diff), True)
+                            self.diff_file_list.append(file_in_cdb)
                 else:
                     # is directory
                     if is_my_file_or_dir:
@@ -715,10 +923,11 @@ class Configuration:
                         for diff_file in diff.rglob("*"):
                             if diff_file.is_file():
                                 file = str(diff_file)
-                                # file = self.get_origin_file_name(str(diff_file), str(self.preprocess_path), ['.i', '.ii'])
+                                file = self.get_origin_file_name(str(diff_file), str(self.preprocess_path), ['.i', '.ii'])
                                 file_in_cdb = self.get_file(file)
-                                file_in_cdb.diff_info = DiffResult(file, True)
-                                self.diff_file_list.append(file_in_cdb)
+                                if file_in_cdb:
+                                    file_in_cdb.diff_info = DiffResult(file, True)
+                                    self.diff_file_list.append(file_in_cdb)
 
     def generate_global_function_summaries(self):
         start_time = time.time()
@@ -730,10 +939,12 @@ class Configuration:
         self.session_times['generate_global_function_summaries'] = time.time() - start_time
 
     def generate_functions_need_reanalyzed(self):
-        assert (self.file_list is not None)
+        start_time = time.time()
+        self.session_times['generate_functions_need_reanalyzed'] = SessionStatus.Failed
         self.functions_need_reanalyzed = FunctionsNeedToBeReanalyzed(self.file_list)
         with open(str(self.inc_info_path / "functions_need_reanalyzed.rf"), 'w') as f:
             f.write(self.functions_need_reanalyzed.__repr__())
+        self.session_times['generate_functions_need_reanalyzed'] = time.time() - start_time
 
     def get_session_times(self):
         ret = "{\n"
@@ -907,8 +1118,8 @@ def main():
         repo_db = Repository(repo['name'], repo['src_path'], options_list=repo['options_list'], opts=opts)
         repo_list.append(repo_db)
         logger.info('-------------BEGIN SUMMARY-------------\n')
-        repo_db.build_every_config()
-        repo_db.preprocess_every_config()
+        # repo_db.build_every_config()
+        # repo_db.preprocess_every_config()
         repo_db.diff_every_config()
         repo_db.extract_ii_every_config()
         repo_db.generate_efm_for_every_config()

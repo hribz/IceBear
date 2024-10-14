@@ -102,6 +102,13 @@
   - `unable to handle compilation, expected exactly one compiler job in ...`: 这个报错的原因是未指定文件语言类型，因为无法识别后缀为`.ii`的文件，解决方法是添加`-x c++`（或`-x c`）选项
   - `error: constexpr function never produces a constant expression [-Winvalid-constexpr] floor(long double __x) { return __builtin_floorl(__x); }`: 该报错的原因推测是constexpr函数中调用了内置函数。这个报错似乎并不来自于生成AST的阶段，目前将这种报错忽略，因为似乎不影响`collectIncInfo`工具分析AST。但这可能是一个隐患，因为目前无法说明对预处理文件和原文件的AST进行分析是等价的。
 
-# 2024/9/26
+# 2024/10/13
 ## 问题
-- 
+- CSA 只关心 Top Level Decl, 为了避免分析到 PCH 文件导入的 Decl ，但是目前的策略是比对预处理后的文件，无法过滤掉来自 PCH 的 Decl 信息。
+
+## 解决方案
+- 是否可以在 AST 上添加一个 pass，在 collectIncInfo 之后，遍历预处理前文件，过滤`functions_need_to_be_reanalyzed`中不属于 Top Level Decl 的函数/方法。
+
+# 2024/10/14
+## 已完成功能
+- 分别实现了不考虑、考虑`fsum`下的重分析函数确定算法

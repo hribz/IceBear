@@ -4,3 +4,9 @@ logs
 __pycache__
 *.dot
 *.png
+*.plist
+*.ii
+*.cg
+*.rf
+*.fs
+test.py

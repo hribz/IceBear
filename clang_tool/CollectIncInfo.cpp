@@ -42,6 +42,7 @@
 using namespace clang;
 using namespace clang::tooling;
 using namespace clang::ast_matchers;
+using SetOfConstDecls = llvm::DenseSet<const Decl *>;
 
 static bool isChangedLine(const std::optional<std::vector<std::pair<int, int>>>& DiffLines, unsigned int line, unsigned int end_line) {
     if (!DiffLines) {
@@ -105,12 +106,14 @@ static void DumpCallGraph(CallGraph &CG, llvm::StringRef MainFilePath,
     for (CallGraphNode *N : RPOT) {
         if (N == CG.getRoot()) continue;
         Decl *D = N->getDecl();
-        outFile << AnalysisDeclContext::getFunctionName(D) << " -> " 
-            << "<" << CGToRange[D].first << "-" << CGToRange[D].second << ">" << "\n";
+        outFile << AnalysisDeclContext::getFunctionName(D) << "\n[\n";
+        SetOfConstDecls CalleeSet;
         for (CallGraphNode::CallRecord &CR : N->callees()) {
             Decl *Callee = CR.Callee->getDecl();
-            outFile << "    " << AnalysisDeclContext::getFunctionName(Callee) 
-                << ": " << "<" << CGToRange[Callee].first << "-" << CGToRange[Callee].second << ">" << "\n";
+            if (CalleeSet.contains(Callee))
+                continue;
+            CalleeSet.insert(Callee);
+            outFile << AnalysisDeclContext::getFunctionName(Callee) << "\n]\n";
         }
     }
 }
@@ -279,6 +282,7 @@ public:
                 // no need to traverse this decl node and its children
                 // return false;
             }
+            return false;
         }
         
         if (isa<RecordDecl>(D)) {
@@ -302,6 +306,10 @@ public:
     }
 
     bool TraverseDecl(Decl *D) {
+        if (FunctionsNeedReanalyze.count(D)) {
+            // If this `Decl` has been confirmed need to be reanalyzed, we don't need to traverse it.
+            return false;
+        }
         bool Result = clang::RecursiveASTVisitor<IncInfoCollectASTVisitor>::TraverseDecl(D);
         if (!inFunctionOrMethodStack.empty() && inFunctionOrMethodStack.back() == D) {
             inFunctionOrMethodStack.pop_back(); // exit function/method
@@ -503,10 +511,6 @@ public:
         DumpCallGraph(CG, MainFilePath, CGToRange);
         IncVisitor.TraverseDecl(Context.getTranslationUnitDecl());
         IncVisitor.DumpGlobalConstantSet();
-        // process Global Constant
-        for (auto D: IncVisitor.GlobalConstantSet) {
-
-        }
         DumpFunctionsNeedReanalyze(FunctionsNeedReanalyze, CGToRange, MainFilePath);
     }
 
