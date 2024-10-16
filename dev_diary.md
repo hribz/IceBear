@@ -112,3 +112,20 @@
 # 2024/10/14
 ## 已完成功能
 - 分别实现了不考虑、考虑`fsum`下的重分析函数确定算法
+
+# 2024/10/15
+## 问题
+- 从预处理后文件收集增量信息时，输出的CallGraph和FunctionReanalyze的函数名称可能包含文件位置信息(如clang_tool/test/function_obj.cpp)。这种信息会由于预处理而发生变化，尤其是行号。不管是`AnalysisDeclContext::getFunctionName`还是`USR`都可能会用到位置信息。这就导致函数名称与CSA的Fcuntion Summaries不匹配，因为不可能让CSA也去分析预处理后的文件，这样会使得报告无法查看。
+
+## 解决方案
+- 1. 从预处理前文件中收集增量信息：对预处理前文件做diff，这样就需要考虑预处理指令，使得在AST上分析diff信息变得十分复杂。
+- 2. 自行实现一个`getFunctionName`函数：`AnalysisDeclContext::getFunctionName`的实现并不复杂，或许可以自行实现一个不使用loc信息的版本。
+- 3. 在生成CallGraph和FunctionReanalyze时，忽略掉包含loc信息的节点：假如包含loc信息的节点确实发生了变化，这不是一个解决方案。
+
+# 2024/10/16
+## 问题
+- 继续研究了带有loc信息的FunctionName的来源，发现主要来自于lambda函数自动生成的构造函数，或者是匿名的union, struct, class自动生成的构造函数。
+
+## 解决方案
+- 重写`getFunctionName`函数，过滤掉可能的loc信息。虽然这会导致不同函数有相同的函数名，但是CSA的`-analyze-function`本身就有这个问题，并且这种带loc信息的函数在项目中可能并没有那么多。
+- 已知可以通过调整`ASTContext.PrintingPolicy`的`AnonymousTagLocations`字段为`false`来屏蔽掉部分函数名中的location信息，例如匿名struct/union，但是无法屏蔽掉参数类型的location信息。

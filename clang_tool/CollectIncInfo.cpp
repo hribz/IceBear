@@ -44,6 +44,67 @@ using namespace clang::tooling;
 using namespace clang::ast_matchers;
 using SetOfConstDecls = llvm::DenseSet<const Decl *>;
 
+/// Don't use AnalysisDeclContext::getFunctionName because it contain loc info.
+/// We need to make sure the function name is same before and after preprocess.
+std::string getFunctionName(const Decl *D) {
+  std::string Str;
+  llvm::raw_string_ostream OS(Str);
+  const ASTContext &Ctx = D->getASTContext();
+
+  if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
+    OS << FD->getQualifiedNameAsString();
+
+    // In C++, there are overloads.
+
+    if (Ctx.getLangOpts().CPlusPlus) {
+      OS << '(';
+      for (const auto &P : FD->parameters()) {
+        if (P != *FD->param_begin())
+          OS << ", ";
+        // `P->getIdentifier()` can't determine if this param's type has name.
+        // It just means this param doesn't have specific identifier (e.g. f(int )). 
+        auto PType = P->getType();
+        auto RD = dyn_cast<RecordDecl>(P);
+        
+        OS << P->getType();
+      }
+      OS << ')';
+    }
+
+  } else if (isa<BlockDecl>(D)) {
+    // Only in Objective C
+    PresumedLoc Loc = Ctx.getSourceManager().getPresumedLoc(D->getLocation());
+
+    if (Loc.isValid()) {
+      OS << "block (line: " << Loc.getLine() << ", col: " << Loc.getColumn()
+         << ')';
+    }
+
+  } else if (const ObjCMethodDecl *OMD = dyn_cast<ObjCMethodDecl>(D)) {
+
+    // FIXME: copy-pasted from CGDebugInfo.cpp.
+    OS << (OMD->isInstanceMethod() ? '-' : '+') << '[';
+    const DeclContext *DC = OMD->getDeclContext();
+    if (const auto *OID = dyn_cast<ObjCImplementationDecl>(DC)) {
+      OS << OID->getName();
+    } else if (const auto *OID = dyn_cast<ObjCInterfaceDecl>(DC)) {
+      OS << OID->getName();
+    } else if (const auto *OC = dyn_cast<ObjCCategoryDecl>(DC)) {
+      if (OC->IsClassExtension()) {
+        OS << OC->getClassInterface()->getName();
+      } else {
+        OS << OC->getIdentifier()->getNameStart() << '('
+           << OC->getIdentifier()->getNameStart() << ')';
+      }
+    } else if (const auto *OCD = dyn_cast<ObjCCategoryImplDecl>(DC)) {
+      OS << OCD->getClassInterface()->getName() << '(' << OCD->getName() << ')';
+    }
+    OS << ' ' << OMD->getSelector().getAsString() << ']';
+  }
+
+  return Str;
+}
+
 static bool isChangedLine(const std::optional<std::vector<std::pair<int, int>>>& DiffLines, unsigned int line, unsigned int end_line) {
     if (!DiffLines) {
         return true;
@@ -106,15 +167,25 @@ static void DumpCallGraph(CallGraph &CG, llvm::StringRef MainFilePath,
     for (CallGraphNode *N : RPOT) {
         if (N == CG.getRoot()) continue;
         Decl *D = N->getDecl();
-        outFile << AnalysisDeclContext::getFunctionName(D) << "\n[\n";
+        outFile << getFunctionName(D) << " -> " <<
+            CGToRange[D].first << ", " << CGToRange[D].second << "\n[\n";
         SetOfConstDecls CalleeSet;
         for (CallGraphNode::CallRecord &CR : N->callees()) {
             Decl *Callee = CR.Callee->getDecl();
             if (CalleeSet.contains(Callee))
                 continue;
             CalleeSet.insert(Callee);
-            outFile << AnalysisDeclContext::getFunctionName(Callee) << "\n]\n";
+            // SmallString<128> usr;
+            // std::string ret;
+            // index::generateUSRForDecl(Callee, usr);
+            // ret += std::to_string(usr.size());
+            // ret += ":";
+            // ret += usr.c_str();
+            // outFile << ret << "\n]\n";
+            outFile << getFunctionName(Callee) << " -> " <<
+                CGToRange[Callee].first << ", " << CGToRange[Callee].second << "\n";
         }
+        outFile << "]\n";
     }
 }
 
@@ -131,14 +202,15 @@ static void DumpFunctionsNeedReanalyze(std::unordered_set<const Decl *> Function
     }
     llvm::outs() << "--- Functions Need to Reanalyze ---\n";
     for (auto &D : FunctionsNeedReanalyze) {
-        SmallString<128> usr;
-        std::string ret;
-        index::generateUSRForDecl(D, usr);
-        ret += std::to_string(usr.size());
-        ret += ":";
-        ret += usr.c_str();
-        const std::string &fname = AnalysisDeclContext::getFunctionName(D);
-        outFile << ret << " " << fname << "\n";
+        // SmallString<128> usr;
+        // std::string ret;
+        // index::generateUSRForDecl(D, usr);
+        // ret += std::to_string(usr.size());
+        // ret += ":";
+        // ret += usr.c_str();
+        // outFile << ret << " ";
+        const std::string &fname = getFunctionName(D);
+        outFile << fname << "\n";
         llvm::outs() << "  ";
         llvm::outs() << fname;
         llvm::outs() << ": " << "<" << D->getDeclKindName() << "> ";
@@ -159,8 +231,8 @@ static std::optional<std::pair<int, int>> StartAndEndLineOfDecl(SourceManager &S
     if (!(Loc.isValid() && Loc.isFileID())) {
         return std::nullopt;
     }
-    auto StartLoc = SM.getSpellingLineNumber(D->getBeginLoc());
-    auto EndLoc = SM.getSpellingLineNumber(D->getEndLoc());
+    auto StartLoc = SM.getExpansionLineNumber(D->getBeginLoc());
+    auto EndLoc = SM.getExpansionLineNumber(D->getEndLoc());
     return std::make_pair(StartLoc, EndLoc);
 }
 
@@ -280,9 +352,9 @@ public:
                 }
                 DRFinder.clearRefDecls();
                 // no need to traverse this decl node and its children
+                // note: It seems that `return false` will stop the visitor.
                 // return false;
             }
-            return false;
         }
         
         if (isa<RecordDecl>(D)) {
@@ -378,80 +450,19 @@ private:
     }
 };
 
-class MyCallGraph : public CallGraph {
-public:
-    explicit MyCallGraph(ASTContext *Context) {}
-
-    bool VisitCallExpr(CallExpr *call) {
-        if (const FunctionDecl *callee = call->getDirectCallee()) {
-            if (!FunctionStack.empty()) {
-                const FunctionDecl *caller = FunctionStack.top();
-                SmallString<128> callerName;
-                index::generateUSRForDecl(caller, callerName);
-                SmallString<128> calleeName;
-                index::generateUSRForDecl(callee, calleeName);
-                callGraph[callerName.c_str()].insert(calleeName.c_str());
-            }
-        } else if (auto callee = call->getCallee()) {
-            
-        }
-        return true;
-    }
-
-    void printCallGraph(const std::string &outputPath) {
-        const SourceManager &SM = Context->getSourceManager();
-        FileID MainFileID = SM.getMainFileID();
-        const FileEntry *FE = SM.getFileEntryForID(MainFileID);
-        
-        if (FE) {
-            // llvm::errs() << "Translation Unit: " << FE->getName() << "\n";
-        } else {
-            llvm::errs() << "Translation Unit: <unknown>\n";
-            return ;
-        }
-        if (outputPath == "") {
-            llvm::outs() << "digraph CallGraph {\n";
-            for (const auto &entry : callGraph) {
-                for (const auto &callee : entry.second) {
-                    llvm::outs() << entry.first.length() << ":" << entry.first << 
-                        " -> " << callee.length() << ":" << callee << "\n";
-                }
-            }
-            llvm::outs() << "}\n";
-            return;
-        }
-        std::string DotFileName = outputPath + FE->getName().str() + ".dot";
-        std::filesystem::path DotFilePath(DotFileName);
-        std::filesystem::create_directories(DotFilePath.parent_path());
-        std::ofstream outFile(DotFileName);
-        if (!outFile.is_open()) {
-            std::cerr << "Error: Could not open file " << DotFileName << " for writing.\n";
-            return;
-        }
-        outFile << "digraph CallGraph {\n";
-        for (const auto &entry : callGraph) {
-            for (const auto &callee : entry.second) {
-                outFile << "  \"" << entry.first << "\" -> \"" << callee << "\";\n";
-            }
-        }
-        outFile << "}\n";
-        outFile.close();
-    }
-
-private:
-    ASTContext *Context;
-    std::stack<const FunctionDecl *> FunctionStack;
-    std::unordered_map<std::string, std::unordered_set<std::string>> callGraph;
-};
-
 class IncInfoCollectConsumer : public clang::ASTConsumer {
 public:
-    explicit IncInfoCollectConsumer(ASTContext *Context, const std::string &outputPath, const std::optional<llvm::json::Object> GlobalDiffLines)
-    : CG(), OutputPath(outputPath), DiffLines(std::vector<std::pair<int, int>>()), IncVisitor(Context, DiffLines, CG, FunctionsNeedReanalyze) {
+    explicit IncInfoCollectConsumer(ASTContext *Context, const std::string &outputPath, const std::optional<llvm::json::Object> GlobalDiffLines, const bool printLoc)
+    : CG(), OutputPath(outputPath), DiffLines(std::vector<std::pair<int, int>>()), 
+      IncVisitor(Context, DiffLines, CG, FunctionsNeedReanalyze) {
         const SourceManager &SM = Context->getSourceManager();
         FileID MainFileID = SM.getMainFileID();
         const FileEntry *FE = SM.getFileEntryForID(MainFileID);
         MainFilePath = FE->getName();
+        // Don't print location information.
+        auto printPolicy = Context->getPrintingPolicy();
+        printPolicy.AnonymousTagLocations = printLoc;
+        Context->setPrintingPolicy(printPolicy);
         if (GlobalDiffLines) {
             // printJsonObject(*GlobalDiffLines);
             if (auto diff_array = GlobalDiffLines->getArray(MainFilePath)) {
@@ -527,8 +538,8 @@ private:
 
 class IncInfoCollectAction : public clang::ASTFrontendAction {
 public:
-    IncInfoCollectAction(const std::string &outputPath, const std::string &diffPath) :
-    OutputPath(outputPath), DiffLines(std::nullopt) {
+    IncInfoCollectAction(const std::string &outputPath, const std::string &diffPath, const bool printLoc) :
+    OutputPath(outputPath), DiffLines(std::nullopt), PrintLoc(printLoc) {
         initDiffLines(diffPath);
     }
 
@@ -555,7 +566,7 @@ public:
     }
 
     std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &CI, llvm::StringRef file) override {
-        return std::make_unique<IncInfoCollectConsumer>(&CI.getASTContext(), OutputPath, DiffLines);
+        return std::make_unique<IncInfoCollectConsumer>(&CI.getASTContext(), OutputPath, DiffLines, PrintLoc);
     }
 
 private:
@@ -563,20 +574,22 @@ private:
     // Don't use pointer, because jsonStr is declared at function `initDiffLines`, 
     // and it will be freed automatically while exiting the function.
     std::optional<llvm::json::Object> DiffLines;
+    const bool PrintLoc;
 };
 
 class IncInfoCollectActionFactory : public FrontendActionFactory {
 public:
-    IncInfoCollectActionFactory(const std::string &outputPath, const std::string &diffPath):
-     OutputPath(outputPath), DiffPath(diffPath) {}
+    IncInfoCollectActionFactory(const std::string &outputPath, const std::string &diffPath, const bool printLoc):
+     OutputPath(outputPath), DiffPath(diffPath), PrintLoc(printLoc) {}
 
     std::unique_ptr<FrontendAction> create() override {
-        return std::make_unique<IncInfoCollectAction>(OutputPath, DiffPath);
+        return std::make_unique<IncInfoCollectAction>(OutputPath, DiffPath, PrintLoc);
     }
 
 private:
-    std::string OutputPath;
-    std::string DiffPath;
+    const std::string OutputPath;
+    const std::string DiffPath;
+    const bool PrintLoc;
 };
 
 static llvm::cl::OptionCategory ToolCategory("Collect Inc Info Options");
@@ -584,6 +597,8 @@ static llvm::cl::opt<std::string> OutputPath("o", llvm::cl::desc("Specify output
     llvm::cl::value_desc("call graph dir"), llvm::cl::init(""));
 static llvm::cl::opt<std::string> DiffPath("diff", llvm::cl::desc("Specify diff info files"),
     llvm::cl::value_desc("diff info files"), llvm::cl::init(""));
+static llvm::cl::opt<bool> PrintAnonLoc("loc", llvm::cl::desc("Print location information in FunctionName or not"),
+    llvm::cl::value_desc("AnonymousTagLocations"), llvm::cl::init(false));
 
 int main(int argc, const char **argv) {
     auto ExpectedParser = CommonOptionsParser::create(argc, argv, ToolCategory);
@@ -595,6 +610,6 @@ int main(int argc, const char **argv) {
     CommonOptionsParser& OptionsParser = ExpectedParser.get();
 
     ClangTool Tool(OptionsParser.getCompilations(), OptionsParser.getSourcePathList());
-    IncInfoCollectActionFactory Factory(OutputPath, DiffPath);
+    IncInfoCollectActionFactory Factory(OutputPath, DiffPath, PrintAnonLoc);
     return Tool.run(&Factory);
 }

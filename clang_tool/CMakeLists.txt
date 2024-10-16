@@ -8,3 +8,13 @@ target_link_libraries(collectIncInfo
   clangAST
   clangIndex
 )
+
+# add_executable(extractCG ExtractCG.cpp)
+# target_link_libraries(extractCG
+#   LLVM
+#   clangTooling
+#   clangBasic
+#   clangASTMatchers
+#   clangAST
+#   clangIndex
+# )

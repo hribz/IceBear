@@ -1,6 +1,7 @@
 from pathlib import Path
 import subprocess
 import shutil
+import threading
 from typing import List, Dict
 from subprocess import CompletedProcess, run
 from logger import logger
@@ -10,6 +11,7 @@ import os
 import re
 import time
 import multiprocessing as mp
+from functools import partial
 
 from data_struct.reply import Reply
 from utils import * 
@@ -17,6 +19,7 @@ from compile_command import CompileCommand
 
 PWD = Path(".").absolute()
 EXTRACT_II = str(PWD / 'build/clang_tool/collectIncInfo')
+EXTRACT_CG = str(PWD / 'build/clang_tool/extractCG')
 PANDA = 'panda'
 MY_CLANG = '/home/xiaoyu/llvm/llvm-project/build/bin/clang'
 MY_CLANG_PLUS_PLUS = '/home/xiaoyu/llvm/llvm-project/build/bin/clang++'
@@ -94,20 +97,15 @@ class Option:
         return {"name": self.name, "value": self.value}
 
 class DiffResult:
-    file: str
-    diff_lines: List
-    origin_file: str
-    origin_diff_lines: List
-    entire_file: bool # entire file different
-
-    def __init__(self, file: str='', entire: bool=False):
-        self.file = file
-        self.diff_lines = []
-        self.origin_diff_lines = []
+    def __init__(self, file, entire: bool=False):
+        self.file: FileInCDB = file
+        self.diff_lines: List = []
+        self.origin_file: FileInCDB = None
+        self.origin_diff_lines: List = []
+        # This is a new file
+        self.entire_file: bool = False
         if entire:
             self.entire_file = True
-        else:
-            self.entire_file = False
 
     def add_diff_line(self, start_line:int, line_count:int):
         self.diff_lines.append([start_line, line_count])
@@ -117,45 +115,34 @@ class DiffResult:
 
     def __repr__(self) -> str:
         if self.entire_file:
-            return f"Only my_file: {self.file}\n"
-        ret = f"my_file: {self.file}\norigin_file: {self.origin_file}\n"
+            return f"Only my_file: {self.file.file_name}\n"
+        ret = f"my_file: {self.file.prep_file}\norigin_file: {self.origin_file.prep_file}\n"
         for idx, line in enumerate(self.diff_lines):
             ret += f"@@ -{self.origin_diff_lines[idx][0]},{self.origin_diff_lines[idx][1]} +{line[0]},{line[1]} @@\n"
         return ret
 
 class CallGraphNode:
-    # Maybe we could ignore callees, just care about caller relationship.
-    fname: str   # Function name
-    callees: List # GraphNode list contains callees
-    callers: List # GraphNode list contains callers
-    inline_callers: set # Callers which had inline this function during CSA analysis
-    is_entry: bool
-    should_reanalyze: bool
 
     def __init__(self, fname):
-        self.fname = fname
-        self.callees = []
-        self.callers = []
+        # Function name
+        self.fname: str = fname 
+        self.callers: List[CallGraphNode] = []
+        self.callers_set: set = set()
+        # Callers which had inline this function during CSA analysis
         self.inline_callers = set()
         self.is_entry = True
         self.should_reanalyze = True
-        
-    def add_callee(self, callee):
-        assert isinstance(callee, CallGraphNode)
-        self.callees.append(callee)
     
     def add_caller(self, caller):
-        assert isinstance(caller, CallGraphNode)
+        self.callers_set.add(caller.fname)
         self.callers.append(caller)
 
     def add_inline_caller(self, caller_name: str):
         self.inline_callers.add(caller_name)
 
     def is_in_callers(self, fname):
-        for caller in self.callers:
-            if caller.fname == fname:
-                return True
-        return False
+        # Maybe there should be a `callers_set` to accelerate this function.
+        return fname in self.callers_set
 
 class CallGraph:
     root: CallGraphNode
@@ -182,7 +169,6 @@ class CallGraph:
     def add_node(self, caller, callee):
         caller_node = self.get_or_insert_node(caller)
         callee_node = self.get_or_insert_node(callee)
-        caller_node.add_callee(callee_node)
         callee_node.add_caller(caller_node)
 
     def add_fs_node(self, caller, callee):
@@ -195,22 +181,16 @@ class CallGraph:
         self.functions_need_reanalyzed.add(node.fname)
 
 class FileInCDB:
-    parent = None # the Configuration instance
-    file_name: str
-    csa_file: str
-    prep_file: str
-    functions_need_reanalyzed_from_rf: set
-    diff_info: DiffResult
-    call_graph: CallGraph
-
     def __init__(self, parent, file_name: str, extname: str = None):
-        self.parent = parent
-        self.file_name = file_name
-        self.csa_file = str(parent.csa_path) + self.file_name
-        self.functions_need_reanalyzed_from_rf = None
-        self.call_graph = None
+        # The Configuration instance
+        self.parent: Configuration = parent
+        self.file_name: str = file_name
+        self.csa_file: str = str(self.parent.csa_path) + self.file_name
+        self.functions_changed: List = None
+        self.diff_info: DiffResult = None
+        self.call_graph: CallGraph = None
         if extname:
-            self.prep_file = str(parent.preprocess_path) + self.file_name + extname
+            self.prep_file: str = str(self.parent.preprocess_path) + self.file_name + extname
     
     def get_file_path(self, kind: FileKind=None):
         if not kind:
@@ -236,6 +216,7 @@ class FileInCDB:
         # ]
         cg_file = self.get_file_path(FileKind.CG)
         if not os.path.exists(cg_file):
+            logger.error(f"[Parse CG File] Callgraph file {cg_file} doesn't exist.")
             return
         self.call_graph = CallGraph()
         with open(cg_file, 'r') as f:
@@ -258,11 +239,11 @@ class FileInCDB:
         rf_file = self.get_file_path(FileKind.RF)
         if not os.path.exists(rf_file):
             return
-        self.functions_need_reanalyzed_from_rf = set()
+        self.functions_changed = []
         with open(rf_file, 'r') as f:
             for line in f.readlines():
                 line = line.strip()
-                self.functions_need_reanalyzed_from_rf.add(line)
+                self.functions_changed.append(line)
     
     def parse_fs_file(self):
         # .fs file format
@@ -272,6 +253,7 @@ class FileInCDB:
         # ]
         fs_file = self.get_file_path(FileKind.FS)
         if not os.path.exists(fs_file):
+            logger.error(f"[Parse FS File] Callgraph file {fs_file} doesn't exist.")
             return
         with open(fs_file, 'r') as f:
             caller, callee = None, None
@@ -289,16 +271,16 @@ class FileInCDB:
                     else:
                         callee = line
 
-    def propagate_reanalyze_attribute(self):
+    def propagate_reanalyze_attribute_without_fs(self):
         # Without function summary information, we have to mark all caller as reanalyzed.
         # And the terminative rule is cannot find caller anymore, or caller has been mark as reanalyzed.
-        for fname in self.functions_need_reanalyzed_from_rf:
+        for fname in self.functions_changed:
             # Propagate to all callers
-            node_in_current_cg = self.call_graph.get_node_if_exist(fname)
-            if not node_in_current_cg:
+            node_from_rf = self.call_graph.get_node_if_exist(fname)
+            if not node_from_rf:
                 logger.error(f"[Propagate Func Reanalyze] Can not found {fname} in call graph")
                 continue
-            worklist = [node_in_current_cg]
+            worklist = [node_from_rf]
             while len(worklist) is not 0:
                 node = worklist.pop()
                 if node.should_reanalyze:
@@ -307,101 +289,58 @@ class FileInCDB:
                 for caller in node.callers:
                     worklist.append(caller)
 
-    def propagate_reanalyze_attribute(self, baseline_cg_with_fs: CallGraph):
+    def propagate_reanalyze_attribute(self, baseline_cg_with_fs: CallGraph = None):
+        if not self.functions_changed:
+            logger.error(f"[Propagate Func Reanalyze] It's seems no functions changed, check if .rf exists.")
+            return
+        if not baseline_cg_with_fs:
+            self.propagate_reanalyze_attribute_without_fs()
+            return
         # Make sure function_need_reanalyzed_from_rf sorted by reverse post order.
-        # This means there are two more terminative rules when node is in baseline call graph:
-        # 1. Caller is in baseline call graph, we just need to traverse upward it when it is 
+        # Note: Traverse by reverse post order seem to be not neccessary, `node.should_reanalyze`
+        #       will skip 
+        # There are two more terminative rules when node is in baseline call graph:
+        # 1. Caller is in baseline call graph, we just need to traverse upward it if it's 
         #    in inline_callers.
         # 2. Caller is not in baseline call graph, which means it is a new function. Because we 
         #    traverse `fname` by reverse post order, this kind of callers have been processed before,
         #    it's ok to terminate at these callers.
-        for fname in self.functions_need_reanalyzed_from_rf:
-            node_in_current_cg = self.call_graph.get_node_if_exist(fname)
-            if not node_in_current_cg:
+        for fname in self.functions_changed:
+            node_from_rf = self.call_graph.get_node_if_exist(fname)
+            if not node_from_rf:
                 logger.error(f"[Propagate Func Reanalyze] Can not found {fname} in call graph")
                 continue
-            worklist = [node_in_current_cg]
+            node_from_rf.should_reanalyze = True
+            # For soundness, don't use two new terminative rules on `node_from_rf`'s callers,
+            # because changes on `node_from_rf` may affect inline behavior of CSA. We assume
+            # that if caller doesn't change, the inline behavior of it will not change.(If 
+            # inline behavior changes actually, it doesn't influence soundness, beacuse the
+            # caller or more high level caller must be changed and mark as reanalyze.)
+            worklist = [caller for caller in node_from_rf.callers]
             while len(worklist) is not 0:
-                node = worklist.pop()
+                node: CallGraphNode = worklist.pop()
                 if node.should_reanalyze:
                     continue
                 self.call_graph.mark_as_reanalye(node)
                 node_in_baseline_cg = baseline_cg_with_fs.get_node_if_exist(node.fname)
                 if node_in_baseline_cg:
                     for caller in node.callers:
-                        caller: CallGraphNode
                         if node_in_baseline_cg.is_in_callers(caller.fname):
                             if caller.fname in node_in_baseline_cg.inline_callers:
                                 worklist.append(caller)
-                        # If caller isn't node_in_baseline_cg's caller, it must be mark as reanalyze before.
+                        else:
+                            worklist.append(caller)
                 else:
                     # New function node, don't need to consider its inline information.
                     for caller in node.callers:
                         worklist.append(caller)
 
-
-
-class GlobalFunctionSummaries:
-    fs: Dict[str, set]
-
-    def __init__(self, file_list: List[FileInCDB]):
-        self.fs = {}
-        for file in file_list:
-            fs_file = file.get_file_path(FileKind.FS)
-            if not os.path.exists(fs_file):
-                # logger.error(f"[GFS Init] {fs_file} not exists")
-                continue
-            with open(fs_file, 'r') as f:
-                callers = set()
-                fname = ''
-                in_callers = False
-                for line in f.readlines():
-                    if line.startswith('['):
-                        callers.clear()
-                        in_callers = True
-                    elif line.startswith(']'):
-                        in_callers = False
-                        if fname not in self.fs:
-                            self.fs[fname] = callers
-                        else:
-                            self.fs[fname] = self.fs[fname].union(callers)
-                    else:
-                        if in_callers:
-                            callers.add(line)
-                        else:
-                            fname = line
-                
-    def __repr__(self) -> str:
-        ret = ""
-        for fname, callers in self.fs.items():
-            ret += (f'{fname}[\n')
-            for caller in callers:
-                ret += (f'{caller}')
-            ret += (']\n')
-        return ret
-
-class FunctionsNeedToBeReanalyzed:
-    files: List[FileInCDB] # Files that have functions to reanalyze
-
-    def __init__(self, file_list: List[FileInCDB]):
-        self.files = []
-        for file in file_list:
-            rf_file = file.get_file_path(FileKind.RF)
-            if not os.path.exists(rf_file):
-                continue
-            self.files.append(file)
-            with open(rf_file, 'r') as f:
-                for line in f.readlines():
-                    file.functions_need_reanalyzed.add(line)
-
-    def __repr__(self) -> str:
-        ret = ""
-        for file in self.files:
-            for fname in file.functions_need_reanalyzed:
-                ret += (f'{fname}')
-        return ret
-
 def getExtDefMap(efmfile): return open(efmfile).read()
+def virtualCall(file, method, has_arg, arg = None): 
+    if has_arg:
+        getattr(file, method.__name__)(arg)
+    else:
+        getattr(file, method.__name__)()
 
 class Configuration:
     name: str
@@ -417,13 +356,12 @@ class Configuration:
     diff_file_list: List[FileInCDB]
     diff_origin_file_list: List[str]
     extract_ii: str = EXTRACT_II
+    extract_cg: str = EXTRACT_CG
     incrementable: bool
     session_times: Dict
     # We traverse file_list most of the time, so we don't use dict[str, FileInCDB]
     file_list_index: Dict[str, int]
     file_list: List[FileInCDB]      # Files in workspace
-    global_function_summaries: GlobalFunctionSummaries
-    functions_need_reanalyzed: FunctionsNeedToBeReanalyzed
 
     def __init__(self, name, src_path, options: List[Option], opts, args=None, cmake_path=None, build_path=None):
         self.name = name
@@ -451,6 +389,8 @@ class Configuration:
         self.status = 'WAIT'
         self.incrementable = False
         self.session_times = {}
+        # baseline Configuration
+        self.baseline: Configuration = self
         if os.path.exists(self.compile_database):
             # If there is compile_commands.jsno exists, we can prepare file list early.
             # Otherwise, we need configure to generate compile_commands.json.
@@ -511,7 +451,7 @@ class Configuration:
     def get_file(self, file_path: str) -> FileInCDB:
         idx = self.file_list_index.get(file_path, None)
         if not idx:
-            logger.error(f"[Get File] {file_path} not exists")
+            logger.error(f"[Get File] {file_path} not exists in file_list_index")
             return None
         return self.file_list[idx]
 
@@ -629,8 +569,6 @@ class Configuration:
         try:
             process = run(extract_ii_script, shell=True, capture_output=True, text=True, check=True)
             self.session_times['extract_inc_info'] = time.time() - start_time
-            if self.incrementable and inc:
-                self.generate_functions_need_reanalyzed()
             logger.info(f"[Extract Inc Info Success] {process.stdout} {process.stderr}")
         except subprocess.CalledProcessError as e:
             self.session_times['extract_inc_info'] = SessionStatus.Failed
@@ -766,7 +704,6 @@ class Configuration:
             process = run(csa_script, shell=True, capture_output=True, text=True, check=True)
             self.session_times['execute_csa'] = time.time() - start_time
             logger.info(f"[Executing CSA Files Success] {csa_script}")
-            self.generate_global_function_summaries()
             if self.analyze_opts.verbose:
                 logger.debug(f"[Panda Debug Info]\nstdout: \n{process.stdout}\n stderr: \n{process.stderr}")
         except subprocess.CalledProcessError as e:
@@ -781,7 +718,7 @@ class Configuration:
             self.session_times['diff_with_other'] = SessionStatus.Skipped
             return
         start_time = time.time()
-        self.baseline: Configuration = other
+        self.baseline = other
         if not self.preprocess_path.exists():
             logger.error(f"Preprocess files DIR {self.preprocess_path} not exists")
             return
@@ -867,15 +804,15 @@ class Configuration:
             elif line.startswith('---'):
                 file_in_cdb = None
                 spilt_line = line.split()
-                origin_file = spilt_line[1]
+                origin_file = self.get_origin_file_name(spilt_line[1], str(other.preprocess_path), ['.i', '.ii'])
             elif line.startswith('+++'):
                 spilt_line = line.split()
                 file = spilt_line[1]
                 file_in_cdb = self.get_file(self.get_origin_file_name(file, str(self.preprocess_path), ['.i', '.ii']))
                 if file_in_cdb:
                     self.diff_file_list.append(file_in_cdb)
-                    file_in_cdb.diff_info = DiffResult(file_in_cdb.prep_file)
-                    file_in_cdb.diff_info.origin_file = origin_file
+                    file_in_cdb.diff_info = DiffResult(file_in_cdb)
+                    file_in_cdb.diff_info.origin_file = other.get_file(origin_file)
             elif line.startswith("Only in"):
                 spilt_line = line.split()
                 file_in_cdb = None
@@ -894,7 +831,7 @@ class Configuration:
                         # diff = self.get_origin_file_name(str(diff), str(self.preprocess_path), ['.i', '.ii'])
                         file_in_cdb = self.get_file(self.get_origin_file_name(str(diff), str(self.preprocess_path), ['.i', '.ii']))
                         if file_in_cdb:
-                            file_in_cdb.diff_info = DiffResult(str(diff), True)
+                            file_in_cdb.diff_info = DiffResult(file_in_cdb, True)
                             self.diff_file_list.append(file_in_cdb)
                 else:
                     # is directory
@@ -926,25 +863,76 @@ class Configuration:
                                 file = self.get_origin_file_name(str(diff_file), str(self.preprocess_path), ['.i', '.ii'])
                                 file_in_cdb = self.get_file(file)
                                 if file_in_cdb:
-                                    file_in_cdb.diff_info = DiffResult(file, True)
+                                    file_in_cdb.diff_info = DiffResult(file_in_cdb, True)
                                     self.diff_file_list.append(file_in_cdb)
 
-    def generate_global_function_summaries(self):
-        start_time = time.time()
-        self.session_times['generate_global_function_summaries'] = SessionStatus.Failed
-        assert (self.file_list is not None)
-        self.global_function_summaries = GlobalFunctionSummaries(self.file_list)
-        with open(str(self.csa_path / "global_function_summaries.fs"), 'w') as f:
-            f.write(self.global_function_summaries.__repr__())
-        self.session_times['generate_global_function_summaries'] = time.time() - start_time
+    def process_file_list(self, method):
+        file_list = self.diff_file_list \
+            if self.analyze_opts.inc and self.incrementable else self.file_list
+        # Can't use mutilprocessing, because every process has its own memory space.
+        # with mp.Pool(self.analyze_opts.jobs) as p:
+        #     p.starmap(virtualCall, [(file, method, False) for file in file_list])
+        threads = []
+        for file in file_list:
+            thread = threading.Thread(target=getattr(file, method.__name__))
+            thread.start()
+            threads.append(thread)
+            # getattr(file, method.__name__)()
 
-    def generate_functions_need_reanalyzed(self):
+        for thread in threads:
+            thread.join()
+
+    def parse_function_summaries(self):
+        self.session_times['parse_function_summaries'] = SessionStatus.Skipped
+        if not (self.analyze_opts.fsum and self.analyze_opts.use_fsum):
+            return
         start_time = time.time()
-        self.session_times['generate_functions_need_reanalyzed'] = SessionStatus.Failed
-        self.functions_need_reanalyzed = FunctionsNeedToBeReanalyzed(self.file_list)
-        with open(str(self.inc_info_path / "functions_need_reanalyzed.rf"), 'w') as f:
-            f.write(self.functions_need_reanalyzed.__repr__())
-        self.session_times['generate_functions_need_reanalyzed'] = time.time() - start_time
+        self.session_times['parse_function_summaries'] = SessionStatus.Failed
+        assert (self.file_list is not None)
+        self.process_file_list(FileInCDB.parse_fs_file)
+        self.session_times['parse_function_summaries'] = time.time() - start_time
+
+    def parse_call_graph(self):
+        start_time = time.time()
+        self.session_times['parse_call_graph'] = SessionStatus.Failed
+        assert (self.file_list is not None)
+        self.process_file_list(FileInCDB.parse_cg_file)
+        self.session_times['parse_call_graph'] = time.time() - start_time
+
+    def parse_functions_changed(self):
+        start_time = time.time()
+        self.session_times['parse_functions_changed'] = SessionStatus.Failed
+        assert (self.file_list is not None)
+        self.process_file_list(FileInCDB.parse_rf_file)
+        self.session_times['parse_functions_changed'] = time.time() - start_time
+
+    def propogate_reanalyze_attr(self):
+        self.session_times['propogate_reanalyze_attr'] = SessionStatus.Skipped
+        if not (self.analyze_opts.inc and self.incrementable):
+            return
+        start_time = time.time()
+        self.session_times['propogate_reanalyze_attr'] = SessionStatus.Failed
+        threads = []
+        for file in self.diff_file_list:
+            arg = None
+            if self.analyze_opts.fsum and self.analyze_opts.use_fsum:
+                # with mp.Pool(self.analyze_opts.jobs) as p:
+                #     p.starmap(virtualCall, [(file, FileInCDB.propagate_reanalyze_attribute, True, \
+                #                                 None if file.diff_info.entire_file \
+                #                                 else file.diff_info.origin_file.call_graph \
+                #                                 ) for file in file_list])
+                arg = None if file.diff_info.entire_file else file.diff_info.origin_file.call_graph
+            else:
+                # with mp.Pool(self.analyze_opts.jobs) as p:
+                #     p.starmap(virtualCall, [(file, FileInCDB.propagate_reanalyze_attribute, False) for file in file_list])
+                arg = None
+            # thread = threading.Thread(target=FileInCDB.propagate_reanalyze_attribute, args=[arg])
+            # thread.start()
+            # threads.append(thread)
+            file.propagate_reanalyze_attribute(arg)
+        # for thread in threads:
+        #     thread.join()
+        self.session_times['propogate_reanalyze_attr'] = time.time() - start_time
 
     def get_session_times(self):
         ret = "{\n"
@@ -1029,6 +1017,8 @@ class Repository:
 
     def extract_ii_every_config(self):
         self.process_every_config(Configuration.extract_inc_info, inc=self.analyze_opts.inc)
+        self.process_every_config(Configuration.parse_call_graph)
+        self.process_every_config(Configuration.parse_functions_changed)
 
     def diff_every_config(self):
         self.process_every_config(Configuration.diff_with_other, other=self.default_config)
@@ -1040,10 +1030,12 @@ class Repository:
         self.process_every_config(Configuration.generate_efm, inc=self.analyze_opts.inc)
 
     def execute_csa_for_every_config(self):
+        self.process_every_config(Configuration.propogate_reanalyze_attr)
         self.process_every_config(Configuration.execute_csa, inc=self.analyze_opts.inc)
+        self.process_every_config(Configuration.parse_function_summaries)
     
     def generate_global_fsum(self):
-        self.process_every_config(Configuration.generate_global_function_summaries)
+        self.process_every_config(Configuration.parse_function_summaries)
     
     def session_summary(self):
         ret = f"name: {self.name}\nsrc: {self.src_path}\n"
@@ -1061,6 +1053,7 @@ def main():
     parser.add_argument('--analyze', type=str, dest='analyze', choices=['ctu', 'no-ctu'],
             help='Execute Clang Static Analyzer.')
     parser.add_argument('--fsum', action='store_true', dest='fsum', help='Generate function summary files.')
+    parser.add_argument('--use_fsum', action='store_true', dest='use_fsum', help='Generate function summary files.')
     parser.add_argument('-j', '--jobs', type=int, dest='jobs', default=1,
                         help='Number of jobs can be executed in parallel.')
     opts = parser.parse_args()
@@ -1124,7 +1117,6 @@ def main():
         repo_db.extract_ii_every_config()
         repo_db.generate_efm_for_every_config()
         repo_db.execute_csa_for_every_config()
-        repo_db.generate_global_fsum()
 
     for repo_db in repo_list:
         logger.TAG = repo_db.name
