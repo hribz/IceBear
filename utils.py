@@ -21,5 +21,6 @@ class FileKind(Enum):
     AST = auto()
     EFM = auto()
     CG = auto()
+    CF = auto()
     RF = auto()
     FS = auto()

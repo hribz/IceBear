@@ -8,6 +8,7 @@
 #include <clang/AST/ExprCXX.h>
 #include <clang/AST/Stmt.h>
 #include <clang/Basic/LLVM.h>
+#include <cstddef>
 #include <filesystem>
 #include <iostream>
 #include <fstream>
@@ -15,6 +16,7 @@
 #include <llvm-17/llvm/ADT/StringRef.h>
 #include <llvm-17/llvm/Support/Error.h>
 #include <llvm-17/llvm/Support/JSON.h>
+#include <llvm-17/llvm/Support/raw_ostream.h>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -64,15 +66,32 @@ std::string getFunctionName(const Decl *D) {
         // `P->getIdentifier()` can't determine if this param's type has name.
         // It just means this param doesn't have specific identifier (e.g. f(int )). 
         auto PType = P->getType();
-        auto RD = dyn_cast<RecordDecl>(P);
-        
-        OS << P->getType();
+        PType.getAsString();
+        if (PType->hasUnnamedOrLocalType()) {
+            if (PType->isReferenceType()) {
+                auto NRType = PType.getNonReferenceType();
+                if (NRType.hasQualifiers())
+                    OS << NRType.getQualifiers().getAsString();
+                OS << " LocType ";
+                if (PType->isLValueReferenceType()) {
+                    OS << "&";
+                } else {
+                    OS << "&&";
+                }
+            } else {
+                if (PType.hasQualifiers())
+                    OS << PType.getQualifiers().getAsString();
+                OS << " LocType ";
+            }
+        } else {
+            OS << P->getType();
+        }
       }
       OS << ')';
     }
 
   } else if (isa<BlockDecl>(D)) {
-    // Only in Objective C
+    // Blocks support disabled - compile with -fblocks or pick a deployment target that supports them
     PresumedLoc Loc = Ctx.getSourceManager().getPresumedLoc(D->getLocation());
 
     if (Loc.isValid()) {
@@ -153,7 +172,7 @@ static bool isChangedLine(const std::optional<std::vector<std::pair<int, int>>>&
 }
 
 static void DumpCallGraph(CallGraph &CG, llvm::StringRef MainFilePath, 
-    std::unordered_map<const Decl *, std::pair<unsigned int, unsigned int>>& CGToRange) {
+    std::unordered_map<const Decl *, std::pair<unsigned int, unsigned int>>& CGToRange, const bool printLoc) {
     if (!CG.size()) {
         return;
     }
@@ -167,8 +186,11 @@ static void DumpCallGraph(CallGraph &CG, llvm::StringRef MainFilePath,
     for (CallGraphNode *N : RPOT) {
         if (N == CG.getRoot()) continue;
         Decl *D = N->getDecl();
-        outFile << getFunctionName(D) << " -> " <<
-            CGToRange[D].first << ", " << CGToRange[D].second << "\n[\n";
+        outFile << getFunctionName(D);
+        if (printLoc) {
+            outFile << " -> " << CGToRange[D].first << ", " << CGToRange[D].second;
+        }
+        outFile << "\n[\n";
         SetOfConstDecls CalleeSet;
         for (CallGraphNode::CallRecord &CR : N->callees()) {
             Decl *Callee = CR.Callee->getDecl();
@@ -182,8 +204,11 @@ static void DumpCallGraph(CallGraph &CG, llvm::StringRef MainFilePath,
             // ret += ":";
             // ret += usr.c_str();
             // outFile << ret << "\n]\n";
-            outFile << getFunctionName(Callee) << " -> " <<
-                CGToRange[Callee].first << ", " << CGToRange[Callee].second << "\n";
+            outFile << getFunctionName(Callee);
+            if (printLoc) {
+                outFile << " -> " << CGToRange[Callee].first << ", " << CGToRange[Callee].second;
+            }
+            outFile << "\n";
         }
         outFile << "]\n";
     }
@@ -194,7 +219,7 @@ static void DumpFunctionsNeedReanalyze(std::unordered_set<const Decl *> Function
     if (FunctionsNeedReanalyze.empty()) {
         return;
     }
-    std::string ReanalyzeFunctionsFile = MainFilePath.str() + ".rf";
+    std::string ReanalyzeFunctionsFile = MainFilePath.str() + ".cf";
     std::ofstream outFile(ReanalyzeFunctionsFile);
     if (!outFile.is_open()) {
         llvm::errs() << "Error: Could not open file " << ReanalyzeFunctionsFile << " for writing.\n";
@@ -454,15 +479,15 @@ class IncInfoCollectConsumer : public clang::ASTConsumer {
 public:
     explicit IncInfoCollectConsumer(ASTContext *Context, const std::string &outputPath, const std::optional<llvm::json::Object> GlobalDiffLines, const bool printLoc)
     : CG(), OutputPath(outputPath), DiffLines(std::vector<std::pair<int, int>>()), 
-      IncVisitor(Context, DiffLines, CG, FunctionsNeedReanalyze) {
+      IncVisitor(Context, DiffLines, CG, FunctionsNeedReanalyze), PrintLoc(printLoc) {
         const SourceManager &SM = Context->getSourceManager();
         FileID MainFileID = SM.getMainFileID();
         const FileEntry *FE = SM.getFileEntryForID(MainFileID);
         MainFilePath = FE->getName();
         // Don't print location information.
-        auto printPolicy = Context->getPrintingPolicy();
-        printPolicy.AnonymousTagLocations = printLoc;
-        Context->setPrintingPolicy(printPolicy);
+        auto PrintPolicy = Context->getPrintingPolicy();
+        PrintPolicy.AnonymousTagLocations = PrintLoc;
+        Context->setPrintingPolicy(PrintPolicy);
         if (GlobalDiffLines) {
             // printJsonObject(*GlobalDiffLines);
             if (auto diff_array = GlobalDiffLines->getArray(MainFilePath)) {
@@ -519,7 +544,7 @@ public:
                 FunctionsNeedReanalyze.insert(D);
             }
         }
-        DumpCallGraph(CG, MainFilePath, CGToRange);
+        DumpCallGraph(CG, MainFilePath, CGToRange, PrintLoc);
         IncVisitor.TraverseDecl(Context.getTranslationUnitDecl());
         IncVisitor.DumpGlobalConstantSet();
         DumpFunctionsNeedReanalyze(FunctionsNeedReanalyze, CGToRange, MainFilePath);
@@ -534,6 +559,7 @@ private:
     std::optional<std::vector<std::pair<int, int>>> DiffLines; // empty means no change, nullopt means new file
     std::unordered_set<const Decl *> FunctionsNeedReanalyze;
     llvm::StringRef MainFilePath;
+    const bool PrintLoc;
 };
 
 class IncInfoCollectAction : public clang::ASTFrontendAction {

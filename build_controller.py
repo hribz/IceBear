@@ -122,7 +122,6 @@ class DiffResult:
         return ret
 
 class CallGraphNode:
-
     def __init__(self, fname):
         # Function name
         self.fname: str = fname 
@@ -131,54 +130,75 @@ class CallGraphNode:
         # Callers which had inline this function during CSA analysis
         self.inline_callers = set()
         self.is_entry = True
-        self.should_reanalyze = True
+        self.should_reanalyze = False
     
     def add_caller(self, caller):
         self.callers_set.add(caller.fname)
         self.callers.append(caller)
 
     def add_inline_caller(self, caller_name: str):
-        self.inline_callers.add(caller_name)
+        if caller_name:
+            self.inline_callers.add(caller_name)
 
-    def is_in_callers(self, fname):
+    def in_callers(self, fname):
         # Maybe there should be a `callers_set` to accelerate this function.
         return fname in self.callers_set
+    
+    def __repr__(self) -> str:
+        ret = self.fname + "<-\n"
+        ret += '\tcallers: '
+        for caller in self.callers:
+            ret += f"{caller.fname} "
+        ret += '\n\tinline: '
+        for inline_caller in self.inline_callers:
+            ret += f"{inline_caller} "
+        ret += '\n'
+        return ret
+
 
 class CallGraph:
     root: CallGraphNode
-    fname_to_cg: Dict[str, CallGraphNode]
+    fname_to_cg_node: Dict[str, CallGraphNode]
     is_baseline: bool
     functions_need_reanalyzed: set
 
     def __init__(self, is_baseline = False):
         self.root = CallGraphNode('')
-        self.fname_to_cg = {}
+        self.fname_to_cg_node = {}
         self.is_baseline = is_baseline
         self.functions_need_reanalyzed = set()
 
     def get_node_if_exist(self, fname:str):
-        if fname in self.fname_to_cg:
-            return self.fname_to_cg[fname]
+        if fname in self.fname_to_cg_node:
+            return self.fname_to_cg_node[fname]
         return None
 
     def get_or_insert_node(self, fname: str):
-        if fname not in self.fname_to_cg:
-            self.fname_to_cg[fname] = CallGraphNode(fname)
-        return self.fname_to_cg.get(fname)
+        assert fname
+        if fname not in self.fname_to_cg_node:
+            self.fname_to_cg_node[fname] = CallGraphNode(fname)
+        return self.fname_to_cg_node.get(fname)
 
-    def add_node(self, caller, callee):
+    def add_node(self, caller, callee=None):
         caller_node = self.get_or_insert_node(caller)
-        callee_node = self.get_or_insert_node(callee)
-        callee_node.add_caller(caller_node)
+        if callee:
+            callee_node = self.get_or_insert_node(callee)
+            callee_node.add_caller(caller_node)
 
     def add_fs_node(self, caller, callee):
-        # precondition: callee is in fname_to_cg
-        callee_node = self.fname_to_cg[callee]
+        # precondition: callee is in fname_to_cg_node
+        callee_node = self.fname_to_cg_node[callee]
         callee_node.add_inline_caller(caller)
 
     def mark_as_reanalye(self, node: CallGraphNode):
         node.should_reanalyze = True
         self.functions_need_reanalyzed.add(node.fname)
+
+    def __repr__(self) -> str:
+        ret = ""
+        for cn in self.fname_to_cg_node.values():
+            ret += cn.__repr__()
+        return ret
 
 class FileInCDB:
     def __init__(self, parent, file_name: str, extname: str = None):
@@ -201,8 +221,10 @@ class FileInCDB:
             return (self.csa_file) + '.extdef'
         elif kind == FileKind.CG:
             return (self.prep_file) + '.cg'
+        elif kind == FileKind.CF:
+            return (self.prep_file) + '.cf'
         elif kind == FileKind.RF:
-            return (self.prep_file) + '.rf'
+            return (self.csa_file) + '.rf'
         elif kind == FileKind.FS:
             return (self.csa_file) + '.fs'
         else:
@@ -231,12 +253,13 @@ class FileInCDB:
                 else:
                     if is_caller:
                         caller = line
+                        self.call_graph.add_node(caller)
                     else:
                         callee = line
                         self.call_graph.add_node(caller, callee)
 
-    def parse_rf_file(self):
-        rf_file = self.get_file_path(FileKind.RF)
+    def parse_cf_file(self):
+        rf_file = self.get_file_path(FileKind.CF)
         if not os.path.exists(rf_file):
             return
         self.functions_changed = []
@@ -253,7 +276,7 @@ class FileInCDB:
         # ]
         fs_file = self.get_file_path(FileKind.FS)
         if not os.path.exists(fs_file):
-            logger.error(f"[Parse FS File] Callgraph file {fs_file} doesn't exist.")
+            logger.error(f"[Parse FS File] Function Summary file {fs_file} doesn't exist.")
             return
         with open(fs_file, 'r') as f:
             caller, callee = None, None
@@ -281,7 +304,7 @@ class FileInCDB:
                 logger.error(f"[Propagate Func Reanalyze] Can not found {fname} in call graph")
                 continue
             worklist = [node_from_rf]
-            while len(worklist) is not 0:
+            while len(worklist) != 0:
                 node = worklist.pop()
                 if node.should_reanalyze:
                     continue
@@ -291,11 +314,14 @@ class FileInCDB:
 
     def propagate_reanalyze_attribute(self, baseline_cg_with_fs: CallGraph = None):
         if not self.functions_changed:
-            logger.error(f"[Propagate Func Reanalyze] It's seems no functions changed, check if .rf exists.")
+            logger.error(f"[Propagate Func Reanalyze] It's seems no functions changed, check if {self.get_file_path(FileKind.CF)} exists.")
             return
         if not baseline_cg_with_fs:
             self.propagate_reanalyze_attribute_without_fs()
             return
+        # logger.debug(f"[propagate_reanalyze_attribute] Dump CallGraph\n{self.call_graph.__repr__()}")
+        # logger.debug(f"[propagate_reanalyze_attribute] Dump Baseline CG\n{baseline_cg_with_fs.__repr__()}")
+
         # Make sure function_need_reanalyzed_from_rf sorted by reverse post order.
         # Note: Traverse by reverse post order seem to be not neccessary, `node.should_reanalyze`
         #       will skip 
@@ -310,14 +336,14 @@ class FileInCDB:
             if not node_from_rf:
                 logger.error(f"[Propagate Func Reanalyze] Can not found {fname} in call graph")
                 continue
-            node_from_rf.should_reanalyze = True
+            self.call_graph.mark_as_reanalye(node_from_rf)
             # For soundness, don't use two new terminative rules on `node_from_rf`'s callers,
             # because changes on `node_from_rf` may affect inline behavior of CSA. We assume
             # that if caller doesn't change, the inline behavior of it will not change.(If 
             # inline behavior changes actually, it doesn't influence soundness, beacuse the
             # caller or more high level caller must be changed and mark as reanalyze.)
             worklist = [caller for caller in node_from_rf.callers]
-            while len(worklist) is not 0:
+            while len(worklist) != 0:
                 node: CallGraphNode = worklist.pop()
                 if node.should_reanalyze:
                     continue
@@ -325,7 +351,7 @@ class FileInCDB:
                 node_in_baseline_cg = baseline_cg_with_fs.get_node_if_exist(node.fname)
                 if node_in_baseline_cg:
                     for caller in node.callers:
-                        if node_in_baseline_cg.is_in_callers(caller.fname):
+                        if node_in_baseline_cg.in_callers(caller.fname):
                             if caller.fname in node_in_baseline_cg.inline_callers:
                                 worklist.append(caller)
                         else:
@@ -334,6 +360,13 @@ class FileInCDB:
                     # New function node, don't need to consider its inline information.
                     for caller in node.callers:
                         worklist.append(caller)
+    
+    def output_functions_need_reanalyze(self):
+        with open(self.get_file_path(FileKind.RF), 'w') as f:
+            logger.debug(f"[Functions Need Reanalyze] {self.file_name}")
+            for fname in self.call_graph.functions_need_reanalyzed:
+                f.write(fname + '\n')
+                logger.debug(f"[Functions Need Reanalyze] {fname}")
 
 def getExtDefMap(efmfile): return open(efmfile).read()
 def virtualCall(file, method, has_arg, arg = None): 
@@ -393,7 +426,7 @@ class Configuration:
         self.baseline: Configuration = self
         if os.path.exists(self.compile_database):
             # If there is compile_commands.jsno exists, we can prepare file list early.
-            # Otherwise, we need configure to generate compile_commands.json.
+            # Otherwise, we need execute configure to generate compile_commands.json.
             self.prepare_file_list()
         
     def create_configure_script(self, cmake_path):
@@ -436,9 +469,9 @@ class Configuration:
         self.file_list_index = {}
         self.file_list  = []
         with open(self.compile_database, 'r') as f:
-            files = json.load(f)
-            for (idx, file) in enumerate(files):
-                compile_command = CompileCommand(file)
+            cdb = json.load(f)
+            for (idx, ccdb) in enumerate(cdb):
+                compile_command = CompileCommand(ccdb)
                 if compile_command.language == 'c++':
                     extname = '.ii'
                 elif compile_command.language == 'c':
@@ -536,7 +569,7 @@ class Configuration:
             self.session_times['preprocess_repo'] = SessionStatus.Failed
             logger.error(f"[Preprocess Files Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
     
-    def extract_inc_info(self, inc:bool=True):
+    def extract_inc_info(self):
         '''
         use clang_tool/CollectIncInfo.cpp to generate information used by incremental analysis
         '''
@@ -561,7 +594,7 @@ class Configuration:
         commands.extend(['--plugin', str(plugin_path)])
         commands.extend(['-f', str(self.preprocess_compile_database)])
         commands.extend(['-o', str(self.inc_info_path)])
-        if inc and self.incrementable:
+        if self.incrementable:
             commands.extend(['--file-list', f"{self.preprocess_diff_files_path}"])
         
         extract_ii_script = ' '.join(commands)
@@ -574,14 +607,14 @@ class Configuration:
             self.session_times['extract_inc_info'] = SessionStatus.Failed
             logger.error(f"[Extract Inc Info Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
 
-    def generate_efm(self, inc:bool=True):
+    def generate_efm(self):
         start_time = time.time()
         remake_dir(self.csa_path, "[EDM Files DIR exists]")
         commands = DEFAULT_PANDA_COMMANDS.copy()
         commands.append('-APL') # Prepare CTU analysis for loading AST files.
         commands.extend(['-f', str(self.compile_database)])
         commands.extend(['-o', str(self.csa_path)])
-        if inc and self.incrementable:
+        if self.incrementable:
             commands.extend(['--file-list', f"{self.diff_files_path}"])
         if self.analyze_opts.verbose:
             commands.extend(['--verbose'])
@@ -599,7 +632,7 @@ class Configuration:
             self.session_times['generate_efm'] = time.time() - start_time
             logger.error(f"[Generating EFM Files Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
  
-        if inc and self.incrementable:
+        if self.incrementable:
             # Combine baseline efm and new efm, reserve `usr`s which not appear in new efm
             # cover `usr`s updated in new efm
             baseline_edm_file = self.baseline.csa_path / 'externalDefMap.txt'
@@ -648,7 +681,7 @@ class Configuration:
 
             GenerateFinalExternalFunctionMap(self.analyze_opts, self.diff_file_list, str(baseline_edm_file))
 
-    def execute_csa(self, inc:bool=True):
+    def execute_csa(self):
         start_time = time.time()
         commands = DEFAULT_PANDA_COMMANDS.copy()
         if self.analyze_opts.verbose:
@@ -696,7 +729,7 @@ class Configuration:
         commands.extend(['-f', str(self.compile_database)])
         commands.extend(['-o', str(self.csa_path)])
         
-        if inc and self.incrementable:
+        if self.incrementable:
             commands.extend(['--file-list', f"{self.diff_files_path}"])
         csa_script = ' '.join(commands)
         logger.debug("[Executing CSA Files Script] " + csa_script)
@@ -747,7 +780,7 @@ class Configuration:
             f_prep_diff_files.close()
             f_diff_lines.close()
 
-            self.incrementable = True
+            self.incrementable = self.analyze_opts.inc and True
             self.session_times['diff_with_other'] = time.time() - start_time
         else:
             self.session_times['diff_with_other'] = SessionStatus.Failed
@@ -868,7 +901,7 @@ class Configuration:
 
     def process_file_list(self, method):
         file_list = self.diff_file_list \
-            if self.analyze_opts.inc and self.incrementable else self.file_list
+            if self.incrementable else self.file_list
         # Can't use mutilprocessing, because every process has its own memory space.
         # with mp.Pool(self.analyze_opts.jobs) as p:
         #     p.starmap(virtualCall, [(file, method, False) for file in file_list])
@@ -890,6 +923,7 @@ class Configuration:
         self.session_times['parse_function_summaries'] = SessionStatus.Failed
         assert (self.file_list is not None)
         self.process_file_list(FileInCDB.parse_fs_file)
+        logger.info(f"[Parse Function Summaries] Parse function summaries successfully.")
         self.session_times['parse_function_summaries'] = time.time() - start_time
 
     def parse_call_graph(self):
@@ -897,21 +931,23 @@ class Configuration:
         self.session_times['parse_call_graph'] = SessionStatus.Failed
         assert (self.file_list is not None)
         self.process_file_list(FileInCDB.parse_cg_file)
+        logger.info(f"[Parse Call Graph] Parse call graph successfully.")
         self.session_times['parse_call_graph'] = time.time() - start_time
 
     def parse_functions_changed(self):
         start_time = time.time()
         self.session_times['parse_functions_changed'] = SessionStatus.Failed
         assert (self.file_list is not None)
-        self.process_file_list(FileInCDB.parse_rf_file)
+        self.process_file_list(FileInCDB.parse_cf_file)
+        logger.info(f"[Parse Function Changed] Parse function changed successfully.")
         self.session_times['parse_functions_changed'] = time.time() - start_time
 
-    def propogate_reanalyze_attr(self):
-        self.session_times['propogate_reanalyze_attr'] = SessionStatus.Skipped
-        if not (self.analyze_opts.inc and self.incrementable):
+    def propagate_reanalyze_attr(self):
+        self.session_times['propagate_reanalyze_attr'] = SessionStatus.Skipped
+        if not self.incrementable:
             return
         start_time = time.time()
-        self.session_times['propogate_reanalyze_attr'] = SessionStatus.Failed
+        self.session_times['propagate_reanalyze_attr'] = SessionStatus.Failed
         threads = []
         for file in self.diff_file_list:
             arg = None
@@ -921,6 +957,7 @@ class Configuration:
                 #                                 None if file.diff_info.entire_file \
                 #                                 else file.diff_info.origin_file.call_graph \
                 #                                 ) for file in file_list])
+                print(f"origin file: {file.diff_info.origin_file.prep_file}")
                 arg = None if file.diff_info.entire_file else file.diff_info.origin_file.call_graph
             else:
                 # with mp.Pool(self.analyze_opts.jobs) as p:
@@ -930,9 +967,12 @@ class Configuration:
             # thread.start()
             # threads.append(thread)
             file.propagate_reanalyze_attribute(arg)
+            file.output_functions_need_reanalyze()
         # for thread in threads:
         #     thread.join()
-        self.session_times['propogate_reanalyze_attr'] = time.time() - start_time
+
+        logger.info(f"[Propagate Reanalyze Attr] Propagate reanalyze attribute successfully.")
+        self.session_times['propagate_reanalyze_attr'] = time.time() - start_time
 
     def get_session_times(self):
         ret = "{\n"
@@ -949,11 +989,7 @@ class Configuration:
         ret = f"build path: {self.build_path}\n"
         ret += "OPTIONS:\n"
         for option in self.options:
-            ret += f"   {option.name:<40} | {option.value}\n"
-        if len(self.diff_file_list) > 0:
-            ret += "DIFF:\n"
-            for diff_file in self.diff_file_list:
-                ret += str(diff_file.diff_info)
+            ret += f"   {option.name:<40} | {option.value}\n"    
         ret += f"execution time: {self.get_session_times()}\n"
         return ret
 
@@ -993,32 +1029,34 @@ class Repository:
         self.extract_ii_every_config(inc)
         self.generate_efm_for_every_config(inc)
 
-    def is_incremental_session(self, session):
-        incremental_sessions = [Configuration.extract_inc_info, Configuration.generate_efm, Configuration.execute_csa]
-        if session in incremental_sessions:
-            return True
-        return False
-
-    def process_every_config(self, session, inc:bool=True, **kwargs):
+    def process_every_config(self, sessions, **kwargs):
         if not self.running_status:
             return
         for config in self.configurations:
-            if self.is_incremental_session(session):
-                getattr(config, session.__name__)(inc, **kwargs)
+            if isinstance(sessions, list):
+                for session in sessions:
+                    getattr(config, session.__name__)(**kwargs)
+                    if config.session_times[session.__name__] == SessionStatus.Failed:
+                        print(f"Session {session.__name__} failed, stop all sessions.")
+                        self.running_status = False
+                        return
             else:
-                getattr(config, session.__name__)(**kwargs)
-            if config.session_times[session.__name__] == SessionStatus.Failed:
-                print(f"Session {session.__name__} failed, stop all sessions.")
-                self.running_status = False
-                return
+                getattr(config, sessions.__name__)(**kwargs)
+                if config.session_times[sessions.__name__] == SessionStatus.Failed:
+                    print(f"Session {sessions.__name__} failed, stop all sessions.")
+                    self.running_status = False
+                    return
+
 
     def build_every_config(self):
         self.process_every_config(Configuration.configure)
 
     def extract_ii_every_config(self):
-        self.process_every_config(Configuration.extract_inc_info, inc=self.analyze_opts.inc)
-        self.process_every_config(Configuration.parse_call_graph)
-        self.process_every_config(Configuration.parse_functions_changed)
+        self.process_every_config([
+            Configuration.extract_inc_info,
+            Configuration.parse_call_graph,
+            Configuration.parse_functions_changed
+        ])
 
     def diff_every_config(self):
         self.process_every_config(Configuration.diff_with_other, other=self.default_config)
@@ -1027,16 +1065,15 @@ class Repository:
         self.process_every_config(Configuration.preprocess_repo)
 
     def generate_efm_for_every_config(self):
-        self.process_every_config(Configuration.generate_efm, inc=self.analyze_opts.inc)
+        self.process_every_config(Configuration.generate_efm)
 
     def execute_csa_for_every_config(self):
-        self.process_every_config(Configuration.propogate_reanalyze_attr)
-        self.process_every_config(Configuration.execute_csa, inc=self.analyze_opts.inc)
-        self.process_every_config(Configuration.parse_function_summaries)
-    
-    def generate_global_fsum(self):
-        self.process_every_config(Configuration.parse_function_summaries)
-    
+        self.process_every_config([
+            Configuration.propagate_reanalyze_attr,
+            Configuration.execute_csa,
+            Configuration.parse_function_summaries
+        ])
+
     def session_summary(self):
         ret = f"name: {self.name}\nsrc: {self.src_path}\n"
         for config in self.configurations:
@@ -1077,13 +1114,13 @@ def main():
         #     'options_list': [
         #     ]
         # },
-        # {
-        #     'name': 'xgboost', 
-        #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/xgboost', 
-        #     'options_list': [
-        #         [Option('GOOGLE_TEST', 'ON')]
-        #     ]
-        # },
+        {
+            'name': 'xgboost', 
+            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/xgboost', 
+            'options_list': [
+                [Option('GOOGLE_TEST', 'ON')]
+            ]
+        },
         # {
         #     'name': 'opencv', 
         #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/opencv', 
@@ -1091,18 +1128,18 @@ def main():
         #         [Option('WITH_CLP', 'ON')]
         #     ]
         # },
-        {
-            'name': 'ica-demo',
-            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/ica-demo',
-            'options_list': [
-                # [Option('CHANGE_ALL', 'ON')],
-                [Option('GLOBAL_CONSTANT', 'ON')],
-                # [Option('VIRTUAL_FUNCTION', 'ON')],
-                # [Option('RECORD_FIELD', 'ON')],
-                # [Option('FEATURE_UPGRADE', 'ON')],
-                # [Option('COMMON_CHANGE', 'ON')],
-            ]
-        }
+        # {
+        #     'name': 'ica-demo',
+        #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/ica-demo',
+        #     'options_list': [
+        #         [Option('CHANGE_ALL', 'ON')],
+        #         # [Option('GLOBAL_CONSTANT', 'ON')],
+        #         # [Option('VIRTUAL_FUNCTION', 'ON')],
+        #         # [Option('RECORD_FIELD', 'ON')],
+        #         # [Option('FEATURE_UPGRADE', 'ON')],
+        #         # [Option('COMMON_CHANGE', 'ON')],
+        #     ]
+        # }
     ]
 
     repo_list: List[Repository] = []
@@ -1112,11 +1149,14 @@ def main():
         repo_list.append(repo_db)
         logger.info('-------------BEGIN SUMMARY-------------\n')
         # repo_db.build_every_config()
-        # repo_db.preprocess_every_config()
+        repo_db.preprocess_every_config()
         repo_db.diff_every_config()
         repo_db.extract_ii_every_config()
         repo_db.generate_efm_for_every_config()
         repo_db.execute_csa_for_every_config()
+
+        # Copy compile_commands.json to build dir for clangd.
+        shutil.copy(str(repo_db.default_config.compile_database), str(repo_db.src_path / 'build'))
 
     for repo_db in repo_list:
         logger.TAG = repo_db.name

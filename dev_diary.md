@@ -129,3 +129,7 @@
 ## 解决方案
 - 重写`getFunctionName`函数，过滤掉可能的loc信息。虽然这会导致不同函数有相同的函数名，但是CSA的`-analyze-function`本身就有这个问题，并且这种带loc信息的函数在项目中可能并没有那么多。
 - 已知可以通过调整`ASTContext.PrintingPolicy`的`AnonymousTagLocations`字段为`false`来屏蔽掉部分函数名中的location信息，例如匿名struct/union，但是无法屏蔽掉参数类型的location信息。
+
+# 2024/10/17
+## 待完成功能
+- 为CSA添加指定多函数分析的功能，现有CSA仅支持指定一个函数进行分析。
