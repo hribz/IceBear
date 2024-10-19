@@ -21,8 +21,8 @@ PWD = Path(".").absolute()
 EXTRACT_II = str(PWD / 'build/clang_tool/collectIncInfo')
 EXTRACT_CG = str(PWD / 'build/clang_tool/extractCG')
 PANDA = 'panda'
-MY_CLANG = '/home/xiaoyu/llvm/llvm-project/build/bin/clang'
-MY_CLANG_PLUS_PLUS = '/home/xiaoyu/llvm/llvm-project/build/bin/clang++'
+MY_CLANG = 'clang'
+MY_CLANG_PLUS_PLUS = 'clang++'
 example_compiler_action_plugin = {
     "comment": "Example plugin for Panda driver.",
     "type": "CompilerAction",
@@ -211,11 +211,14 @@ class FileInCDB:
         self.call_graph: CallGraph = None
         if extname:
             self.prep_file: str = str(self.parent.preprocess_path) + self.file_name + extname
+            self.diff_file: str = str(self.parent.diff_path) + self.file_name + extname
     
     def get_file_path(self, kind: FileKind=None):
         if not kind:
             return self.file_name
-        if kind == FileKind.AST:
+        if kind == FileKind.DIFF:
+            return (self.diff_file)
+        elif kind == FileKind.AST:
             return (self.csa_file) + '.ast'
         elif kind == FileKind.EFM:
             return (self.csa_file) + '.extdef'
@@ -259,11 +262,11 @@ class FileInCDB:
                         self.call_graph.add_node(caller, callee)
 
     def parse_cf_file(self):
-        rf_file = self.get_file_path(FileKind.CF)
-        if not os.path.exists(rf_file):
+        cf_file = self.get_file_path(FileKind.CF)
+        if not os.path.exists(cf_file):
             return
         self.functions_changed = []
-        with open(rf_file, 'r') as f:
+        with open(cf_file, 'r') as f:
             for line in f.readlines():
                 line = line.strip()
                 self.functions_changed.append(line)
@@ -299,11 +302,11 @@ class FileInCDB:
         # And the terminative rule is cannot find caller anymore, or caller has been mark as reanalyzed.
         for fname in self.functions_changed:
             # Propagate to all callers
-            node_from_rf = self.call_graph.get_node_if_exist(fname)
-            if not node_from_rf:
+            node_from_cf = self.call_graph.get_node_if_exist(fname)
+            if not node_from_cf:
                 logger.error(f"[Propagate Func Reanalyze] Can not found {fname} in call graph")
                 continue
-            worklist = [node_from_rf]
+            worklist = [node_from_cf]
             while len(worklist) != 0:
                 node = worklist.pop()
                 if node.should_reanalyze:
@@ -332,17 +335,17 @@ class FileInCDB:
         #    traverse `fname` by reverse post order, this kind of callers have been processed before,
         #    it's ok to terminate at these callers.
         for fname in self.functions_changed:
-            node_from_rf = self.call_graph.get_node_if_exist(fname)
-            if not node_from_rf:
+            node_from_cf = self.call_graph.get_node_if_exist(fname)
+            if not node_from_cf:
                 logger.error(f"[Propagate Func Reanalyze] Can not found {fname} in call graph")
                 continue
-            self.call_graph.mark_as_reanalye(node_from_rf)
-            # For soundness, don't use two new terminative rules on `node_from_rf`'s callers,
-            # because changes on `node_from_rf` may affect inline behavior of CSA. We assume
+            self.call_graph.mark_as_reanalye(node_from_cf)
+            # For soundness, don't use two new terminative rules on `node_from_cf`'s callers,
+            # because changes on `node_from_cf` may affect inline behavior of CSA. We assume
             # that if caller doesn't change, the inline behavior of it will not change.(If 
             # inline behavior changes actually, it doesn't influence soundness, beacuse the
             # caller or more high level caller must be changed and mark as reanalyze.)
-            worklist = [caller for caller in node_from_rf.callers]
+            worklist = [caller for caller in node_from_cf.callers]
             while len(worklist) != 0:
                 node: CallGraphNode = worklist.pop()
                 if node.should_reanalyze:
@@ -369,11 +372,25 @@ class FileInCDB:
                 logger.debug(f"[Functions Need Reanalyze] {fname}")
 
 def getExtDefMap(efmfile): return open(efmfile).read()
+
 def virtualCall(file, method, has_arg, arg = None): 
     if has_arg:
         getattr(file, method.__name__)(arg)
     else:
         getattr(file, method.__name__)()
+
+def replace_loc_info(pair):
+    src, dest = pair
+    try:
+        pattern = re.compile(r'^# \d+')
+        with open(src, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        new_lines = ["" if pattern.match(line) else line for line in lines]
+        makedir(os.path.dirname(dest))
+        with open(dest, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+    except Exception as e:
+        print(f"Error processing {src}: {e}")
 
 class Configuration:
     name: str
@@ -456,6 +473,7 @@ class Configuration:
         self.preprocess_compile_database = self.preprocess_path / 'preprocess_compile_commands.json'
         self.preprocess_diff_files_path = self.preprocess_path / 'preprocess_diff_files.txt'
         self.csa_path = self.workspace / 'csa-ctu-scan'
+        self.diff_path = self.workspace / 'diff'
         self.inc_info_path = self.workspace / 'inc_info'
         self.diff_files_path = self.workspace / 'diff_files.txt'
         self.diff_lines_path = self.workspace / 'diff_lines.json'
@@ -528,8 +546,9 @@ class Configuration:
         with open(plugin_path, 'w') as f:
             plugin = example_compiler_action_plugin
             plugin['action']['title'] = 'Preprocess Files'
-            # '-P' will clean line information in preprocessed files 
-            plugin['action']['args'] = ['-E', "-P"] 
+            # '-P' will clean line information in preprocessed files.
+            # Error! Line information should not ignored!
+            plugin['action']['args'] = ['-E'] 
             plugin['action']['extname'] = ['.i', '.ii']
             json.dump(plugin, f, indent=4)
         commands = DEFAULT_PANDA_COMMANDS.copy()
@@ -745,20 +764,27 @@ class Configuration:
             self.session_times['execute_csa'] = time.time() - start_time
             logger.error(f"[Executing CSA Files Failed]\nstdout: \n{e.stdout}\n stderr: \n{e.stderr}")
     
+    def prepare_diff_dir(self):
+        remake_dir(self.diff_path, "[Diff Files DIR exists]")
+        with mp.Pool(self.analyze_opts.jobs) as p:
+            p.map(replace_loc_info, [(file.prep_file, file.diff_file) for file in self.file_list])
+
     def diff_with_other(self, other):
+        # Replace all preprocess location info to empty lines.
+        self.prepare_diff_dir()
         if self == other:
             logger.info(f"[Skip Diff] Repo {str(self.build_path)} is the same as {str(other.build_path)}")
             self.session_times['diff_with_other'] = SessionStatus.Skipped
             return
         start_time = time.time()
         self.baseline = other
-        if not self.preprocess_path.exists():
-            logger.error(f"Preprocess files DIR {self.preprocess_path} not exists")
+        if not self.diff_path.exists():
+            logger.error(f"Preprocess files DIR {self.diff_path} not exists")
             return
-        if not other.preprocess_path.exists():
-            logger.error(f"Preprocess files DIR {other.preprocess_path} not exists")
+        if not other.diff_path.exists():
+            logger.error(f"Preprocess files DIR {other.diff_path} not exists")
             return
-        self.diff_two_dir(self.preprocess_path, other.preprocess_path, other)
+        self.diff_two_dir(self.diff_path, other.diff_path, other)
         if self.status == 'DIFF':
             logger.info(f"[Parse Diff Result Success] diff file number: {len(self.diff_file_list)}")
             
@@ -818,8 +844,8 @@ class Configuration:
         file: str
         file_in_cdb: FileInCDB
         origin_file: str
-        my_build_dir_in_preprocess_path = None
-        other_build_dir_in_preprocess_path = None
+        my_build_dir_in_diff_path = None
+        my_build_dir_in_diff_path = None
         for line in (diff_out).split('\n'):
             line: str
             if line.startswith('@@'):
@@ -837,11 +863,11 @@ class Configuration:
             elif line.startswith('---'):
                 file_in_cdb = None
                 spilt_line = line.split()
-                origin_file = self.get_origin_file_name(spilt_line[1], str(other.preprocess_path), ['.i', '.ii'])
+                origin_file = self.get_origin_file_name(spilt_line[1], str(other.diff_path), ['.i', '.ii'])
             elif line.startswith('+++'):
                 spilt_line = line.split()
                 file = spilt_line[1]
-                file_in_cdb = self.get_file(self.get_origin_file_name(file, str(self.preprocess_path), ['.i', '.ii']))
+                file_in_cdb = self.get_file(self.get_origin_file_name(file, str(self.diff_path), ['.i', '.ii']))
                 if file_in_cdb:
                     self.diff_file_list.append(file_in_cdb)
                     file_in_cdb.diff_info = DiffResult(file_in_cdb)
@@ -852,7 +878,7 @@ class Configuration:
                 diff = Path(spilt_line[2][:-1]) / spilt_line[3]
                 logger.debug(f"[Parse Diff Result Only in] {diff}")
                 try:
-                    diff.relative_to(self.preprocess_path)
+                    diff.relative_to(self.diff_path)
                     is_my_file_or_dir = True
                 except ValueError:
                     is_my_file_or_dir = False
@@ -861,8 +887,8 @@ class Configuration:
                     # is file
                     if is_my_file_or_dir:
                         # only record new file in my build directory
-                        # diff = self.get_origin_file_name(str(diff), str(self.preprocess_path), ['.i', '.ii'])
-                        file_in_cdb = self.get_file(self.get_origin_file_name(str(diff), str(self.preprocess_path), ['.i', '.ii']))
+                        # diff = self.get_origin_file_name(str(diff), str(self.diff_path), ['.i', '.ii'])
+                        file_in_cdb = self.get_file(self.get_origin_file_name(str(diff), str(self.diff_path), ['.i', '.ii']))
                         if file_in_cdb:
                             file_in_cdb.diff_info = DiffResult(file_in_cdb, True)
                             self.diff_file_list.append(file_in_cdb)
@@ -871,29 +897,29 @@ class Configuration:
                     if is_my_file_or_dir:
                         # diff = /path_to_preprocess/path_to_build0
                         # relative_dir = path_to_build0
-                        relative_dir = diff.relative_to(self.preprocess_path)
+                        relative_dir = diff.relative_to(self.diff_path)
                         logger.debug(f"[Parse Diff Result] Find my dir: {diff} relative_dir : {relative_dir} build_path {self.build_path}")
                         if "/" + str(relative_dir) == str(self.build_path):
-                            my_build_dir_in_preprocess_path = str(diff)
+                            my_build_dir_in_diff_path = str(diff)
                     else:
                         # diff = /path_to_preprocess/path_to_build
                         # relative_dir = path_to_build
-                        relative_dir = diff.relative_to(other.preprocess_path)
+                        relative_dir = diff.relative_to(other.diff_path)
                         logger.debug(f"[Parse Diff Result] Find other dir: {diff} relative_dir : {relative_dir} build_path {other.build_path}")
                         if "/" + str(relative_dir) == str(other.build_path):
-                            other_build_dir_in_preprocess_path = str(diff)
-                    if my_build_dir_in_preprocess_path or other_build_dir_in_preprocess_path:
-                        if my_build_dir_in_preprocess_path and other_build_dir_in_preprocess_path:
+                            my_build_dir_in_diff_path = str(diff)
+                    if my_build_dir_in_diff_path or my_build_dir_in_diff_path:
+                        if my_build_dir_in_diff_path and my_build_dir_in_diff_path:
                             # eliminate the impact of different build path
                             logger.debug(f"[Parse Diff Result Recursively] diff build directory {diff} in preprocess path")
-                            self.diff_two_dir(my_build_dir_in_preprocess_path, other_build_dir_in_preprocess_path, other)
-                            my_build_dir_in_preprocess_path = other_build_dir_in_preprocess_path = None
+                            self.diff_two_dir(my_build_dir_in_diff_path, my_build_dir_in_diff_path, other)
+                            my_build_dir_in_diff_path = my_build_dir_in_diff_path = None
                     elif is_my_file_or_dir:
                         logger.debug(f"[Parse Diff Directory] find dir {diff} only in one build path")
                         for diff_file in diff.rglob("*"):
                             if diff_file.is_file():
                                 file = str(diff_file)
-                                file = self.get_origin_file_name(str(diff_file), str(self.preprocess_path), ['.i', '.ii'])
+                                file = self.get_origin_file_name(str(diff_file), str(self.diff_path), ['.i', '.ii'])
                                 file_in_cdb = self.get_file(file)
                                 if file_in_cdb:
                                     file_in_cdb.diff_info = DiffResult(file_in_cdb, True)
@@ -957,7 +983,6 @@ class Configuration:
                 #                                 None if file.diff_info.entire_file \
                 #                                 else file.diff_info.origin_file.call_graph \
                 #                                 ) for file in file_list])
-                print(f"origin file: {file.diff_info.origin_file.prep_file}")
                 arg = None if file.diff_info.entire_file else file.diff_info.origin_file.call_graph
             else:
                 # with mp.Pool(self.analyze_opts.jobs) as p:

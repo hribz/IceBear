@@ -8,30 +8,23 @@
 #include <clang/AST/ExprCXX.h>
 #include <clang/AST/Stmt.h>
 #include <clang/Basic/LLVM.h>
-#include <cstddef>
-#include <filesystem>
 #include <iostream>
 #include <fstream>
 #include <iterator>
-#include <llvm-17/llvm/ADT/StringRef.h>
-#include <llvm-17/llvm/Support/Error.h>
-#include <llvm-17/llvm/Support/JSON.h>
-#include <llvm-17/llvm/Support/raw_ostream.h>
+#include <llvm/ADT/StringRef.h>
+#include <llvm/Support/Error.h>
+#include <llvm/Support/JSON.h>
+#include <llvm/Support/raw_ostream.h>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
-#include <stack>
 #include <utility>
 #include <vector>
 
-#include "clang/AST/AST.h"
 #include "clang/AST/RecursiveASTVisitor.h"
-#include "clang/Frontend/FrontendActions.h"
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "clang/Tooling/Tooling.h"
-#include "clang/ASTMatchers/ASTMatchers.h"
-#include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendAction.h"
 #include "clang/Index/USRGeneration.h"
@@ -43,86 +36,7 @@
 
 using namespace clang;
 using namespace clang::tooling;
-using namespace clang::ast_matchers;
 using SetOfConstDecls = llvm::DenseSet<const Decl *>;
-
-/// Don't use AnalysisDeclContext::getFunctionName because it contain loc info.
-/// We need to make sure the function name is same before and after preprocess.
-std::string getFunctionName(const Decl *D) {
-  std::string Str;
-  llvm::raw_string_ostream OS(Str);
-  const ASTContext &Ctx = D->getASTContext();
-
-  if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
-    OS << FD->getQualifiedNameAsString();
-
-    // In C++, there are overloads.
-
-    if (Ctx.getLangOpts().CPlusPlus) {
-      OS << '(';
-      for (const auto &P : FD->parameters()) {
-        if (P != *FD->param_begin())
-          OS << ", ";
-        // `P->getIdentifier()` can't determine if this param's type has name.
-        // It just means this param doesn't have specific identifier (e.g. f(int )). 
-        auto PType = P->getType();
-        PType.getAsString();
-        if (PType->hasUnnamedOrLocalType()) {
-            if (PType->isReferenceType()) {
-                auto NRType = PType.getNonReferenceType();
-                if (NRType.hasQualifiers())
-                    OS << NRType.getQualifiers().getAsString();
-                OS << " LocType ";
-                if (PType->isLValueReferenceType()) {
-                    OS << "&";
-                } else {
-                    OS << "&&";
-                }
-            } else {
-                if (PType.hasQualifiers())
-                    OS << PType.getQualifiers().getAsString();
-                OS << " LocType ";
-            }
-        } else {
-            OS << P->getType();
-        }
-      }
-      OS << ')';
-    }
-
-  } else if (isa<BlockDecl>(D)) {
-    // Blocks support disabled - compile with -fblocks or pick a deployment target that supports them
-    PresumedLoc Loc = Ctx.getSourceManager().getPresumedLoc(D->getLocation());
-
-    if (Loc.isValid()) {
-      OS << "block (line: " << Loc.getLine() << ", col: " << Loc.getColumn()
-         << ')';
-    }
-
-  } else if (const ObjCMethodDecl *OMD = dyn_cast<ObjCMethodDecl>(D)) {
-
-    // FIXME: copy-pasted from CGDebugInfo.cpp.
-    OS << (OMD->isInstanceMethod() ? '-' : '+') << '[';
-    const DeclContext *DC = OMD->getDeclContext();
-    if (const auto *OID = dyn_cast<ObjCImplementationDecl>(DC)) {
-      OS << OID->getName();
-    } else if (const auto *OID = dyn_cast<ObjCInterfaceDecl>(DC)) {
-      OS << OID->getName();
-    } else if (const auto *OC = dyn_cast<ObjCCategoryDecl>(DC)) {
-      if (OC->IsClassExtension()) {
-        OS << OC->getClassInterface()->getName();
-      } else {
-        OS << OC->getIdentifier()->getNameStart() << '('
-           << OC->getIdentifier()->getNameStart() << ')';
-      }
-    } else if (const auto *OCD = dyn_cast<ObjCCategoryImplDecl>(DC)) {
-      OS << OCD->getClassInterface()->getName() << '(' << OCD->getName() << ')';
-    }
-    OS << ' ' << OMD->getSelector().getAsString() << ']';
-  }
-
-  return Str;
-}
 
 static bool isChangedLine(const std::optional<std::vector<std::pair<int, int>>>& DiffLines, unsigned int line, unsigned int end_line) {
     if (!DiffLines) {
@@ -186,7 +100,7 @@ static void DumpCallGraph(CallGraph &CG, llvm::StringRef MainFilePath,
     for (CallGraphNode *N : RPOT) {
         if (N == CG.getRoot()) continue;
         Decl *D = N->getDecl();
-        outFile << getFunctionName(D);
+        outFile << AnalysisDeclContext::getFunctionName(D);
         if (printLoc) {
             outFile << " -> " << CGToRange[D].first << ", " << CGToRange[D].second;
         }
@@ -204,7 +118,7 @@ static void DumpCallGraph(CallGraph &CG, llvm::StringRef MainFilePath,
             // ret += ":";
             // ret += usr.c_str();
             // outFile << ret << "\n]\n";
-            outFile << getFunctionName(Callee);
+            outFile << AnalysisDeclContext::getFunctionName(Callee);
             if (printLoc) {
                 outFile << " -> " << CGToRange[Callee].first << ", " << CGToRange[Callee].second;
             }
@@ -234,7 +148,7 @@ static void DumpFunctionsNeedReanalyze(std::unordered_set<const Decl *> Function
         // ret += ":";
         // ret += usr.c_str();
         // outFile << ret << " ";
-        const std::string &fname = getFunctionName(D);
+        const std::string &fname = AnalysisDeclContext::getFunctionName(D);
         outFile << fname << "\n";
         llvm::outs() << "  ";
         llvm::outs() << fname;
@@ -483,10 +397,10 @@ public:
         const SourceManager &SM = Context->getSourceManager();
         FileID MainFileID = SM.getMainFileID();
         const FileEntry *FE = SM.getFileEntryForID(MainFileID);
-        MainFilePath = FE->getName();
+        MainFilePath = FE->tryGetRealPathName();
         // Don't print location information.
         auto PrintPolicy = Context->getPrintingPolicy();
-        PrintPolicy.AnonymousTagLocations = PrintLoc;
+        PrintPolicy.AnonymousTagLocations = true;
         Context->setPrintingPolicy(PrintPolicy);
         if (GlobalDiffLines) {
             // printJsonObject(*GlobalDiffLines);
@@ -502,9 +416,9 @@ public:
                 }
             } else if (auto new_file = GlobalDiffLines->getInteger(MainFilePath)) {
                 DiffLines = std::nullopt;
-                llvm::outs() << FE->getName() << " is new file.\n";
+                llvm::outs() << MainFilePath << " is new file.\n";
             } else {
-                llvm::errs() << FE->getName() << " has no diff lines information.\n";
+                llvm::errs() << MainFilePath << " has no diff lines information.\n";
             }
         }
     }

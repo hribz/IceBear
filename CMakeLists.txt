@@ -3,15 +3,15 @@ project(FunctionCallGraph)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True) 
 
-set(MY_LLVM_VERSION 17)
+set(MY_LLVM_VERSION 19.1.2)
 find_package(LLVM ${MY_LLVM_VERSION} REQUIRED CONFIG)
 message(STATUS "Found LLVM: ${LLVM_INCLUDE_DIRS}")
 
-set(CLANG_VERSION 17)
-list(APPEND CMAKE_PREFIX_PATH "/usr/lib/cmake/llvm-${MY_LLVM_VERSION}/")
-list(APPEND CMAKE_PREFIX_PATH "/usr/lib/cmake/clang-${MY_LLVM_VERSION}/")
+set(CLANG_VERSION 19)
+list(APPEND CMAKE_PREFIX_PATH "/usr/lib/cmake/llvm-${CLANG_VERSION}/")
+list(APPEND CMAKE_PREFIX_PATH "/usr/lib/cmake/clang-${CLANG_VERSION}/")
 
-find_package(Clang REQUIRED CONFIG)
+find_package(Clang ${MY_LLVM_VERSION} REQUIRED CONFIG)
 message(STATUS "Found Clang: ${CLANG_VERSION}")
 
 # Set the LLVM and Clang header and library paths
