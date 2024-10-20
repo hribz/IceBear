@@ -630,7 +630,7 @@ class Configuration:
         start_time = time.time()
         remake_dir(self.csa_path, "[EDM Files DIR exists]")
         commands = DEFAULT_PANDA_COMMANDS.copy()
-        commands.append('-APL') # Prepare CTU analysis for loading AST files.
+        commands.append('--ctu-loading-ast-files') # Prepare CTU analysis for loading AST files.
         commands.extend(['-f', str(self.compile_database)])
         commands.extend(['-o', str(self.csa_path)])
         if self.incrementable:
