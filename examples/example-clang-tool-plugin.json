@@ -1,0 +1,11 @@
+{
+    "comment": "Example plugin for Panda driver",
+    "type": "ClangToolAction",
+    "action": {
+        "title": "Executing static analyzer",
+        "tool": "clang-check",
+        "args": ["-analyze"],
+        "extname": ".clang-check",
+        "stream": "stderr"
+    }
+}

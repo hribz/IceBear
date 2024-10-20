@@ -1,0 +1,725 @@
+#!/usr/bin/env python3
+#-*- encoding: utf-8 -*-
+
+#################################################
+#  See Copyright Notice in file `LICENSE.txt`.  #
+#################################################
+
+import os
+import sys
+import json
+import argparse
+import multiprocessing as mp
+import subprocess as proc
+import time
+import atexit
+
+
+# Utils {{{
+def log(msg, opts=None):
+    if opts is not None and log.verbose is None:
+        log.verbose = opts.verbose
+    if log.verbose is True:
+        print('-- ' + msg, file=sys.stderr)
+log.verbose = None
+
+
+def fatal(msg): sys.exit('-- ' + msg)
+def warn(msg): print('-- ' + msg, file=sys.stderr)
+
+
+def PrintExcutionInfo():
+    if PrintExcutionInfo.print_time:
+        print('Total execution time: %.3lf sec' %
+                (time.time() - PrintExcutionInfo.start_time))
+atexit.register(PrintExcutionInfo)
+PrintExcutionInfo.start_time = time.time()
+PrintExcutionInfo.print_time = False
+
+
+def mkdir(dirname):
+    log('!: mkdir -p %s' % dirname)
+    if not os.path.exists(dirname):
+        try:
+            os.makedirs(dirname)
+        except FileExistsError:  # may happen when multi-thread
+            pass
+
+
+class CompileCommands:
+    def __init__(self, ccmd=None):
+        self.compiler = None
+        self.file = None
+        self.directory = None
+        self.arguments = None
+        self.language = None
+        if ccmd:
+            self.parse(ccmd)
+
+    def __str__(self):
+        return json.dumps(
+                {
+                    'arguments': self.arguments,
+                    'directory': self.directory,
+                    'file': self.file,
+                    'compiler': self.compiler,
+                    'language': self.language,
+                }, indent=4)
+
+    def parse(self, ccmd):
+        # Check the validity of a compile command.
+        if not CompileCommands.isValidCompileCommand(ccmd):
+            warn('W: Invalid compile command object.\n' +
+                     json.dumps(ccmd, indent=4))
+            return None
+
+        # directoy and file
+        self.directory = os.path.abspath(ccmd['directory'])
+        self.file = os.path.abspath(os.path.join(
+            self.directory, ccmd['file']))
+
+        # File type: clang::driver::types::lookupTypeForExtension
+        extname = os.path.splitext(self.file)[1][1:]
+        if extname == 'c':
+            self.language = 'c'
+        elif extname in {'C', 'cc', 'CC', 'cp', 'cpp', 'CPP',
+                'cxx', 'CXX', 'c++', 'C++'}:
+            self.language = 'c++'
+#       elif extname == 'i':
+#           self.language = 'PP-C'
+#       elif extname == 'ii':
+#           self.language = 'PP-C++'
+        else:
+            self.language = 'Unknown'
+
+        # command => arguments
+        arguments = None
+        if 'command' in ccmd:
+            from shlex import split
+            arguments = split(ccmd['command'])
+        else:
+            arguments = ccmd['arguments']
+
+        # compiler
+        self.compiler = arguments[0]
+
+        # Adjust arguments.
+        i, n = 0, len(arguments)
+        self.arguments = []
+        prune1 = {'-c', '-fsyntax-only', '-save-temps'}
+        prune2 = {'-o', '-MF', '-MT', '-MQ', '-MJ'}
+        prunes2 = {'-M', '-W', '-g'}
+        while True:
+            i += 1
+            if i >= n:
+                break
+            if arguments[i] in prune1:
+                continue
+            if arguments[i] in prune2:
+                i += 1
+                continue
+            if arguments[i][:3] == '-o=':
+                continue
+            if arguments[i][:2] in prunes2:
+                continue
+            self.arguments.append(arguments[i])
+            # Reset language if provided in command line arguments.
+            if arguments[i] == '-x':
+                self.language = arguments[i + 1]
+            elif arguments[i][:2] == '-x':
+                self.language = arguments[i][2:]
+
+        return self
+
+
+    @staticmethod
+    def isValidCompileCommand(ccmd):
+        return 'file' in ccmd and 'directory' in ccmd and \
+                ('arguments' in ccmd or 'command' in ccmd)
+
+
+class TaskPool:
+    def __init__(self, count=0):
+        assert count > 0, 'Invalid pool size.'
+        self.procs = []
+        self.stop = 0x42424242
+        self.tasks = mp.Queue()
+        for i in range(count):
+            proc = mp.Process(target=self._run_task)
+            proc.daemon = True
+            proc.start()
+            self.procs.append(proc)
+
+    def addTask(self, *args):
+        self.tasks.put(args)
+
+    def join(self):
+        for i in self.procs:
+            self.tasks.put(self.stop)
+        for i in self.procs:
+            i.join()
+
+    def _run_task(self):
+        while True:
+            args = self.tasks.get()
+            if args == self.stop:
+                break
+            (lambda action, *args: action(*args))(*args)
+
+
+def GetIndex(container, index, root='<root>'):
+    if index not in container:
+        raise SyntaxError('Index "%s" not found in %s' % (index, root))
+    return container[index]
+
+
+def GetIndexOrNone(container, index):
+    return container[index] if index in container else None
+
+
+class CompilerActionControl:
+    def __init__(self, title, args, extname=None, outopt=None):
+        self.title = title
+        self.args = args
+        if extname:
+            self.hasOutput = True
+            self.extname = extname
+            self.outopt = outopt if outopt is not None else '-o'
+            assert isinstance(self.extname, str) or \
+                    isinstance(self.extname, list), \
+                    'Index "extname" can only be string or list'
+        else:
+            self.hasOutput = False
+
+    def CreateFromPluginAction(action):
+        title = GetIndex(action, 'title', 'action')
+        args = GetIndex(action, 'args', 'action')
+        extname = GetIndexOrNone(action, 'extname')
+        outopt = GetIndexOrNone(action, 'outopt')
+        return CompilerActionControl(title, args, extname, outopt)
+
+    def getOutputExtensionName(self, language):
+        if not self.hasOutput:
+            return None
+        if isinstance(self.extname, str):
+            return self.extname
+        if language == 'c':
+            return self.extname[0]
+        if language == 'c++':
+            return self.extname[1]
+        assert False, 'UNREACHABLE: cannot determine extname.'
+
+    def getOutputName(self, outdir, ccdb):
+        assert os.path.isabs(ccdb.file), "'file' in cdb unit is not abspath"
+        return outdir + ccdb.file + self.getOutputExtensionName(ccdb.language)
+
+
+class ClangToolActionControl:
+    def __init__(self, title, tool, args, extname=None, stdout=None,
+            stderr=None):
+        self.title = title
+        self.tool = tool
+        self.args = args
+        self.extname = extname
+        self.stdout = stdout
+        self.stderr = stderr
+        assert not (self.stdout and self.stderr), \
+                'Cannot accept both stdout and stderr as output.'
+        if self.extname:
+            assert self.stdout or self.stderr, \
+                    'Capture output from either stdout or stderr'
+
+    def CreateFromPluginAction(action):
+        title = GetIndex(action, 'title', 'action')
+        tool = GetIndex(action, 'tool', 'action')
+        args = GetIndex(action, 'args', 'action')
+        extname = GetIndexOrNone(action, 'extname')
+        stdout, stderr = None, None
+        if extname:
+            stream = GetIndex(action, 'stream', 'action')
+            if stream == 'stdout':
+                stdout = proc.PIPE
+            if stream == 'stderr':
+                stderr = proc.PIPE
+            if not stdout and not stderr:
+                raise SyntaxError('Invalid value for index "stream" in action')
+        return ClangToolActionControl(
+                title, tool, args, extname, stdout, stderr)
+
+    def getOutputName(self, outdir, ccdb):
+        assert os.path.isabs(ccdb.file), "'file' in cdb unit is not abspath"
+        return outdir + ccdb.file + self.extname
+
+
+def ParsePlugins(plugins):
+    ret = []
+    for p in set(plugins):
+        p = os.path.abspath(p)
+        try:
+            plugobj = json.load(open(p))
+            actionTy = GetIndex(plugobj, 'type')
+            action = GetIndex(plugobj, 'action')
+            if actionTy == 'CompilerAction':
+                ret.append((CompilerAction,
+                    CompilerActionControl.CreateFromPluginAction(action)))
+                continue
+            if actionTy == 'ClangToolAction':
+                ret.append((ClangToolAction,
+                    ClangToolActionControl.CreateFromPluginAction(action)))
+                continue
+            raise SyntaxError('Invalid value for index "type"')
+        except OSError as eos:
+            fatal('Cannot read plugin file: %s' % eos)
+        except json.decoder.JSONDecodeError as ejson:
+            fatal('Syntax error in plugin file %s: %s' % (p, ejson))
+        except SyntaxError as se:
+            fatal('Invalid plugin file %s: %s' % (p, se))
+        except AssertionError as ae:
+            fatal('Invalid plugin file %s: %s' % (p, ae))
+    return ret
+
+
+class Default:
+    OutputPath = './panda-output'
+    CCompiler = 'clang'
+    CXXCompiler = 'clang++'
+    ExtDefMapper = 'clang-extdef-mapping'
+    CompilationDatabase = os.path.abspath('./compile_commands.json')
+    ExternalFunctionMap = 'externalDefMap.txt'
+    InvocationList = 'invocations.yaml'
+    InputFileList = 'inputs.ifl'
+    SourceFileList = 'source-files.txt'
+
+    SelfPath = os.path.realpath(__file__)
+
+    ProgramDescriptionMsg = 'A simple driver for pipelining tools based on ' \
+                            'compilation database.'
+# }}}
+
+
+def ParseArguments(argv): # {{{
+    Panda = argv[0]
+    Parser = argparse.ArgumentParser(
+            prog='panda', formatter_class=argparse.RawTextHelpFormatter,
+            description=Default.ProgramDescriptionMsg)
+    Parser.add_argument('--verbose', action='store_true', dest='verbose',
+                        help='Verbose output for debug.')
+    Parser.add_argument('-f', '--compilation-database', type=str, dest='cdb',
+                        help='Customize the input compilation database',
+                        default=Default.CompilationDatabase)
+    Parser.add_argument('-j', '--jobs', type=int, dest='jobs', default=1,
+                        help='Number of jobs can be executed in parallel.')
+    Parser.add_argument('-o', '--output', type=str, dest='output',
+                        default=Default.OutputPath,
+                        help='Write output files to directory.')
+
+    Parser.add_argument(
+            '-X', '--syntax', action='store_true', dest='syntax',
+            help='Test arguments and source code for frontend errors.')
+    Parser.add_argument(
+            '-C', '--compile', action='store_true', dest='genobj',
+            help='Recompile the source file.')
+    Parser.add_argument(
+            '-E', '--preprocess', action='store_true', dest='genii',
+            help='Generate the preprocessed source file dump.')
+    Parser.add_argument(
+            '-A', '--gen-ast', action='store_true', dest='genast',
+            help='Generate the Clang PCH format source file dump.')
+    Parser.add_argument(
+            '-B', '--gen-bc', action='store_true', dest='genbc',
+            help='Generate the target LLVM bitcode.')
+    Parser.add_argument(
+            '-R', '--gen-ll', action='store_true', dest='genll',
+            help='Generate the target LLVM IR text code.')
+    Parser.add_argument(
+            '-S', '--gen-asm', action='store_true', dest='genasm',
+            help='Generate the target assembly code.')
+    Parser.add_argument(
+            '-D', '--gen-dep', action='store_true', dest='gendep',
+            help='Generate dependency description.')
+    Parser.add_argument(
+            '-M', '--gen-extdef-mapping', action='store_true', dest='genefm',
+            help='Generate the external function map.')
+    Parser.add_argument(
+            '-P', '--gen-extdef-mapping-ast', action='store_true',
+            dest='genefmast', help='Generate the external function map for AST files.')
+    Parser.add_argument(
+            '-Y', '--gen-invocation-list', action='store_true', dest='genivcl',
+            help='Generate the invocation list.')
+    Parser.add_argument(
+            '-L', '--gen-input-file-list', action='store_true', dest='genifl',
+            help='Generate input file list.')
+    Parser.add_argument(
+            '-F', '--gen-source-file-list', action='store_true', dest='gensfl',
+            help='Generate source file list.')
+
+    Parser.add_argument(
+            '--analyze', type=str, dest='analyze', choices=['ctu', 'no-ctu'],
+            help='Execute Clang Static Analyzer.')
+    Parser.add_argument(
+            '--plugin', type=str, nargs='*', help='External tools to be executed.')
+
+    Parser.add_argument(
+            '--cc', type=str, dest='cc', default=Default.CCompiler,
+            help='Customize the C compiler.')
+    Parser.add_argument(
+            '--cxx', type=str, dest='cxx', default=Default.CXXCompiler,
+            help='Customize the C++ compiler.')
+    Parser.add_argument(
+            '--efmer', type=str, dest='efmer', default=Default.ExtDefMapper,
+            help='Customize the external function map generator.')
+
+    Parser.add_argument(
+            '--efm', type=str, dest='efm', default=Default.ExternalFunctionMap,
+            help='Customize the filename of output external function map.')
+    Parser.add_argument(
+            '--ivcl', type=str, dest='ivcl', default=Default.InvocationList,
+            help='Customize the filename of output invocation list.')
+    Parser.add_argument(
+            '--ifl', type=str, dest='ifl', default=Default.InputFileList,
+            help='Customize the filename of output input file list.')
+    Parser.add_argument(
+            '--sfl', type=str, dest='sfl', default=Default.SourceFileList,
+            help='Customize the filename of output source file list.')
+
+    Parser.add_argument(
+            '--sfl-prefix', type=str, dest='sflprefix',
+            help='Filter source file list with a prefix. Empty accepts all.')
+
+
+    Parser.add_argument(
+            '--ctu-on-demand-parsing', action='store_true', dest='genodp',
+            help='Prepare CTU analysis for on-demand-parsing. (alias to -MYL)')
+    Parser.add_argument(
+            '--ctu-loading-ast-files', action='store_true', dest='genlaf',
+            help='Prepare CTU analysis for loading AST files. (alias to -APL)')
+
+    Parser.add_argument(
+            'files', type=str, nargs='*',
+            help='Execute actions on specific files in compilation database.')
+    Parser.add_argument(
+            '--file-list', type=str, dest='filelist',
+            help='Execute actions for files on the list.')
+
+    Parser.add_argument(
+            '--print-execution-time', action='store_true', dest='print_time',
+            help='Print total execution time.')
+
+    opts = Parser.parse_args(argv[1:])
+    opts.output = os.path.abspath(opts.output)
+
+    if opts.print_time:
+        PrintExcutionInfo.print_time = True
+
+    if opts.genodp:
+        opts.genefm = True
+        opts.genivcl = True
+        opts.genifl = True
+    if opts.genlaf:
+        opts.genast = True
+        opts.genefmast = True
+        opts.genifl = True
+    if opts.files:
+        opts.files = set([os.path.abspath(os.path.join(os.path.curdir, i))
+            for i in opts.files])
+    if opts.filelist:
+        try:
+            files = set([os.path.abspath(os.path.join(os.path.curdir, i))
+                for i in open(opts.filelist).read().split('\n')])
+            opts.files = opts.files.union(files) if opts.files else files
+        except IOError as e:
+            fatal(str(e))
+    if opts.plugin:
+        opts.plugin = ParsePlugins(opts.plugin)
+
+    # Init log.verbose.
+    log('N: Running in verbose mode', opts)
+    log('Parsed command line options: ' + str(opts))
+
+    if opts.genefm and opts.genefmast:
+        fatal('Option -M and -P are conflict.')
+
+    if not (opts.cdb and os.path.exists(opts.cdb)):
+        fatal('Compilation database "' + opts.cdb +'" is unavailable.')
+
+    if opts.jobs <= 0:
+        fatal('Invalid count of jobs.')
+
+    # If ctu analysis is enabled, but required files are not generated, add
+    # them. Note: invocation list is always required no matter odp or laf mode
+    # is prepared.
+    if opts.analyze == 'ctu':
+        if not os.path.isfile(os.path.join(opts.output, opts.efm)):
+            opts.genefm = True
+        if not os.path.isfile(os.path.join(opts.output, opts.ivcl)):
+            opts.genivcl = True
+
+    return opts
+# }}}
+
+
+def CompilerAction(opts, ccdb, action):
+    compiler = {'c': opts.cc, 'c++': opts.cxx}
+    arguments = [compiler[ccdb.language]] + ccdb.arguments + action.args
+
+    if action.hasOutput:
+        output = action.getOutputName(opts.output, ccdb)
+        print('%s: %s' % (action.title, output))
+        arguments += [action.outopt, output]
+
+        # Create directory for output file.
+        mkdir(os.path.dirname(output))
+    else:
+        print('%s for %s' % (action.title, ccdb.file))
+
+    # Execute action commands.
+    log('!: ' + json.dumps(arguments))
+    with proc.Popen(arguments, cwd=ccdb.directory) as p:
+        ret = p.wait()
+    return ret
+
+
+SyntaxOnlyAction = CompilerActionControl(
+        'Checking syntax errors', ['-fsyntax-only', '-Wall'])
+CompilationAction = CompilerActionControl(
+        'Generating object file', ['-c', '-w'], '.o')
+PreprocessAction = CompilerActionControl(
+        'Generating preprocessed source file', ['-E'], ['.i', '.ii'])
+GenerateASTAction = CompilerActionControl(
+        'Generating AST dump file', ['-emit-ast', '-w'], '.ast')
+GenerateBitcodeAction = CompilerActionControl(
+        'Generating LLVM bitcode file', ['-c', '-emit-llvm', '-w'], '.bc')
+GenerateLLVMIRAction = CompilerActionControl(
+        'Generating LLVM IR file', ['-c', '-emit-llvm', '-S', '-w'], '.ll')
+GenerateAssemblyAction = CompilerActionControl(
+        'Generating assembly dump file', ['-S', '-w'], '.s')
+GenerateDependencyAction = CompilerActionControl(
+        'Generating dependency file', ['-fsyntax-only', '-w', '-M'], '.d', '-MF')
+# For analyzer, reset output and ctu arguments in self.args with opts.output.
+# Checkers in package deadcode are disabled by default, as they usually
+# generate only useless reports.
+ClangStaticAnalyzerAction = CompilerActionControl(
+        'Running static analyzer',
+        ['--analyze', '-Xanalyzer', '-analyzer-output=html',
+            '-Xanalyzer', '-analyzer-disable-checker=deadcode'])
+
+
+def ClangToolAction(opts, ccdb, action):
+    print('%s for %s' % (action.title, ccdb.file))
+    actionargs = []
+    for i in action.args:
+        actionargs.append(i.replace('/path/to/output', opts.output))
+    arguments = [action.tool, ccdb.file] + actionargs + ['--', '-w'] + \
+             ccdb.arguments
+    log('!: ' + json.dumps(arguments))
+    content = None
+    outstream = None
+    with proc.Popen(arguments, stdout=action.stdout, stderr=action.stderr,
+            cwd=ccdb.directory) as p:
+        if action.stdout:
+            outstream = 'stdout'
+            content = p.stdout.read().decode('utf-8')
+        if action.stderr:
+            outstream = 'stderr'
+            content = p.stderr.read().decode('utf-8')
+        ret = p.wait()
+    if content is not None:
+        output = action.getOutputName(opts.output, ccdb)
+        log('!: Write ' + outstream + ' output to file ' + output)
+        mkdir(os.path.dirname(output))
+        with open(output, 'w') as fout:
+            fout.write(content)
+    return ret
+
+
+# Initialize tool names after argument parsing in function 
+# PostArgumentParsingInitializations.
+ClangExtDefMappingAction = ClangToolActionControl(
+        'Generating raw external function map', Default.ExtDefMapper, [],
+        '.extdef', proc.PIPE)
+
+
+def getExtDefMap(efmfile): return open(efmfile).read()
+def GenerateFinalExternalFunctionMap(opts, cdb):
+    output = os.path.join(opts.output, opts.efm)
+    print('Generating global external function map: ' + output)
+    efm = {}
+    with mp.Pool(opts.jobs) as p:
+        for efmcontent in p.map(getExtDefMap,
+                [ClangExtDefMappingAction.getOutputName(opts.output, i) \
+                        for i in cdb]):
+            for efmline in efmcontent.split('\n'):
+                try: # The new "<usr-length>:<usr> <path>" format (D102669).
+                    lenlen = efmline.find(':')
+                    usrlen = int(efmline[:lenlen])
+                    usr = efmline[:lenlen + usrlen + 1]
+                    path = efmline[lenlen + usrlen + 2:]
+                    efm[usr] = path
+                except ValueError: # When <usr-length> is not available.
+                    efmitem = efmline.split(' ')
+                    if len(efmitem) == 2:
+                        efm[efmitem[0]] = efmitem[1]
+    with open(output, 'w') as fout:
+        for usr in efm:
+            path = efm[usr]
+            if opts.genefmast or opts.genast:
+                path = opts.output + path + '.ast'
+            fout.write('%s %s\n' % (usr, path))
+
+
+def GenerateInvocationListAction(opts, cdb):
+    output = os.path.join(opts.output, opts.ivcl)
+    print('Generating invocation list: ' + output)
+
+    resourceDir = '-resource-dir='
+    with proc.Popen(['clang', '-print-resource-dir'], stdout=proc.PIPE) as p:
+        resourceDir += p.stdout.read().decode('utf-8').strip()
+
+    mkdir(os.path.dirname(output))
+    with open(output, 'w') as fout:
+        for ccdb in cdb:
+            ivcl = [ccdb.compiler] + ccdb.arguments + \
+                    ['-c', '-working-directory=' + ccdb.directory, resourceDir]
+            content = json.dumps({ccdb.file : ivcl})
+            fout.write(content[1:-1] + '\n')
+
+
+def GenerateSourceFileListActionCollect(argv):
+    (ccdb, depfile) = argv
+    ret = set()
+    if not os.path.isfile(depfile):
+        warn('Rerun with -D to generate dependency file ' + depfile)
+        return ret
+    for i in open(depfile).read().split():
+        if not i or i == '\\' or i[-1] == ':':
+            continue
+        name = os.path.abspath(os.path.join(ccdb.directory, i))
+        if os.path.isfile(name):
+            ret.add(name)
+    return ret
+
+def GenerateSourceFileListAction(opts, cdb):
+    output = os.path.join(opts.output, opts.sfl)
+    print('Generating source file list: ' + output)
+
+    files = None
+    jobs = [(i, GenerateDependencyAction.getOutputName(opts.output, i)) \
+            for i in cdb]
+    with mp.Pool(opts.jobs) as pool:
+        files = list(set.union(
+            *pool.map(GenerateSourceFileListActionCollect, jobs)))
+    files.sort()
+
+    mkdir(os.path.dirname(output))
+    with open(output, 'w') as fout:
+        for i in files:
+            if not opts.sflprefix or i.startswith(opts.sflprefix):
+                fout.write(i + '\n')
+
+
+def GenerateInputFileListAction(opts, cdb):
+    output = os.path.join(opts.output, opts.ifl)
+    print('Generating input file list: ' + output)
+    mkdir(os.path.dirname(output))
+    with open(output, 'w') as fout:
+        for ccdb in cdb:
+            fout.write(ccdb.file + '\n')
+
+
+def PostArgumentParsingInitializations(opts):
+    # Set analyzer output path and ctu arguments.
+    ClangStaticAnalyzerAction.args += [
+            '-o', os.path.join(opts.output, 'csa-reports')
+            ]
+    if opts.verbose:
+        ClangStaticAnalyzerAction.args += [
+                '-Xanalyzer', '-analyzer-display-progress'
+                ]
+    if opts.analyze == 'ctu':
+        ctuConfigs = [
+                'experimental-enable-naive-ctu-analysis=true',
+                'ctu-dir=' + opts.output,
+                'ctu-index-name=' + opts.efm,
+                'ctu-invocation-list=' + os.path.join(opts.output, opts.ivcl),
+                ]
+        if opts.verbose:
+            ctuConfigs.append('display-ctu-progress=true')
+        ClangStaticAnalyzerAction.args += [
+                '-Xanalyzer', '-analyzer-config', '-Xanalyzer',
+                ','.join(ctuConfigs),
+                ]
+    # Set clang-extdef-mapping tool.
+    ClangExtDefMappingAction.tool = opts.efmer
+
+
+def CreateCompilationDatabaseObjectAction(opts, pool):
+    def action(ccmd):
+        ccdb = CompileCommands(ccmd)
+        if opts.files and ccdb.file not in opts.files:
+            log('Skip file "%s"' % ccdb.file)
+            return ccdb
+        if opts.syntax:
+            pool.addTask(CompilerAction, opts, ccdb, SyntaxOnlyAction)
+        if opts.genobj:
+            pool.addTask(CompilerAction, opts, ccdb, CompilationAction)
+        if opts.genii:
+            pool.addTask(CompilerAction, opts, ccdb, PreprocessAction)
+        if opts.genast:
+            pool.addTask(CompilerAction, opts, ccdb, GenerateASTAction)
+        if opts.genbc:
+            pool.addTask(CompilerAction, opts, ccdb, GenerateBitcodeAction)
+        if opts.genll:
+            pool.addTask(CompilerAction, opts, ccdb, GenerateLLVMIRAction)
+        if opts.genasm:
+            pool.addTask(CompilerAction, opts, ccdb, GenerateAssemblyAction)
+        if opts.gendep:
+            pool.addTask(CompilerAction, opts, ccdb, GenerateDependencyAction)
+        if opts.genefm or opts.genefmast:
+            pool.addTask(ClangToolAction, opts, ccdb, ClangExtDefMappingAction)
+        # As no-ctu analysis is single file operation, they can be executed
+        # together with other compiler and clang tooling actions.
+        if opts.analyze == 'no-ctu':
+            pool.addTask(CompilerAction, opts, ccdb, ClangStaticAnalyzerAction)
+        # Add plugin actions.
+        if opts.plugin:
+            for p in opts.plugin:
+                pool.addTask(p[0], opts, ccdb, p[1])
+        return ccdb
+    return action
+
+
+def AddCompilationDatabaseActions(opts, pool, cdb):
+    if opts.genivcl:
+        pool.addTask(GenerateInvocationListAction, opts, cdb)
+    if opts.genifl:
+        pool.addTask(GenerateInputFileListAction, opts, cdb)
+
+
+def ExecuteFullCompilationDatabaseAction(opts, cdb):
+    if opts.genefm or opts.genefmast:
+        GenerateFinalExternalFunctionMap(opts, cdb)
+    if opts.gensfl:
+        GenerateSourceFileListAction(opts, cdb)
+    # For ctu analysis, execute analyzer after all required files are
+    # generated.
+    if opts.analyze == 'ctu':
+        pool = TaskPool(opts.jobs)
+        for ccdb in cdb:
+            pool.addTask(CompilerAction, opts, ccdb, ClangStaticAnalyzerAction)
+        pool.join()
+
+
+def main(argv):
+    opts = ParseArguments(argv)
+    PostArgumentParsingInitializations(opts)
+    pool = TaskPool(opts.jobs)
+    action = CreateCompilationDatabaseObjectAction(opts, pool)
+    with open(opts.cdb) as fcdb:
+        cdb = json.load(fcdb, object_hook=action)
+    AddCompilationDatabaseActions(opts, pool, cdb)
+    pool.join()
+    ExecuteFullCompilationDatabaseAction(opts, cdb)
+
+
+if __name__ == '__main__':
+    main(sys.argv)

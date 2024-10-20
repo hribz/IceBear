@@ -1,0 +1,8 @@
+{
+    "comment": "Example plugin for Panda driver.",
+    "type": "CompilerAction",
+    "action": {
+        "title": "Dumping clang cc1 arguments",
+        "args": ["-###"]
+    }
+}
