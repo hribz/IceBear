@@ -178,7 +178,7 @@ def GetIndexOrNone(container, index):
 
 
 class CompilerActionControl:
-    def __init__(self, title, args, extname=None, outopt=None):
+    def __init__(self, title, args, extname=None, outopt=None, extname_inopt=None, inopt=None):
         self.title = title
         self.args = args
         if extname:
@@ -190,13 +190,21 @@ class CompilerActionControl:
                     'Index "extname" can only be string or list'
         else:
             self.hasOutput = False
+        if inopt:
+            self.hasInput = True
+            self.inopt = inopt
+            self.extname_inopt = extname_inopt if extname_inopt is not None else ''
+        else:
+            self.hasInput = False
 
     def CreateFromPluginAction(action):
         title = GetIndex(action, 'title', 'action')
         args = GetIndex(action, 'args', 'action')
         extname = GetIndexOrNone(action, 'extname')
         outopt = GetIndexOrNone(action, 'outopt')
-        return CompilerActionControl(title, args, extname, outopt)
+        extname_inopt = GetIndexOrNone(action, 'extname_inopt')
+        inopt = GetIndexOrNone(action, 'inopt')
+        return CompilerActionControl(title, args, extname, outopt, extname_inopt, inopt)
 
     def getOutputExtensionName(self, language):
         if not self.hasOutput:
@@ -213,6 +221,9 @@ class CompilerActionControl:
         assert os.path.isabs(ccdb.file), "'file' in cdb unit is not abspath"
         return outdir + ccdb.file + self.getOutputExtensionName(ccdb.language)
 
+    def getInputName(self, outdir, ccdb):
+        assert os.path.isabs(ccdb.file), "'file' in cdb unit is not abspath"
+        return outdir + ccdb.file + self.extname_inopt
 
 class ClangToolActionControl:
     def __init__(self, title, tool, args, extname=None, stdout=None,
@@ -462,11 +473,27 @@ def CompilerAction(opts, ccdb, action):
     compiler = {'c': opts.cc, 'c++': opts.cxx}
     arguments = [compiler[ccdb.language]] + ccdb.arguments + action.args
 
+    if action.hasInput:
+        input = action.getInputName(opts.output, ccdb)
+        if isinstance(action.inopt, list):
+            # -analyze-function-file=input_file
+            action.inopt[-1] += input
+            arguments += action.inopt
+        else:
+            arguments.append(action.outopt)
+            arguments.append(output)
+
     if action.hasOutput:
         output = action.getOutputName(opts.output, ccdb)
         print('%s: %s' % (action.title, output))
-        arguments += [action.outopt, output]
-
+        # ['-Xanalyzer', '-analyzer-dump-fsum=']
+        if isinstance(action.outopt, list):
+            # -analyzer-dump-fsum=output_file
+            action.outopt[-1] += output
+            arguments += action.outopt
+        else:
+            arguments.append(action.outopt)
+            arguments.append(output)
         # Create directory for output file.
         mkdir(os.path.dirname(output))
     else:
@@ -696,6 +723,8 @@ def AddCompilationDatabaseActions(opts, pool, cdb):
 
 
 def ExecuteFullCompilationDatabaseAction(opts, cdb):
+    if opts.files:
+        cdb = [ccdb for ccdb in cdb if ccdb.file in opts.files]
     if opts.genefm or opts.genefmast:
         GenerateFinalExternalFunctionMap(opts, cdb)
     if opts.gensfl:

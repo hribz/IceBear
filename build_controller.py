@@ -20,7 +20,7 @@ from compile_command import CompileCommand
 PWD = Path(".").absolute()
 EXTRACT_II = str(PWD / 'build/clang_tool/collectIncInfo')
 EXTRACT_CG = str(PWD / 'build/clang_tool/extractCG')
-PANDA = 'panda'
+PANDA = str(PWD / 'panda/panda')
 MY_CLANG = 'clang'
 MY_CLANG_PLUS_PLUS = 'clang++'
 example_compiler_action_plugin = {
@@ -731,9 +731,11 @@ class Configuration:
                 plugin['comment'] = 'Plugin used by IncAnalyzer to execute CSA'
                 plugin['action']['title'] = 'Execute CSA'
                 plugin['action']['args'] = args
+                plugin['action']['extname_inopt'] = '.rf'
                 plugin['action']['extname'] = '.fs'
                 # Incompatiable with panda, because panda consider this as one parameter.
                 # So we need to revise panda to support two parameters.
+                plugin['action']['inopt'] = ['-Xanalyzer', '-analyze-function-file=']
                 plugin['action']['outopt'] = ['-Xanalyzer', '-analyzer-dump-fsum=']
                 json.dump(plugin, f, indent=4)
             commands.extend(['--plugin', str(plugin_path)])
@@ -1139,13 +1141,13 @@ def main():
         #     'options_list': [
         #     ]
         # },
-        {
-            'name': 'xgboost', 
-            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/xgboost', 
-            'options_list': [
-                [Option('GOOGLE_TEST', 'ON')]
-            ]
-        },
+        # {
+        #     'name': 'xgboost', 
+        #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/xgboost', 
+        #     'options_list': [
+        #         [Option('GOOGLE_TEST', 'ON')]
+        #     ]
+        # },
         # {
         #     'name': 'opencv', 
         #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/opencv', 
@@ -1153,18 +1155,18 @@ def main():
         #         [Option('WITH_CLP', 'ON')]
         #     ]
         # },
-        # {
-        #     'name': 'ica-demo',
-        #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/ica-demo',
-        #     'options_list': [
-        #         [Option('CHANGE_ALL', 'ON')],
-        #         # [Option('GLOBAL_CONSTANT', 'ON')],
-        #         # [Option('VIRTUAL_FUNCTION', 'ON')],
-        #         # [Option('RECORD_FIELD', 'ON')],
-        #         # [Option('FEATURE_UPGRADE', 'ON')],
-        #         # [Option('COMMON_CHANGE', 'ON')],
-        #     ]
-        # }
+        {
+            'name': 'ica-demo',
+            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/ica-demo',
+            'options_list': [
+                [Option('CHANGE_ALL', 'ON')],
+                # [Option('GLOBAL_CONSTANT', 'ON')],
+                # [Option('VIRTUAL_FUNCTION', 'ON')],
+                # [Option('RECORD_FIELD', 'ON')],
+                # [Option('FEATURE_UPGRADE', 'ON')],
+                # [Option('COMMON_CHANGE', 'ON')],
+            ]
+        }
     ]
 
     repo_list: List[Repository] = []
@@ -1173,7 +1175,7 @@ def main():
         repo_db = Repository(repo['name'], repo['src_path'], options_list=repo['options_list'], opts=opts)
         repo_list.append(repo_db)
         logger.info('-------------BEGIN SUMMARY-------------\n')
-        # repo_db.build_every_config()
+        repo_db.build_every_config()
         repo_db.preprocess_every_config()
         repo_db.diff_every_config()
         repo_db.extract_ii_every_config()
