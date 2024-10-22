@@ -100,7 +100,7 @@ static void DumpCallGraph(CallGraph &CG, llvm::StringRef MainFilePath,
     for (CallGraphNode *N : RPOT) {
         if (N == CG.getRoot()) continue;
         Decl *D = N->getDecl();
-        outFile << AnalysisDeclContext::getFunctionName(D);
+        outFile << AnalysisDeclContext::getFunctionName(D->getCanonicalDecl());
         if (printLoc) {
             outFile << " -> " << CGToRange[D].first << ", " << CGToRange[D].second;
         }
@@ -118,7 +118,7 @@ static void DumpCallGraph(CallGraph &CG, llvm::StringRef MainFilePath,
             // ret += ":";
             // ret += usr.c_str();
             // outFile << ret << "\n]\n";
-            outFile << AnalysisDeclContext::getFunctionName(Callee);
+            outFile << AnalysisDeclContext::getFunctionName(Callee->getCanonicalDecl());
             if (printLoc) {
                 outFile << " -> " << CGToRange[Callee].first << ", " << CGToRange[Callee].second;
             }
@@ -148,7 +148,7 @@ static void DumpFunctionsNeedReanalyze(std::unordered_set<const Decl *> Function
         // ret += ":";
         // ret += usr.c_str();
         // outFile << ret << " ";
-        const std::string &fname = AnalysisDeclContext::getFunctionName(D);
+        const std::string &fname = AnalysisDeclContext::getFunctionName(D->getCanonicalDecl());
         outFile << fname << "\n";
         llvm::outs() << "  ";
         llvm::outs() << fname;
@@ -399,9 +399,11 @@ public:
         const FileEntry *FE = SM.getFileEntryForID(MainFileID);
         MainFilePath = FE->tryGetRealPathName();
         // Don't print location information.
-        auto PrintPolicy = Context->getPrintingPolicy();
-        PrintPolicy.AnonymousTagLocations = true;
-        Context->setPrintingPolicy(PrintPolicy);
+        // auto PrintPolicy = Context->getPrintingPolicy();
+        // PrintPolicy.FullyQualifiedName = true;
+        // PrintPolicy.TerseOutput = true;
+        // PrintPolicy.PrintInjectedClassNameWithArguments = true;
+        // Context->setPrintingPolicy(PrintPolicy);
         if (GlobalDiffLines) {
             // printJsonObject(*GlobalDiffLines);
             if (auto diff_array = GlobalDiffLines->getArray(MainFilePath)) {

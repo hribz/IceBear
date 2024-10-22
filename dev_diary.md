@@ -150,3 +150,21 @@
 
 ## 解决方案
 - 反转了）其实是collectIncInfo的'-loc'参数默认设置为false的问题，既然行号的问题解决了，就应该设置为true，继续输出行号信息。
+
+# 2024/10/21
+## 问题
+- 同一个函数在.fs和.cg中的函数名不同，可能因为：
+  1. Differences between process file directly and process preprocessed file.
+  2. Some tiny differences between function names in .fs and .cg files. 
+     (e.g. `const class Config::ConfigIterator` and `const ConfigIterator`;)
+     This problem maybe resolved by aligning llvm version between CSA and collectIncInfo.
+
+## 解决方案
+- 该问题在同一版本后仍未解决，尝试打印PrettyPolicy比较差异：经过比较，Policy没有区别。
+- gpt认为可能原因是AST在解析过程中发生了变化（例如模板实例化），因此输出FunctionName的时机也会影响结果。
+- 上面`const class`的差别原因以及其它情况的原因可见clang_tool/test/function_name.cpp
+
+# 2024/10/22
+## 问题
+- RAII的对象在生命周期结束时会自动调用析构函数，但是AST上并没有显式的调用节点，因此CG上不存在析构函数的调用。但是CSA会考虑生命周期结束时调用析构函数。
+- 对象的生命周期不一定是`{}`之间，例如临时对象`A{};`由于没有引用，它的声明周期仅为当前语句。

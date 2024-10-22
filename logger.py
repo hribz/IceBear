@@ -16,8 +16,8 @@ class Logger(object):
         ensure_dir('logs')
         handler = {
             logging.DEBUG: "logs/debug_{}.log".format(timestamp),
-            logging.INFO: "logs/info_{}.log".format(timestamp),
-            logging.ERROR: "logs/error_{}.log".format(timestamp)
+            # logging.INFO: "logs/info_{}.log".format(timestamp),
+            # logging.ERROR: "logs/error_{}.log".format(timestamp)
         }
         self.__loggers = {}
         logLevels = handler.keys()
@@ -38,10 +38,10 @@ class Logger(object):
             logger.addHandler(sh)
             self.__loggers.update({level: logger})
     def info(self, message):
-        self.__loggers[logging.INFO].info(f"[{self.TAG}]" + message)
+        self.__loggers[logging.DEBUG].info(f"[{self.TAG}]" + message)
     def debug(self, message):
         self.__loggers[logging.DEBUG].debug(f"[{self.TAG}]" + message)
     def error(self, message):
-        self.__loggers[logging.ERROR].error(f"[{self.TAG}]" + message)
+        self.__loggers[logging.DEBUG].error(f"[{self.TAG}]" + message)
 
 logger = Logger(datetime.now().strftime('%Y%m%d_%H%M%S'), '')

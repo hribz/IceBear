@@ -162,11 +162,12 @@ class CallGraph:
     is_baseline: bool
     functions_need_reanalyzed: set
 
-    def __init__(self, is_baseline = False):
+    def __init__(self, file, is_baseline = False):
         self.root = CallGraphNode('')
         self.fname_to_cg_node = {}
         self.is_baseline = is_baseline
         self.functions_need_reanalyzed = set()
+        self.file: FileInCDB = file
 
     def get_node_if_exist(self, fname:str):
         if fname in self.fname_to_cg_node:
@@ -186,7 +187,9 @@ class CallGraph:
             callee_node.add_caller(caller_node)
 
     def add_fs_node(self, caller, callee):
-        # precondition: callee is in fname_to_cg_node
+        if callee not in self.fname_to_cg_node:
+            logger.error(f"[Add FS Node] {callee} is not in {self.file.get_file_path(FileKind.CG)}")
+            return
         callee_node = self.fname_to_cg_node[callee]
         callee_node.add_inline_caller(caller)
 
@@ -241,9 +244,11 @@ class FileInCDB:
         # ]
         cg_file = self.get_file_path(FileKind.CG)
         if not os.path.exists(cg_file):
+            # The reason of .cg file doesn't exists maybe the file in compile_commands.json
+            # cannot preprocess correctly. 
             logger.error(f"[Parse CG File] Callgraph file {cg_file} doesn't exist.")
             return
-        self.call_graph = CallGraph()
+        self.call_graph = CallGraph(self)
         with open(cg_file, 'r') as f:
             caller, callee = None, None
             is_caller = True
@@ -366,10 +371,8 @@ class FileInCDB:
     
     def output_functions_need_reanalyze(self):
         with open(self.get_file_path(FileKind.RF), 'w') as f:
-            logger.debug(f"[Functions Need Reanalyze] {self.file_name}")
             for fname in self.call_graph.functions_need_reanalyzed:
                 f.write(fname + '\n')
-                logger.debug(f"[Functions Need Reanalyze] {fname}")
 
 def getExtDefMap(efmfile): return open(efmfile).read()
 
@@ -552,7 +555,8 @@ class Configuration:
             plugin['action']['extname'] = ['.i', '.ii']
             json.dump(plugin, f, indent=4)
         commands = DEFAULT_PANDA_COMMANDS.copy()
-        commands.extend(['--plugin', str(plugin_path)])
+        # commands.extend(['--plugin', str(plugin_path)])
+        commands.append('-E')
         commands.extend(['-f', str(self.compile_database)])
         commands.extend(['-o', str(self.preprocess_path)])
         if self.analyze_opts.verbose:
@@ -574,11 +578,14 @@ class Configuration:
                     else:
                         extname = ''
                     file_command["file"] = str(self.preprocess_path) + compile_command.file + extname
-                    # preprocessed file does not need compile flags
-                    if file_command.get("command"):
-                        file_command["command"] = (compile_command.compiler + " -x " + compile_command.language)
-                    else:
-                        file_command["arguments"] = ([compile_command.compiler, "-x", compile_command.language])
+                    # Preprocessed files still need compile options, such as c++ version and so on.
+                    # And it's no need to add flags like '-xc++', because clang is able to identify
+                    # preprocessed files automatically, unless open the '-P' option. 
+                    #
+                    # if file_command.get("command"):
+                    #     file_command["command"] = (file_command["command"] + " -x " + compile_command.language)
+                    # else:
+                    #     file_command["arguments"] = file_command["arguments"].extend(["-x", compile_command.language])
                 pre_cdb = open(self.preprocess_compile_database, 'w')
                 json.dump(json_file, pre_cdb, indent=4)
                 pre_cdb.close()
@@ -621,7 +628,7 @@ class Configuration:
         try:
             process = run(extract_ii_script, shell=True, capture_output=True, text=True, check=True)
             self.session_times['extract_inc_info'] = time.time() - start_time
-            logger.info(f"[Extract Inc Info Success] {process.stdout} {process.stderr}")
+            # logger.info(f"[Extract Inc Info Success] {process.stdout} {process.stderr}")
         except subprocess.CalledProcessError as e:
             self.session_times['extract_inc_info'] = SessionStatus.Failed
             logger.error(f"[Extract Inc Info Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
@@ -1141,13 +1148,13 @@ def main():
         #     'options_list': [
         #     ]
         # },
-        # {
-        #     'name': 'xgboost', 
-        #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/xgboost', 
-        #     'options_list': [
-        #         [Option('GOOGLE_TEST', 'ON')]
-        #     ]
-        # },
+        {
+            'name': 'xgboost', 
+            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/xgboost', 
+            'options_list': [
+                [Option('GOOGLE_TEST', 'ON')]
+            ]
+        },
         # {
         #     'name': 'opencv', 
         #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/opencv', 
@@ -1155,18 +1162,18 @@ def main():
         #         [Option('WITH_CLP', 'ON')]
         #     ]
         # },
-        {
-            'name': 'ica-demo',
-            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/ica-demo',
-            'options_list': [
-                [Option('CHANGE_ALL', 'ON')],
-                # [Option('GLOBAL_CONSTANT', 'ON')],
-                # [Option('VIRTUAL_FUNCTION', 'ON')],
-                # [Option('RECORD_FIELD', 'ON')],
-                # [Option('FEATURE_UPGRADE', 'ON')],
-                # [Option('COMMON_CHANGE', 'ON')],
-            ]
-        }
+        # {
+        #     'name': 'ica-demo',
+        #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/ica-demo',
+        #     'options_list': [
+        #         [Option('CHANGE_ALL', 'ON')],
+        #         # [Option('GLOBAL_CONSTANT', 'ON')],
+        #         # [Option('VIRTUAL_FUNCTION', 'ON')],
+        #         # [Option('RECORD_FIELD', 'ON')],
+        #         # [Option('FEATURE_UPGRADE', 'ON')],
+        #         # [Option('COMMON_CHANGE', 'ON')],
+        #     ]
+        # }
     ]
 
     repo_list: List[Repository] = []
@@ -1175,7 +1182,7 @@ def main():
         repo_db = Repository(repo['name'], repo['src_path'], options_list=repo['options_list'], opts=opts)
         repo_list.append(repo_db)
         logger.info('-------------BEGIN SUMMARY-------------\n')
-        repo_db.build_every_config()
+        # repo_db.build_every_config()
         repo_db.preprocess_every_config()
         repo_db.diff_every_config()
         repo_db.extract_ii_every_config()

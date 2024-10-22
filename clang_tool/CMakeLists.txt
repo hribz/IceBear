@@ -1,11 +1,14 @@
-# traversal AST and generate CallGraph
 add_executable(collectIncInfo CollectIncInfo.cpp)
-target_link_libraries(collectIncInfo
+target_link_libraries(collectIncInfo PRIVATE
   LLVM
+  LLVMSupport
+  clangFrontend
+  clangSerialization
   clangTooling
   clangBasic
   clangASTMatchers
   clangAST
+  clangAnalysis
   clangIndex
 )
 
