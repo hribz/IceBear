@@ -15,7 +15,10 @@
 #include <llvm/Support/Error.h>
 #include <llvm/Support/JSON.h>
 #include <llvm/Support/raw_ostream.h>
+#include <memory>
 #include <optional>
+#include <ostream>
+#include <streambuf>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -98,45 +101,72 @@ public:
         DumpFunctionsNeedReanalyze();
     }
 
+    static void getUSRName(const Decl *D, std::string &Str) {
+        // Don't use this function if don't need USR representation
+        // to avoid redundant string copy.
+        D = D->getCanonicalDecl();
+        SmallString<128> usr;
+        index::generateUSRForDecl(D, usr);
+        Str = std::to_string(usr.size());
+        Str += ":";
+        Str += usr.c_str();
+    }
+
     void DumpCallGraph() {
         if (!CG.size()) {
             return;
         }
-        std::string CGFile = MainFilePath.str() + ".cg";
-        std::ofstream outFile(CGFile);
-        if (!outFile.is_open()) {
-            llvm::errs() << "Error: Could not open file " << CGFile << " for writing.\n";
-            return;
+
+        std::ostream* OS = &std::cout;
+        // `outFile`'s life time should persist until dump finished.
+        // And don't create file if don't need to dump to file.
+        std::shared_ptr<std::ofstream> outFile;
+        if (IncOpt.DumpToFile) {
+            std::string CGFile = MainFilePath.str() + ".cg";
+            outFile = std::make_shared<std::ofstream>(CGFile);
+            if (!outFile->is_open()) {
+                llvm::errs() << "Error: Could not open file " << CGFile << " for writing.\n";
+                return;
+            }
+            OS = outFile.get();
+        } else {
+            *OS << "--- Call Graph ---\n";
         }
+
         llvm::ReversePostOrderTraversal<clang::CallGraph*> RPOT(&CG);
         for (CallGraphNode *N : RPOT) {
             if (N == CG.getRoot()) continue;
             Decl *D = N->getDecl();
-            outFile << AnalysisDeclContext::getFunctionName(D->getCanonicalDecl());
-            if (IncOpt.PrintLoc) {
-                outFile << " -> " << CGToRange[D].first << ", " << CGToRange[D].second;
+            if (IncOpt.DumpUSR) {
+                std::string ret;
+                getUSRName(D, ret);
+                *OS << ret;
+            } else {
+                *OS << AnalysisDeclContext::getFunctionName(D->getCanonicalDecl());
             }
-            outFile << "\n[\n";
+            if (IncOpt.PrintLoc) {
+                *OS << " -> " << CGToRange[D].first << ", " << CGToRange[D].second;
+            }
+            *OS << "\n[\n";
             SetOfConstDecls CalleeSet;
             for (CallGraphNode::CallRecord &CR : N->callees()) {
                 Decl *Callee = CR.Callee->getDecl();
                 if (CalleeSet.contains(Callee))
                     continue;
                 CalleeSet.insert(Callee);
-                // SmallString<128> usr;
-                // std::string ret;
-                // index::generateUSRForDecl(Callee, usr);
-                // ret += std::to_string(usr.size());
-                // ret += ":";
-                // ret += usr.c_str();
-                // outFile << ret << "\n]\n";
-                outFile << AnalysisDeclContext::getFunctionName(Callee->getCanonicalDecl());
-                if (IncOpt.PrintLoc) {
-                    outFile << " -> " << CGToRange[Callee].first << ", " << CGToRange[Callee].second;
+                if (IncOpt.DumpUSR) {
+                    std::string ret;
+                    getUSRName(Callee, ret);
+                    *OS << ret;
+                } else {
+                    *OS << AnalysisDeclContext::getFunctionName(Callee->getCanonicalDecl());
                 }
-                outFile << "\n";
+                if (IncOpt.PrintLoc) {
+                    *OS << " -> " << CGToRange[Callee].first << "-" << CGToRange[Callee].second;
+                }
+                *OS << "\n";
             }
-            outFile << "]\n";
+            *OS << "]\n";
         }
     }
 
@@ -144,28 +174,33 @@ public:
         if (FunctionsNeedReanalyze.empty()) {
             return;
         }
-        std::string ReanalyzeFunctionsFile = MainFilePath.str() + ".cf";
-        std::ofstream outFile(ReanalyzeFunctionsFile);
-        if (!outFile.is_open()) {
-            llvm::errs() << "Error: Could not open file " << ReanalyzeFunctionsFile << " for writing.\n";
-            return;
+
+        std::ostream* OS = &std::cout;
+        std::shared_ptr<std::ofstream> outFile;
+        if (IncOpt.DumpToFile) {
+            std::string ReanalyzeFunctionsFile = MainFilePath.str() + ".cf";
+            outFile = std::make_shared<std::ofstream>(ReanalyzeFunctionsFile);
+            if (!outFile->is_open()) {
+                llvm::errs() << "Error: Could not open file " << ReanalyzeFunctionsFile << " for writing.\n";
+                return;
+            }
+            OS = outFile.get();
+        } else {
+            *OS << "--- Functions Need to Reanalyze ---\n";
         }
-        llvm::outs() << "--- Functions Need to Reanalyze ---\n";
+
         for (auto &D : FunctionsNeedReanalyze) {
-            // SmallString<128> usr;
-            // std::string ret;
-            // index::generateUSRForDecl(D, usr);
-            // ret += std::to_string(usr.size());
-            // ret += ":";
-            // ret += usr.c_str();
-            // outFile << ret << " ";
-            const std::string &fname = AnalysisDeclContext::getFunctionName(D->getCanonicalDecl());
-            outFile << fname << "\n";
-            llvm::outs() << "  ";
-            llvm::outs() << fname;
-            llvm::outs() << ": " << "<" << D->getDeclKindName() << "> ";
-            llvm::outs() << CGToRange[D].first << "-" << CGToRange[D].second;
-            llvm::outs() << "\n";
+            if (IncOpt.DumpUSR) {
+                std::string ret;
+                getUSRName(D, ret);
+                *OS << ret;
+            } else {
+                *OS << AnalysisDeclContext::getFunctionName(D->getCanonicalDecl());
+            }
+            if (IncOpt.PrintLoc) {
+                *OS << " -> " << CGToRange[D].first << "-" << CGToRange[D].second;
+            }
+            *OS << "\n";
         }
     }
 
@@ -222,6 +257,10 @@ static llvm::cl::opt<bool> ClassLevel("class", llvm::cl::desc("Propogate type ch
     llvm::cl::value_desc("class level change"), llvm::cl::init(true));
 static llvm::cl::opt<bool> FieldLevel("field", llvm::cl::desc("Propogate type change by field level"),
     llvm::cl::value_desc("field level change"), llvm::cl::init(false));
+static llvm::cl::opt<bool> DumpToFile("dump-file", llvm::cl::desc("Dump CG and CF to file"),
+    llvm::cl::value_desc("dump to file or stream"), llvm::cl::init(true));
+static llvm::cl::opt<bool> DumpUSR("dump-usr", llvm::cl::desc("Dump USR function name"),
+    llvm::cl::value_desc("dump usr fname"), llvm::cl::init(false));
 
 int main(int argc, const char **argv) {
     auto ExpectedParser = CommonOptionsParser::create(argc, argv, ToolCategory);
@@ -233,7 +272,8 @@ int main(int argc, const char **argv) {
     CommonOptionsParser& OptionsParser = ExpectedParser.get();
 
     ClangTool Tool(OptionsParser.getCompilations(), OptionsParser.getSourcePathList());
-    IncOptions IncOpt{.PrintLoc=PrintLoc, .ClassLevelTypeChange=ClassLevel, .FieldLevelTypeChange=FieldLevel};
+    IncOptions IncOpt{.PrintLoc=PrintLoc, .ClassLevelTypeChange=ClassLevel, .FieldLevelTypeChange=FieldLevel, 
+                      .DumpToFile=DumpToFile, .DumpUSR=DumpUSR};
     IncInfoCollectActionFactory Factory(OutputPath, DiffPath, IncOpt);
     return Tool.run(&Factory);
 }

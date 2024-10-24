@@ -44,6 +44,9 @@ public:
     bool PrintLoc = false;
     bool ClassLevelTypeChange = true;
     bool FieldLevelTypeChange = false;
+
+    bool DumpToFile = true;
+    bool DumpUSR = false;
 };
 
 class DeclRefFinder : public RecursiveASTVisitor<DeclRefFinder> {
