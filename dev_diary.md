@@ -168,3 +168,54 @@
 ## 问题
 - RAII的对象在生命周期结束时会自动调用析构函数，但是AST上并没有显式的调用节点，因此CG上不存在析构函数的调用。但是CSA会考虑生命周期结束时调用析构函数。
 - 对象的生命周期不一定是`{}`之间，例如临时对象`A{};`由于没有引用，它的声明周期仅为当前语句。
+
+# 2024/10/23
+## 问题
+- AST确实没有隐式调用析构函数的节点，CSA之所以能考虑到它们的隐式调用，是因为生成CFG时可以开启选项`addImplicitDtors`使得CFG中包含隐式的析构函数调用。
+
+## 解决方案
+- 在分析到FunctionDecl中使用了某个类/结构体时，如果它具有显式的析构函数，就将它的析构函数加入到CG中。
+- 如果只考虑类型被修改就重分析使用该类型的函数，那么其实不需要管析构函数是否修改，因为它的调用函数已经被标记为需要重分析。
+
+# 2024/10/24
+## 待完成功能
+- 分析类型依赖关系，传播类型变化
+- 识别虚函数，函数指针调用
+
+## 解决方案
+- **Record粒度**：遍历到`RecordDecl`时，如果发生下列情况，就记录为变化Record：
+  - 如果`RecordDecl`的声明范围内发生了变化
+  - 如果`RecordDecl`的父`RecordDecl`为变化`Record`
+  - **传播策略**：
+    - 如果函数/方法使用了变化`RecordDecl`，就将函数/方法记录为变化
+    - 由于`RecordDecl`一定是作为类型声明使用的，所以只需要考虑`VarDecl`, `FieldDecl`即可，不需要考虑`DeclRef`
+- **Field粒度**：遍历到`FieldDecl`时，如果发生下列情况，就记录为变化FieldDecl：
+  - 如果`FieldDecl`的声明范围内发生了变化
+  - 如果`FieldDecl`的类型发生了变化
+  - **传播策略**：
+    - 如果函数/方法使用了变化`FieldDecl`，就将函数/方法记录为变化
+    - 父`RecordDecl`的`CXXCtorInitializer`也需要考虑进来
+    - `FieldDecl`使用时都对应有`MemberExpr`，因此需要考虑所有`MemberExpr`
+- **Forward Decl**
+  - 从**Record粒度**来看，如果`forward`的定义发生了变化，`C`中的`forward decl`字段`ptr`其实可以不认为发生了变化，因为如果要使用`ptr`指向对象的成员变量，必然要使用`forward`类型，此时`C`类型在这里只起到一个中间作用，用于保存该类型的指针。
+  - 从**Field粒度**来看，也不用将`ptr`记录为变化`Field`，因为`ptr`本身的类型`forward *`是一个指针类型，并没有发生变化。
+  - note:参考[link](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2020/p0593r6.html#idiomatic-c-code-as-c)，访问对象指针的成员时，需要保证对象被合规创建，否则是未定义行为。
+```cpp
+class forward;
+
+class C {
+  forward *ptr;
+}
+
+class forward {
+  // forward definition may change
+  int x;
+}
+
+int main () {
+  C c;
+  c.ptr = (forward *)malloc(10);
+  (c.ptr)->x = 1;
+  return 0;
+}
+```

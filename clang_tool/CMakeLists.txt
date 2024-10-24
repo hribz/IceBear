@@ -1,4 +1,4 @@
-add_executable(collectIncInfo CollectIncInfo.cpp)
+add_executable(collectIncInfo CollectIncInfo.cpp DiffLineManager.cpp IncInfoCollectASTVisitor.cpp)
 target_link_libraries(collectIncInfo PRIVATE
   LLVM
   LLVMSupport
