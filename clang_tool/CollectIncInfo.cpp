@@ -98,6 +98,7 @@ public:
         DumpCallGraph();
         IncVisitor.TraverseDecl(Context.getTranslationUnitDecl());
         IncVisitor.DumpGlobalConstantSet();
+        IncVisitor.DumpTaintDecls();
         DumpFunctionsNeedReanalyze();
     }
 
@@ -168,6 +169,7 @@ public:
             }
             *OS << "]\n";
         }
+        outFile->close();
     }
 
     void DumpFunctionsNeedReanalyze() {
@@ -202,6 +204,7 @@ public:
             }
             *OS << "\n";
         }
+        outFile->close();
     }
 
 private:

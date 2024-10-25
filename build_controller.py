@@ -628,14 +628,15 @@ class Configuration:
         try:
             process = run(extract_ii_script, shell=True, capture_output=True, text=True, check=True)
             self.session_times['extract_inc_info'] = time.time() - start_time
-            # logger.info(f"[Extract Inc Info Success] {process.stdout} {process.stderr}")
+            if self.analyze_opts.verbose:
+                logger.info(f"[Extract Inc Info Success] {process.stdout} {process.stderr}")
         except subprocess.CalledProcessError as e:
             self.session_times['extract_inc_info'] = SessionStatus.Failed
             logger.error(f"[Extract Inc Info Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
 
     def generate_efm(self):
         start_time = time.time()
-        remake_dir(self.csa_path, "[EDM Files DIR exists]")
+        # remake_dir(self.csa_path, "[EDM Files DIR exists]")
         commands = DEFAULT_PANDA_COMMANDS.copy()
         commands.append('--ctu-loading-ast-files') # Prepare CTU analysis for loading AST files.
         commands.extend(['-f', str(self.compile_database)])
@@ -700,7 +701,8 @@ class Configuration:
                     for efmcontent in p.map(getExtDefMap, [i.get_file_path(FileKind.EFM) for i in file_list]):
                         for efmline in efmcontent.split('\n'):
                             usr, path = parse_efm(efmline)
-                            efm[usr] = path
+                            if usr and path:
+                                efm[usr] = path
                 with open(output, 'w') as fout:
                     for usr in efm:
                         fout.write('%s %s\n' % (usr, efm[usr]))
@@ -1183,11 +1185,11 @@ def main():
         repo_list.append(repo_db)
         logger.info('-------------BEGIN SUMMARY-------------\n')
         # repo_db.build_every_config()
-        repo_db.preprocess_every_config()
-        repo_db.diff_every_config()
+        # repo_db.preprocess_every_config()
+        # repo_db.diff_every_config()
         repo_db.extract_ii_every_config()
-        repo_db.generate_efm_for_every_config()
-        repo_db.execute_csa_for_every_config()
+        # repo_db.generate_efm_for_every_config()
+        # repo_db.execute_csa_for_every_config()
 
         # Copy compile_commands.json to build dir for clangd.
         shutil.copy(str(repo_db.default_config.compile_database), str(repo_db.src_path / 'build'))

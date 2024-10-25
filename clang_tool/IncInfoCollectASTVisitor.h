@@ -8,6 +8,7 @@
 #include <clang/AST/ExprCXX.h>
 #include <clang/AST/Stmt.h>
 #include <clang/Basic/LLVM.h>
+#include <cstddef>
 #include <iostream>
 #include <fstream>
 #include <iterator>
@@ -85,22 +86,39 @@ public:
     
     bool isGlobalConstant(const Decl *D);
 
+    // Def
     bool VisitDecl(Decl *D);
 
     bool TraverseDecl(Decl *D);
 
     bool ProcessDeclRefExpr(Expr * const E, NamedDecl * const ND);
 
+    // Use
     bool VisitDeclRefExpr(DeclRefExpr *DR);
-
+    // Use
     bool VisitMemberExpr(MemberExpr *ME);
 
+    void InsertCanonicalDeclToSet(std::unordered_set<const Decl *> &set, const Decl *D) {
+        set.insert(D->getCanonicalDecl());
+    }
+
+    int CountCanonicalDeclInSet(std::unordered_set<const Decl *> &set, const Decl *D) {
+        return set.count(D->getCanonicalDecl());
+    }
+
     void DumpGlobalConstantSet();
+
+    void DumpTaintDecls();
 
 private:
     ASTContext *Context;
     std::unordered_set<const Decl *> GlobalConstantSet;
-    std::unordered_set<const Decl *> TaintDecls; // Decls have changed, the function/method use these should reanalyze
+    // Decls have changed, the function/method use these should reanalyze.
+    // Don't record changed functions and methods, they are recorded in 
+    // FunctionsNeedReanalyze. Just consider indirect factors which make
+    // functions/methods need to reanalyze. Such as GlobalConstant and 
+    // class/struct change.
+    std::unordered_set<const Decl *> TaintDecls; 
     std::unordered_set<const Decl *> &FunctionsNeedReanalyze;
     DiffLineManager &DLM;
     CallGraph &CG;

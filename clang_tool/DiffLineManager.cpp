@@ -8,7 +8,7 @@ void DiffLineManager::Initialize(std::string DiffPath, std::string mainFilePath)
         return ;
     }
     std::ifstream file(DiffPath);
-        if (!file.is_open()) {
+    if (!file.is_open()) {
         llvm::errs() << "Failed to open " << DiffPath << ".\n";
         return ;
     }
