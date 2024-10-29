@@ -67,6 +67,12 @@ void ParseString(string *tok) {
     }
 }
 
+#if defined(__clang_analyzer__)
+void csa_test() {
+    // case 4: Only visiable when use CSA. 
+}
+#endif
+
 int main() {
     int number = 10;
     Parent::C1 c1(&number);
@@ -74,5 +80,8 @@ int main() {
     std::string s = "123";
     ParseString(&s);
     raii r1{10};
+    #if defined(__clang_analyzer__)
+    csa_test();
+    #endif
     return 0;
 }

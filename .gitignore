@@ -12,3 +12,4 @@ __pycache__
 test.py
 *.cf
 .cache
+*.sum

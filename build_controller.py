@@ -21,8 +21,11 @@ PWD = Path(".").absolute()
 EXTRACT_II = str(PWD / 'build/clang_tool/collectIncInfo')
 EXTRACT_CG = str(PWD / 'build/clang_tool/extractCG')
 PANDA = str(PWD / 'panda/panda')
+# CSA revised version
 MY_CLANG = 'clang'
 MY_CLANG_PLUS_PLUS = 'clang++'
+CLANG = 'clang-19'
+CLANG_PLUS_PLUS = 'clang++-19'
 example_compiler_action_plugin = {
     "comment": "Example plugin for Panda driver.",
     "type": "CompilerAction",
@@ -74,15 +77,15 @@ else:
 if os.path.exists(MY_CLANG_PLUS_PLUS):
     print(f'use clang++={MY_CLANG_PLUS_PLUS}')
 else:
-    MY_CLANG = shutil.which('clang++')
-    if not MY_CLANG:
+    MY_CLANG_PLUS_PLUS = shutil.which('clang++')
+    if not MY_CLANG_PLUS_PLUS:
         print('please ensure there is clang++ in your environment')
         exit(1)
 DEFAULT_PANDA_COMMANDS = [
     PANDA, 
     '-j', '16', '--print-execution-time',
-    '--cc', MY_CLANG, 
-    '--cxx', MY_CLANG_PLUS_PLUS
+    '--cc', CLANG, 
+    '--cxx', CLANG_PLUS_PLUS
 ]
 
 class Option:
@@ -186,10 +189,16 @@ class CallGraph:
             callee_node = self.get_or_insert_node(callee)
             callee_node.add_caller(caller_node)
 
-    def add_fs_node(self, caller, callee):
+    def add_fs_node(self, caller, callee, efm:Dict=None):
         if callee not in self.fname_to_cg_node:
-            logger.error(f"[Add FS Node] {callee} is not in {self.file.get_file_path(FileKind.CG)}")
-            return
+            if efm and callee in efm:
+                logger.debug(f"[Add CTU FS Node] {callee} is analyzed by CTU inline")
+                other_cg:CallGraph = efm[callee].call_graph
+                ctu_callee_node = other_cg.fname_to_cg_node[callee]
+                ctu_callee_node.add_inline_caller(caller)
+            else:
+                logger.error(f"[Add FS Node] {callee} is not in {self.file.get_file_path(FileKind.CG)}")
+                return
         callee_node = self.fname_to_cg_node[callee]
         callee_node.add_inline_caller(caller)
 
@@ -212,10 +221,18 @@ class FileInCDB:
         self.functions_changed: List = None
         self.diff_info: DiffResult = None
         self.call_graph: CallGraph = None
+        self.efm: Dict[str, str] = {}
         if extname:
             self.prep_file: str = str(self.parent.preprocess_path) + self.file_name + extname
             self.diff_file: str = str(self.parent.diff_path) + self.file_name + extname
     
+    def is_changed(self):
+        return self.diff_file is not None
+
+    def get_baseline_file(self):
+        assert not self.is_changed()
+        return self.parent.baseline.get_file(self.file_name)
+
     def get_file_path(self, kind: FileKind=None):
         if not kind:
             return self.file_name
@@ -298,7 +315,10 @@ class FileInCDB:
                 else:
                     if is_caller:
                         caller = line
-                        self.call_graph.add_fs_node(caller, callee)
+                        if self.parent.analyze_opts.analyze == 'ctu':
+                            self.call_graph.add_fs_node(caller, callee, self.parent.global_efm)
+                        else:
+                            self.call_graph.add_fs_node(caller, callee)
                     else:
                         callee = line
 
@@ -374,27 +394,6 @@ class FileInCDB:
             for fname in self.call_graph.functions_need_reanalyzed:
                 f.write(fname + '\n')
 
-def getExtDefMap(efmfile): return open(efmfile).read()
-
-def virtualCall(file, method, has_arg, arg = None): 
-    if has_arg:
-        getattr(file, method.__name__)(arg)
-    else:
-        getattr(file, method.__name__)()
-
-def replace_loc_info(pair):
-    src, dest = pair
-    try:
-        pattern = re.compile(r'^# \d+')
-        with open(src, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-        new_lines = ["" if pattern.match(line) else line for line in lines]
-        makedir(os.path.dirname(dest))
-        with open(dest, 'w', encoding='utf-8') as f:
-            f.writelines(new_lines)
-    except Exception as e:
-        print(f"Error processing {src}: {e}")
-
 class Configuration:
     name: str
     options: List[Option]
@@ -430,8 +429,8 @@ class Configuration:
         self.options = []
         self.options.append(Option('CMAKE_EXPORT_COMPILE_COMMANDS', '1'))
         self.options.append(Option('CMAKE_BUILD_TYPE', 'Release'))
-        # self.options.append(Option('CMAKE_C_COMPILER', MY_CLANG))
-        # self.options.append(Option('CMAKE_CXX_COMPILER', MY_CLANG_PLUS_PLUS))
+        self.options.append(Option('CMAKE_C_COMPILER', CLANG))
+        self.options.append(Option('CMAKE_CXX_COMPILER', CLANG_PLUS_PLUS))
         self.options.extend(options)
         if cmake_path:
             self.create_configure_script(cmake_path)
@@ -444,6 +443,7 @@ class Configuration:
         self.session_times = {}
         # baseline Configuration
         self.baseline: Configuration = self
+        self.global_efm: Dict[str, FileInCDB] = None
         if os.path.exists(self.compile_database):
             # If there is compile_commands.jsno exists, we can prepare file list early.
             # Otherwise, we need execute configure to generate compile_commands.json.
@@ -582,10 +582,12 @@ class Configuration:
                     # And it's no need to add flags like '-xc++', because clang is able to identify
                     # preprocessed files automatically, unless open the '-P' option. 
                     #
-                    # if file_command.get("command"):
-                    #     file_command["command"] = (file_command["command"] + " -x " + compile_command.language)
-                    # else:
-                    #     file_command["arguments"] = file_command["arguments"].extend(["-x", compile_command.language])
+                    # When use CSA analyze the file, macro `__clang_analyzer__` will defined automatically.
+                    compile_command.arguments.append('-D__clang_analyzer__')
+                    if file_command.get("command"):
+                        file_command["command"] = " ".join(compile_command.arguments)
+                    else:
+                        file_command["arguments"] = compile_command.arguments
                 pre_cdb = open(self.preprocess_compile_database, 'w')
                 json.dump(json_file, pre_cdb, indent=4)
                 pre_cdb.close()
@@ -654,11 +656,12 @@ class Configuration:
             if self.analyze_opts.verbose:
                 logger.debug(f"[Panda EFM Info]\nstdout: \n{process.stdout}\n stderr: \n{process.stderr}")
         except subprocess.CalledProcessError as e:
-            # self.session_times['generate_efm'] = SessionStatus.Failed
-            # TODO: 由于panda此处可能返回failed，待修复后再储存为FAILED
-            self.session_times['generate_efm'] = time.time() - start_time
+            self.session_times['generate_efm'] = SessionStatus.Failed
             logger.error(f"[Generating EFM Files Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
- 
+    
+    def merge_efm(self):
+        start_time = time.time()
+        self.global_efm = {}
         if self.incrementable:
             # Combine baseline efm and new efm, reserve `usr`s which not appear in new efm
             # cover `usr`s updated in new efm
@@ -669,54 +672,67 @@ class Configuration:
                 self.session_times['generate_efm'] = SessionStatus.Failed
                 return
             
-            def GenerateFinalExternalFunctionMap(opts, file_list: List[FileInCDB], origin_edm=None):
+            def GenerateFinalExternalFunctionMapIncrementally(opts, file_list: List[FileInCDB], origin_edm=None):
                 output = os.path.join(str(self.csa_path), 'externalDefMap.txt')
                 print('Generating global external function map: ' + output)
-                efm = {}
-                def parse_efm(efmline: str):
-                    efmline = efmline.strip()
-                    if not efmline:
-                        return None, None
-                    try: # The new "<usr-length>:<usr> <path>" format (D102669).
-                        lenlen = efmline.find(':')
-                        usrlen = int(efmline[:lenlen])
-                        usr = efmline[:lenlen + usrlen + 1]
-                        path = efmline[lenlen + usrlen + 2:]
-                        return usr, path
-                    except ValueError: # When <usr-length> is not available.
-                        efmitem = efmline.split(' ')
-                        if len(efmitem) == 2:
-                            return efmitem[0], \
-                                self.get_file(self.get_origin_file_name(efmitem[1], self.csa_path, [".ast"])).get_file_path(FileKind.AST)
-                        logger.error(f"[Parse EFM] efmline {efmline} format error.")
-                        return None, None
                 # copy origin efm
                 if origin_edm:
                     with open(origin_edm, 'r') as f:
                         for line in f.readlines():
                             usr, path = parse_efm(line)
                             if usr and path:
-                                efm[usr] = path
+                                path_file = self.get_file(get_origin_file_name(path, str(self.baseline.csa_path), ['.ast']))
+                                if path_file:
+                                    self.global_efm[usr] = path_file
                 with mp.Pool(opts.jobs) as p:
                     for efmcontent in p.map(getExtDefMap, [i.get_file_path(FileKind.EFM) for i in file_list]):
                         for efmline in efmcontent.split('\n'):
                             usr, path = parse_efm(efmline)
                             if usr and path:
-                                efm[usr] = path
+                                path_file = self.get_file(path)
+                                if path_file:
+                                    self.global_efm[usr] = path_file
+                                else:
+                                    logger.error(f"[Generate Global EFM] Can't find {path} in compile database!")
                 with open(output, 'w') as fout:
-                    for usr in efm:
-                        fout.write('%s %s\n' % (usr, efm[usr]))
+                    for usr in self.global_efm:
+                        if self.global_efm[usr].is_changed():
+                            fout.write('%s %s\n' % (usr, self.global_efm[usr].get_file_path(FileKind.AST)))
+                        else:
+                            fout.write('%s %s\n' % (usr, self.baseline.get_file(self.global_efm[usr].file_name).get_file_path(FileKind.AST)))
 
-            GenerateFinalExternalFunctionMap(self.analyze_opts, self.diff_file_list, str(baseline_edm_file))
+            GenerateFinalExternalFunctionMapIncrementally(self.analyze_opts, self.diff_file_list, str(baseline_edm_file))
+        else:
+            with open(self.csa_path / 'externalDefMap.txt', 'r') as f:
+                for line in f.readlines():
+                    usr, path = parse_efm(line)
+                    if usr and path:
+                        self.global_efm[usr] = self.get_file(get_origin_file_name(path, str(self.csa_path), ['.ast']))
+        self.session_times['merge_efm'] = time.time() - start_time
 
     def execute_csa(self):
         start_time = time.time()
-        commands = DEFAULT_PANDA_COMMANDS.copy()
+        commands = [
+            PANDA, 
+            '-j', str(self.analyze_opts.jobs), '--print-execution-time',
+        ]
+        # We need to use revised Clang Static Analyzer to analyze functions incrementally.
+        if self.analyze_opts.inc:
+            commands.extend([
+                '--cc', MY_CLANG,
+                '--cxx', MY_CLANG_PLUS_PLUS
+            ])
+        else:
+            commands.extend([
+                '--cc', CLANG,
+                '--cxx', CLANG_PLUS_PLUS
+            ])
+
         if self.analyze_opts.verbose:
             commands.extend(['--verbose'])
 
         if self.analyze_opts.fsum:
-            # We need to use revised Clang Static Analyzer to output function summmary
+            # We need to use revised Clang Static Analyzer to output function summmary.
             args = ['--analyze', '-Xanalyzer', '-analyzer-output=html',
                 '-Xanalyzer', '-analyzer-disable-checker=deadcode',
                 '-o', str(self.csa_path / 'csa-reports')]
@@ -842,14 +858,6 @@ class Configuration:
         else:
             logger.error(f"[Diff Files Failed] stdout: {process.stdout}\n stderr: {process.stderr}")
 
-    def get_origin_file_name(self, file:str, prefix: List[str], extnames: List[str]):
-        file = file[len(prefix):]
-        for ext in extnames:
-            if file.endswith(ext):
-                file = file[:-len(ext)]
-                break
-        return file
-
     def parse_diff_result(self, diff_out, other):
         diff_line_pattern = re.compile(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@$')
         file: str
@@ -874,11 +882,11 @@ class Configuration:
             elif line.startswith('---'):
                 file_in_cdb = None
                 spilt_line = line.split()
-                origin_file = self.get_origin_file_name(spilt_line[1], str(other.diff_path), ['.i', '.ii'])
+                origin_file = get_origin_file_name(spilt_line[1], str(other.diff_path), ['.i', '.ii'])
             elif line.startswith('+++'):
                 spilt_line = line.split()
                 file = spilt_line[1]
-                file_in_cdb = self.get_file(self.get_origin_file_name(file, str(self.diff_path), ['.i', '.ii']))
+                file_in_cdb = self.get_file(get_origin_file_name(file, str(self.diff_path), ['.i', '.ii']))
                 if file_in_cdb:
                     self.diff_file_list.append(file_in_cdb)
                     file_in_cdb.diff_info = DiffResult(file_in_cdb)
@@ -898,8 +906,8 @@ class Configuration:
                     # is file
                     if is_my_file_or_dir:
                         # only record new file in my build directory
-                        # diff = self.get_origin_file_name(str(diff), str(self.diff_path), ['.i', '.ii'])
-                        file_in_cdb = self.get_file(self.get_origin_file_name(str(diff), str(self.diff_path), ['.i', '.ii']))
+                        # diff = get_origin_file_name(str(diff), str(self.diff_path), ['.i', '.ii'])
+                        file_in_cdb = self.get_file(get_origin_file_name(str(diff), str(self.diff_path), ['.i', '.ii']))
                         if file_in_cdb:
                             file_in_cdb.diff_info = DiffResult(file_in_cdb, True)
                             self.diff_file_list.append(file_in_cdb)
@@ -930,7 +938,7 @@ class Configuration:
                         for diff_file in diff.rglob("*"):
                             if diff_file.is_file():
                                 file = str(diff_file)
-                                file = self.get_origin_file_name(str(diff_file), str(self.diff_path), ['.i', '.ii'])
+                                file = get_origin_file_name(str(diff_file), str(self.diff_path), ['.i', '.ii'])
                                 file_in_cdb = self.get_file(file)
                                 if file_in_cdb:
                                     file_in_cdb.diff_info = DiffResult(file_in_cdb, True)
@@ -1102,6 +1110,7 @@ class Repository:
 
     def generate_efm_for_every_config(self):
         self.process_every_config(Configuration.generate_efm)
+        self.process_every_config(Configuration.merge_efm)
 
     def execute_csa_for_every_config(self):
         self.process_every_config([
@@ -1136,8 +1145,8 @@ def main():
         return [
             PANDA, 
             '-j', str(options.jobs), '--print-execution-time',
-            '--cc', MY_CLANG, 
-            '--cxx', MY_CLANG_PLUS_PLUS
+            '--cc', CLANG, 
+            '--cxx', CLANG_PLUS_PLUS
         ]
     
     global DEFAULT_PANDA_COMMANDS
@@ -1150,20 +1159,20 @@ def main():
         #     'options_list': [
         #     ]
         # },
-        {
-            'name': 'xgboost', 
-            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/xgboost', 
-            'options_list': [
-                [Option('GOOGLE_TEST', 'ON')]
-            ]
-        },
         # {
-        #     'name': 'opencv', 
-        #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/opencv', 
+        #     'name': 'xgboost', 
+        #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/xgboost', 
         #     'options_list': [
-        #         [Option('WITH_CLP', 'ON')]
+        #         [Option('GOOGLE_TEST', 'ON')]
         #     ]
         # },
+        {
+            'name': 'opencv', 
+            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/opencv', 
+            'options_list': [
+                [Option('WITH_CLP', 'ON')]
+            ]
+        },
         # {
         #     'name': 'ica-demo',
         #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/ica-demo',
@@ -1184,12 +1193,12 @@ def main():
         repo_db = Repository(repo['name'], repo['src_path'], options_list=repo['options_list'], opts=opts)
         repo_list.append(repo_db)
         logger.info('-------------BEGIN SUMMARY-------------\n')
-        # repo_db.build_every_config()
-        # repo_db.preprocess_every_config()
-        # repo_db.diff_every_config()
+        repo_db.build_every_config()
+        repo_db.preprocess_every_config()
+        repo_db.diff_every_config()
         repo_db.extract_ii_every_config()
-        # repo_db.generate_efm_for_every_config()
-        # repo_db.execute_csa_for_every_config()
+        repo_db.generate_efm_for_every_config()
+        repo_db.execute_csa_for_every_config()
 
         # Copy compile_commands.json to build dir for clangd.
         shutil.copy(str(repo_db.default_config.compile_database), str(repo_db.src_path / 'build'))

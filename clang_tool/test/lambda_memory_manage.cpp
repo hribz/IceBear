@@ -1,7 +1,9 @@
 namespace {
+    
     int main() {
         int n = 0;
         auto func1 = [n](int a){n;};
+
         n++;
         func1(1);
         auto func2 = func1;
