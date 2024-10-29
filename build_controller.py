@@ -473,6 +473,7 @@ class Configuration:
         self.compile_database = self.build_path / 'compile_commands.json'
         self.workspace = self.build_path / 'workspace_for_cdb'
         self.preprocess_path = self.workspace / 'preprocess'
+        self.compile_commands_used_by_pre = self.preprocess_path / 'compile_commands_used_by_pre.json'
         self.preprocess_compile_database = self.preprocess_path / 'preprocess_compile_commands.json'
         self.preprocess_diff_files_path = self.preprocess_path / 'preprocess_diff_files.txt'
         self.csa_path = self.workspace / 'csa-ctu-scan'
@@ -545,6 +546,17 @@ class Configuration:
     def preprocess_repo(self):
         start_time = time.time()
         remake_dir(self.preprocess_path, "[Preprocess Files DIR exists]")
+
+        with open(self.compile_database, 'r') as f:
+            json_file = json.load(f)
+            for ccdb in json_file:
+                if ccdb.get("command"):
+                    ccdb["command"] += ' -D__clang_analyzer__ '
+                else:
+                    ccdb["arguments"].append('-D__clang_analyzer__')
+            pre_cdb = open(self.compile_commands_used_by_pre, 'w')
+            json.dump(json_file, pre_cdb, indent=4)
+            pre_cdb.close()
         plugin_path = self.preprocess_path / 'compile_action.json'
         with open(plugin_path, 'w') as f:
             plugin = example_compiler_action_plugin
@@ -557,7 +569,7 @@ class Configuration:
         commands = DEFAULT_PANDA_COMMANDS.copy()
         # commands.extend(['--plugin', str(plugin_path)])
         commands.append('-E')
-        commands.extend(['-f', str(self.compile_database)])
+        commands.extend(['-f', str(self.compile_commands_used_by_pre)])
         commands.extend(['-o', str(self.preprocess_path)])
         if self.analyze_opts.verbose:
             commands.extend(['--verbose'])
@@ -1193,7 +1205,7 @@ def main():
         repo_db = Repository(repo['name'], repo['src_path'], options_list=repo['options_list'], opts=opts)
         repo_list.append(repo_db)
         logger.info('-------------BEGIN SUMMARY-------------\n')
-        repo_db.build_every_config()
+        # repo_db.build_every_config()
         repo_db.preprocess_every_config()
         repo_db.diff_every_config()
         repo_db.extract_ii_every_config()

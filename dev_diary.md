@@ -233,4 +233,4 @@ int main () {
 - 某些情况下，使用`compile_commands.json`对应指令预处理后的文件并不等价于CSA分析到的文件，例如宏`__clang_analyzer__`在CSA分析代码时会自动开启，但是预处理时并不会。(见`clang_tool/test/function_name.cpp case 4`)
 
 ## 解决方法
-- 为预处理数据库添加该宏定义。
+- 修改预处理使用的compile database的指令。
