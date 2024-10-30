@@ -13,9 +13,10 @@ class DiffLineManager {
 public:
     DiffLineManager(const SourceManager &sm): DiffLines(std::nullopt), SM(sm) {}
 
-    void Initialize(std::string , std::string);
+    void Initialize(std::string &, std::string);
 
     bool isChangedLine(unsigned int , unsigned int );
+    bool isChangedDecl(const Decl *D);
 
     std::optional<std::pair<int, int>> StartAndEndLineOfDecl(const Decl *);
 

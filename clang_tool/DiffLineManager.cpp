@@ -1,6 +1,8 @@
 #include "DiffLineManager.h"
+#include <utility>
+#include <vector>
 
-void DiffLineManager::Initialize(std::string DiffPath, std::string mainFilePath) {
+void DiffLineManager::Initialize(std::string &DiffPath, std::string mainFilePath) {
     MainFilePath = mainFilePath;
 
     if (DiffPath.empty()) {
@@ -25,7 +27,7 @@ void DiffLineManager::Initialize(std::string DiffPath, std::string mainFilePath)
     if (GlobalDiffLines) {
         // printJsonObject(*GlobalDiffLines);
         if (auto diff_array = GlobalDiffLines->getArray(MainFilePath)) {
-            DiffLines = {};
+            DiffLines = std::vector<std::pair<int, int>>();
             for (auto line: *diff_array) {
                 auto line_arr = line.getAsArray();
                 auto line_start = (*line_arr)[0].getAsInteger();
@@ -105,6 +107,11 @@ bool DiffLineManager::isChangedLine(unsigned int line, unsigned int end_line) {
     }
 
     return false;  // 如果没有找到，返回 false
+}
+
+bool DiffLineManager::isChangedDecl(const Decl *D) {
+    auto loc = StartAndEndLineOfDecl(D);
+    return loc && isChangedLine(loc->first, loc->second);
 }
 
 void DiffLineManager::printJsonObject(const llvm::json::Object &obj) {

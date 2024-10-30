@@ -91,6 +91,8 @@ public:
             auto StartLoc = loc->first;
             auto EndLoc = loc->second;
             CGToRange[D] = std::make_pair(StartLoc, EndLoc);
+            // CG only record canonical decls, so it's neccessary to
+            // judge if there are changes in Function Definition scope. 
             if (DLM.isChangedLine(StartLoc, EndLoc)) {
                 FunctionsNeedReanalyze.insert(D);
             }
@@ -169,7 +171,9 @@ public:
             }
             *OS << "]\n";
         }
-        outFile->close();
+        (*OS).flush();
+        if (IncOpt.DumpToFile)
+            outFile->close();
     }
 
     void DumpFunctionsNeedReanalyze() {
@@ -204,7 +208,9 @@ public:
             }
             *OS << "\n";
         }
-        outFile->close();
+        (*OS).flush();
+        if (IncOpt.DumpToFile)
+            outFile->close();
     }
 
 private:

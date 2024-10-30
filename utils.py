@@ -50,7 +50,7 @@ def replace_loc_info(pair):
         pattern = re.compile(r'^# \d+')
         with open(src, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-        new_lines = ["" if pattern.match(line) else line for line in lines]
+        new_lines = ["\n" if pattern.match(line) else line for line in lines]
         makedir(os.path.dirname(dest))
         with open(dest, 'w', encoding='utf-8') as f:
             f.writelines(new_lines)

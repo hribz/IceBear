@@ -1,5 +1,6 @@
 #include "IncInfoCollectASTVisitor.h"
 #include <clang/AST/DeclCXX.h>
+#include <llvm-19/llvm/Support/raw_ostream.h>
 #include <llvm/Support/Casting.h>
 
 bool IncInfoCollectASTVisitor::isGlobalConstant(const Decl *D) {
@@ -20,20 +21,19 @@ bool IncInfoCollectASTVisitor::isGlobalConstant(const Decl *D) {
     if (auto EC = dyn_cast_or_null<EnumConstantDecl>(D)) {
         return true;
     }
-    if (auto FD = dyn_cast_or_null<FieldDecl>(D)) {
-        if (FD->getType().isConstQualified()) {
-            return true;
-        }
-        return false;
-    }
+    // if (auto FD = dyn_cast_or_null<FieldDecl>(D)) {
+    //     if (FD->getType().isConstQualified()) {
+    //         return true;
+    //     }
+    //     return false;
+    // }
     return false;
 }
 
 bool IncInfoCollectASTVisitor::VisitDecl(Decl *D) {
     // record all changed global constants def
     if (isGlobalConstant(D)) {
-        auto loc = DLM.StartAndEndLineOfDecl(D);
-        if (loc && DLM.isChangedLine(loc->first, loc->second)) {
+        if (DLM.isChangedDecl(D)) {
             // Should we just record canonical decl?
             InsertCanonicalDeclToSet(GlobalConstantSet, D);
             InsertCanonicalDeclToSet(TaintDecls, D);
@@ -58,8 +58,7 @@ bool IncInfoCollectASTVisitor::VisitDecl(Decl *D) {
         return true;
         // TODO: Is it neccessary to consider type change?
         RecordDecl *RD = dyn_cast<RecordDecl>(D);
-        auto loc = DLM.StartAndEndLineOfDecl(RD);
-        if (loc && DLM.isChangedLine(loc->first, loc->second)) {
+        if (DLM.isChangedDecl(RD)) {
             InsertCanonicalDeclToSet(TaintDecls, RD);
         } else if(auto CXXRD = llvm::dyn_cast_or_null<CXXRecordDecl>(RD)) {
             // Traverse all base records.
@@ -74,17 +73,14 @@ bool IncInfoCollectASTVisitor::VisitDecl(Decl *D) {
     } else if (isa<FieldDecl>(D)) {
         return true;
         FieldDecl *FD = dyn_cast<FieldDecl>(D);
-        auto loc = DLM.StartAndEndLineOfDecl(FD);
         // record changed field
-        if ((loc && DLM.isChangedLine(loc->first, loc->second))) {
+        if (DLM.isChangedDecl(FD)) {
             InsertCanonicalDeclToSet(TaintDecls, FD);
         }
         // TODO: if this field is used in `CXXCtorInitializer`, the correspond `CXXCtor` should be reanalyze
         
-    } else {
-        if (CG.getNode(D)) {
-            inFunctionOrMethodStack.push_back(D);
-        }
+    } else if (isa<FunctionDecl>(D))  {
+
     }
     return true;
 }
@@ -94,12 +90,17 @@ bool IncInfoCollectASTVisitor::TraverseDecl(Decl *D) {
         // D maybe nullptr when VisitTemplateTemplateParmDecl.
         return true;
     }
-    if (CountCanonicalDeclInSet(FunctionsNeedReanalyze, D)) {
-        // If this `Decl` has been confirmed need to be reanalyzed, we don't need to traverse it.
-        return true;
+    bool isFunctionDecl = isa<FunctionDecl>(D);
+    if (isFunctionDecl) {
+        if (CountCanonicalDeclInSet(FunctionsNeedReanalyze, D) || DLM.isChangedDecl(D)) {
+            // If this `Decl` has been confirmed need to be reanalyzed, we don't need to traverse it.
+            InsertCanonicalDeclToSet(FunctionsNeedReanalyze, D);
+            return true;
+        }
+        inFunctionOrMethodStack.push_back(D->getCanonicalDecl()); // enter function/method
     }
     bool Result = clang::RecursiveASTVisitor<IncInfoCollectASTVisitor>::TraverseDecl(D);
-    if (!inFunctionOrMethodStack.empty() && inFunctionOrMethodStack.back() == D->getCanonicalDecl()) {
+    if (isFunctionDecl) {
         inFunctionOrMethodStack.pop_back(); // exit function/method
     }
     return Result;
@@ -153,8 +154,14 @@ void IncInfoCollectASTVisitor::DumpGlobalConstantSet() {
             llvm::outs() << "Unnamed declaration";
         }
         llvm::outs() << ": " << "<" << D->getDeclKindName() << "> ";
+        if (IncOpt.PrintLoc) {
+            auto loc = DLM.StartAndEndLineOfDecl(D);
+            if (loc)
+                llvm::outs() << " -> " << loc->first << "-" << loc->second;
+        }
         llvm::outs() << "\n";
     }
+    llvm::outs().flush();
 }
 
 void IncInfoCollectASTVisitor::DumpTaintDecls() {
@@ -170,6 +177,12 @@ void IncInfoCollectASTVisitor::DumpTaintDecls() {
             llvm::outs() << "Unnamed declaration";
         }
         llvm::outs() << ": " << "<" << D->getDeclKindName() << "> ";
+        if (IncOpt.PrintLoc) {
+            auto loc = DLM.StartAndEndLineOfDecl(D);
+            if (loc)
+                llvm::outs() << " -> " << loc->first << "-" << loc->second;
+        }
         llvm::outs() << "\n";
     }
+    llvm::outs().flush();
 }

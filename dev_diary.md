@@ -230,7 +230,7 @@ int main () {
 
 # 2024/10/29
 ## 问题
-- 某些情况下，使用`compile_commands.json`对应指令预处理后的文件并不等价于CSA分析到的文件，例如宏`__clang_analyzer__`在CSA分析代码时会自动开启，但是预处理时并不会。(见`clang_tool/test/function_name.cpp case 4`)
+- 某些情况下，使用`compile_commands.json`对应指令预处理后的文件并不等价于CSA分析到的文件，例如宏`__clang_analyzer__`在CSA分析代码时会自动开启，但是预处理时并不会。(见`clang_tool/test/function_name.cpp case 4`以及`clang_tool/test/namespace.cpp`)
 
 ## 解决方法
 - 修改预处理使用的compile database的指令。
