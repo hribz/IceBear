@@ -270,6 +270,8 @@ static llvm::cl::opt<bool> DumpToFile("dump-file", llvm::cl::desc("Dump CG and C
     llvm::cl::value_desc("dump to file or stream"), llvm::cl::init(true));
 static llvm::cl::opt<bool> DumpUSR("dump-usr", llvm::cl::desc("Dump USR function name"),
     llvm::cl::value_desc("dump usr fname"), llvm::cl::init(false));
+static llvm::cl::opt<bool> CTU("ctu", llvm::cl::desc("Consider CTU analysis"),
+    llvm::cl::value_desc("consider CTU analysis"), llvm::cl::init(false));
 
 int main(int argc, const char **argv) {
     auto ExpectedParser = CommonOptionsParser::create(argc, argv, ToolCategory);
@@ -282,7 +284,7 @@ int main(int argc, const char **argv) {
 
     ClangTool Tool(OptionsParser.getCompilations(), OptionsParser.getSourcePathList());
     IncOptions IncOpt{.PrintLoc=PrintLoc, .ClassLevelTypeChange=ClassLevel, .FieldLevelTypeChange=FieldLevel, 
-                      .DumpToFile=DumpToFile, .DumpUSR=DumpUSR};
+                      .DumpToFile=DumpToFile, .DumpUSR=DumpUSR, .CTU=CTU};
     IncInfoCollectActionFactory Factory(OutputPath, DiffPath, IncOpt);
     return Tool.run(&Factory);
 }

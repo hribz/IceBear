@@ -1,4 +1,5 @@
 #include "IncInfoCollectASTVisitor.h"
+#include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
 #include <llvm-19/llvm/Support/raw_ostream.h>
 #include <llvm/Support/Casting.h>
@@ -92,6 +93,11 @@ bool IncInfoCollectASTVisitor::TraverseDecl(Decl *D) {
     }
     bool isFunctionDecl = isa<FunctionDecl>(D);
     if (isFunctionDecl) {
+        auto FD = dyn_cast<FunctionDecl>(D);
+        if (!IncOpt.CTU && !FD->isDefined()) {
+            // Don't care functions don't have definition if under no-ctu mode.
+            return true;
+        }
         if (CountCanonicalDeclInSet(FunctionsNeedReanalyze, D) || DLM.isChangedDecl(D)) {
             // If this `Decl` has been confirmed need to be reanalyzed, we don't need to traverse it.
             InsertCanonicalDeclToSet(FunctionsNeedReanalyze, D);

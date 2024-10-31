@@ -48,6 +48,7 @@ public:
 
     bool DumpToFile = true;
     bool DumpUSR = false;
+    bool CTU = false;
 };
 
 class DeclRefFinder : public RecursiveASTVisitor<DeclRefFinder> {

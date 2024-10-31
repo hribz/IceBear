@@ -292,7 +292,9 @@ class FileInCDB:
         for fname in self.functions_changed:
             node_from_cf = self.call_graph.get_node_if_exist(fname)
             if not node_from_cf:
-                logger.error(f"[Propagate Func Reanalyze] Can not found {fname} in call graph")
+                # If the changed function's definition in other translation unit, it may not appear
+                # in CallGraph.
+                logger.error(f"[Propagate Func Reanalyze] Can not found {fname} in {self.get_file_path(FileKind.CG)}")
                 continue
             self.call_graph.mark_as_reanalye(node_from_cf)
             # For soundness, don't use two new terminative rules on `node_from_cf`'s callers,
@@ -378,7 +380,8 @@ class Configuration:
         self.options.extend(options)
 
         commands = [cmake_path]
-        commands.append(str(self.src_path))
+        commands.append(f"-S {str(self.src_path)}")
+        commands.append(f"-B {str(self.build_path)}")
         for option in self.options:
             commands.append(f"-D{option.name}={option.value}")
         if self.args:
@@ -455,7 +458,7 @@ class Configuration:
         self.create_cmake_api_file()
         logger.debug("[Repo Config Script] " + self.configure_script)
         try:
-            os.chdir(self.build_path)
+            # os.chdir(self.build_path)
             process = run(self.configure_script, shell=True, capture_output=True, text=True, check=True)
             logger.info(f"[Repo Config Success] {process.stdout}")
             self.session_times['configure'] = time.time() - start_time
@@ -988,7 +991,7 @@ class Repository:
 
     def __init__(self, name, src_path, env: Environment, options_list:List[List[Option]]=None, build_root = None):
         self.name = name
-        self.src_path = Path(src_path)
+        self.src_path = Path(src_path).absolute()
         self.env = env
         self.cmakeFile = self.src_path / 'CMakeLists.txt'
         self.running_status = True
@@ -1087,6 +1090,53 @@ class Repository:
         for config in self.configurations:
             ret += str(config)
         return ret
+    
+    def summary_to_csv_specific(self):
+        headers = ["project", "version"]
+        headers.extend([str(session) for session in self.default_config.session_times.keys()])
+        data = []
+        for (idx, config) in enumerate(self.configurations):
+            config_data = [self.name, f"build_{idx}"]
+            for session in config.session_times.keys():
+                exe_time = config.session_times[session]
+                if isinstance(exe_time, SessionStatus):
+                    config_data.append(str(exe_time._name_))
+                else:
+                    config_data.append("%.3lf s" % exe_time)
+            data.append(config_data)
+
+        return headers, data
+    
+    def summary_to_csv(self):
+        headers = ["project", "version", "configure", "prepare for inc", "prepare for CSA", "execute CSA"]
+        prepare_for_inc = {"preprocess_repo", "diff_with_other", "extract_inc_info", "parse_call_graph", 
+                           "parse_functions_changed", "propagate_reanalyze_attr", "parse_function_summaries"}
+        prepare_for_csa = {"generate_efm", "merge_efm"}
+        data = []
+        for (idx, config) in enumerate(self.configurations):
+            config_data = [self.name, f"build_{idx}"]
+            config_time = 0.0
+            inc_time = 0.0
+            csa_time = 0.0
+            exe_csa_time = 0.0
+            for session in config.session_times.keys():
+                exe_time = config.session_times[session]
+                if not isinstance(exe_time, SessionStatus):
+                    if session in prepare_for_inc:
+                        inc_time += exe_time
+                    elif session in prepare_for_csa:
+                        csa_time += exe_time
+                    elif session == "configure":
+                        config_time = exe_time
+                    elif session == "execute_csa":
+                        exe_csa_time = exe_time
+            config_data.append("%.3lf s" % config_time)
+            config_data.append("%.3lf s" % inc_time)
+            config_data.append("%.3lf s" % csa_time)
+            config_data.append("%.3lf s" % exe_csa_time)
+            data.append(config_data)
+
+        return headers, data
 
 def main(args):
     parser = ArgumentParser()
