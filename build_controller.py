@@ -8,6 +8,7 @@ from logger import logger
 import json
 import argparse
 import os
+import sys
 import re
 import time
 import multiprocessing as mp
@@ -16,77 +17,6 @@ from functools import partial
 from data_struct.reply import Reply
 from utils import * 
 from compile_command import CompileCommand
-
-PWD = Path(".").absolute()
-EXTRACT_II = str(PWD / 'build/clang_tool/collectIncInfo')
-EXTRACT_CG = str(PWD / 'build/clang_tool/extractCG')
-PANDA = str(PWD / 'panda/panda')
-# CSA revised version
-MY_CLANG = 'clang'
-MY_CLANG_PLUS_PLUS = 'clang++'
-CLANG = 'clang-19'
-CLANG_PLUS_PLUS = 'clang++-19'
-example_compiler_action_plugin = {
-    "comment": "Example plugin for Panda driver.",
-    "type": "CompilerAction",
-    "action": {
-        "title": "Dumping clang cc1 arguments",
-        "args": ["-###"],
-        "extname": ".d",
-        "outopt": None
-    }
-}
-example_clang_tool_plugin = {
-    "comment": "Example plugin for Panda driver",
-    "type": "ClangToolAction",
-    "action": {
-        "title": "Executing static analyzer",
-        "tool": "clang-check",
-        "args": ["-analyze"],
-        "extname": ".clang-check",
-        "stream": "stderr"
-    }
-}
-
-LOG_TAG = ''
-# 查找cmake命令的位置
-CMAKE_PATH = shutil.which('cmake')
-if CMAKE_PATH:
-    print(f'CMake found at: {CMAKE_PATH}')
-else:
-    print('CMake not found in the system path')
-    exit(1)
-DIFF_PATH = shutil.which('diff')
-if DIFF_PATH:
-    print(f'diff found at: {CMAKE_PATH}')
-else:
-    print('diff not found in the system path')
-    exit(1)
-if EXTRACT_II:
-    print(f'cg extractor found at: {EXTRACT_II}')
-else:
-    print('please build cg extractor firstly') 
-    exit(1)
-if os.path.exists(MY_CLANG):
-    print(f'use clang={MY_CLANG}')
-else:
-    MY_CLANG = shutil.which('clang')
-    if not MY_CLANG:
-        print('please ensure there is clang in your environment')
-        exit(1)
-if os.path.exists(MY_CLANG_PLUS_PLUS):
-    print(f'use clang++={MY_CLANG_PLUS_PLUS}')
-else:
-    MY_CLANG_PLUS_PLUS = shutil.which('clang++')
-    if not MY_CLANG_PLUS_PLUS:
-        print('please ensure there is clang++ in your environment')
-        exit(1)
-DEFAULT_PANDA_COMMANDS = [
-    PANDA, 
-    '-j', '16', '--print-execution-time',
-    '--cc', CLANG, 
-    '--cxx', CLANG_PLUS_PLUS
-]
 
 class Option:
     def __init__(self, name: str, value: str):
@@ -315,7 +245,7 @@ class FileInCDB:
                 else:
                     if is_caller:
                         caller = line
-                        if self.parent.analyze_opts.analyze == 'ctu':
+                        if self.parent.env.analyze_opts.analyze == 'ctu':
                             self.call_graph.add_fs_node(caller, callee, self.parent.global_efm)
                         else:
                             self.call_graph.add_fs_node(caller, callee)
@@ -395,6 +325,7 @@ class FileInCDB:
                 f.write(fname + '\n')
 
 class Configuration:
+    env: Environment
     name: str
     options: List[Option]
     args: List[str]
@@ -407,18 +338,16 @@ class Configuration:
     reply_database: List[Reply]
     diff_file_list: List[FileInCDB]
     diff_origin_file_list: List[str]
-    extract_ii: str = EXTRACT_II
-    extract_cg: str = EXTRACT_CG
     incrementable: bool
     session_times: Dict
     # We traverse file_list most of the time, so we don't use dict[str, FileInCDB]
     file_list_index: Dict[str, int]
     file_list: List[FileInCDB]      # Files in workspace
 
-    def __init__(self, name, src_path, options: List[Option], opts, args=None, cmake_path=None, build_path=None):
+    def __init__(self, name, src_path, env, options: List[Option], args=None, build_path=None):
         self.name = name
-        self.analyze_opts = opts
         self.src_path = src_path
+        self.env = env
         self.update_build_path(build_path)
         self.file_list_index = None
         self.file_list = None
@@ -426,30 +355,28 @@ class Configuration:
             self.args = args
         else:
             self.args = None
-        self.options = []
-        self.options.append(Option('CMAKE_EXPORT_COMPILE_COMMANDS', '1'))
-        self.options.append(Option('CMAKE_BUILD_TYPE', 'Release'))
-        self.options.append(Option('CMAKE_C_COMPILER', CLANG))
-        self.options.append(Option('CMAKE_CXX_COMPILER', CLANG_PLUS_PLUS))
-        self.options.extend(options)
-        if cmake_path:
-            self.create_configure_script(cmake_path)
-        else:
-            self.create_configure_script(CMAKE_PATH)
+        self.create_configure_script(self.env.CMAKE_PATH, options)
         self.reply_database = []
         self.diff_file_list = []
         self.status = 'WAIT'
         self.incrementable = False
         self.session_times = {}
-        # baseline Configuration
+        # Baseline Configuration
         self.baseline: Configuration = self
         self.global_efm: Dict[str, FileInCDB] = None
         if os.path.exists(self.compile_database):
-            # If there is compile_commands.jsno exists, we can prepare file list early.
+            # If there is compile_commands.json exists, we can prepare file list early.
             # Otherwise, we need execute configure to generate compile_commands.json.
             self.prepare_file_list()
-        
-    def create_configure_script(self, cmake_path):
+
+    def create_configure_script(self, cmake_path, options):
+        self.options = []
+        self.options.append(Option('CMAKE_EXPORT_COMPILE_COMMANDS', '1'))
+        self.options.append(Option('CMAKE_BUILD_TYPE', 'Release'))
+        self.options.append(Option('CMAKE_C_COMPILER', self.env.CLANG))
+        self.options.append(Option('CMAKE_CXX_COMPILER', self.env.CLANG_PLUS_PLUS))
+        self.options.extend(options)
+
         commands = [cmake_path]
         commands.append(str(self.src_path))
         for option in self.options:
@@ -502,10 +429,10 @@ class Configuration:
                     extname = ''
                 self.file_list.append(FileInCDB(self, compile_command.file, extname))
                 self.file_list_index[compile_command.file] = idx
-    
+
     def get_file(self, file_path: str) -> FileInCDB:
         idx = self.file_list_index.get(file_path, None)
-        if not idx:
+        if idx is None:
             logger.error(f"[Get File] {file_path} not exists in file_list_index")
             return None
         return self.file_list[idx]
@@ -559,19 +486,19 @@ class Configuration:
             pre_cdb.close()
         plugin_path = self.preprocess_path / 'compile_action.json'
         with open(plugin_path, 'w') as f:
-            plugin = example_compiler_action_plugin
+            plugin = self.env.example_compiler_action_plugin.copy()
             plugin['action']['title'] = 'Preprocess Files'
             # '-P' will clean line information in preprocessed files.
             # Error! Line information should not ignored!
             plugin['action']['args'] = ['-E'] 
             plugin['action']['extname'] = ['.i', '.ii']
             json.dump(plugin, f, indent=4)
-        commands = DEFAULT_PANDA_COMMANDS.copy()
+        commands = self.env.DEFAULT_PANDA_COMMANDS.copy()
         # commands.extend(['--plugin', str(plugin_path)])
         commands.append('-E')
         commands.extend(['-f', str(self.compile_commands_used_by_pre)])
         commands.extend(['-o', str(self.preprocess_path)])
-        if self.analyze_opts.verbose:
+        if self.env.analyze_opts.verbose:
             commands.extend(['--verbose'])
         preprocess_script = ' '.join(commands)
         logger.debug("[Preprocess Files Script] " + preprocess_script)
@@ -620,16 +547,16 @@ class Configuration:
         remake_dir(self.inc_info_path, "[Inc Info Files DIR exists]")
         plugin_path = self.inc_info_path / 'cg_plugin.json'
         with open(plugin_path, 'w') as f:
-            plugin = example_clang_tool_plugin
+            plugin = self.env.example_clang_tool_plugin.copy()
             plugin['action']['title'] = 'Extract Inc Info'
-            plugin['action']['tool'] = self.extract_ii
+            plugin['action']['tool'] = self.env.EXTRACT_II
             plugin['action']['args'] = ['-diff', str(self.diff_lines_path)]
             plugin['action']['extname'] = ""
             plugin['action']['stream'] = ''
             json.dump(plugin, f, indent=4)
 
-        commands = DEFAULT_PANDA_COMMANDS.copy()
-        if self.analyze_opts.verbose:
+        commands = self.env.DEFAULT_PANDA_COMMANDS.copy()
+        if self.env.analyze_opts.verbose:
             commands.extend(['--verbose'])
         commands.extend(['--plugin', str(plugin_path)])
         commands.extend(['-f', str(self.preprocess_compile_database)])
@@ -642,7 +569,7 @@ class Configuration:
         try:
             process = run(extract_ii_script, shell=True, capture_output=True, text=True, check=True)
             self.session_times['extract_inc_info'] = time.time() - start_time
-            if self.analyze_opts.verbose:
+            if self.env.analyze_opts.verbose:
                 logger.info(f"[Extract Inc Info Success] {process.stdout} {process.stderr}")
         except subprocess.CalledProcessError as e:
             self.session_times['extract_inc_info'] = SessionStatus.Failed
@@ -651,13 +578,13 @@ class Configuration:
     def generate_efm(self):
         start_time = time.time()
         # remake_dir(self.csa_path, "[EDM Files DIR exists]")
-        commands = DEFAULT_PANDA_COMMANDS.copy()
+        commands = self.env.DEFAULT_PANDA_COMMANDS.copy()
         commands.append('--ctu-loading-ast-files') # Prepare CTU analysis for loading AST files.
         commands.extend(['-f', str(self.compile_database)])
         commands.extend(['-o', str(self.csa_path)])
         if self.incrementable:
             commands.extend(['--file-list', f"{self.diff_files_path}"])
-        if self.analyze_opts.verbose:
+        if self.env.analyze_opts.verbose:
             commands.extend(['--verbose'])
         edm_script = ' '.join(commands)
         logger.debug("[Generating EFM Files Script] " + edm_script)
@@ -665,7 +592,7 @@ class Configuration:
             process = run(edm_script, shell=True, capture_output=True, text=True, check=True)
             logger.info(f"[Generating EFM Files Success] {edm_script}")
             self.session_times['generate_efm'] = time.time() - start_time
-            if self.analyze_opts.verbose:
+            if self.env.analyze_opts.verbose:
                 logger.debug(f"[Panda EFM Info]\nstdout: \n{process.stdout}\n stderr: \n{process.stderr}")
         except subprocess.CalledProcessError as e:
             self.session_times['generate_efm'] = SessionStatus.Failed
@@ -713,7 +640,7 @@ class Configuration:
                         else:
                             fout.write('%s %s\n' % (usr, self.baseline.get_file(self.global_efm[usr].file_name).get_file_path(FileKind.AST)))
 
-            GenerateFinalExternalFunctionMapIncrementally(self.analyze_opts, self.diff_file_list, str(baseline_edm_file))
+            GenerateFinalExternalFunctionMapIncrementally(self.env.analyze_opts, self.diff_file_list, str(baseline_edm_file))
         else:
             with open(self.csa_path / 'externalDefMap.txt', 'r') as f:
                 for line in f.readlines():
@@ -725,46 +652,46 @@ class Configuration:
     def execute_csa(self):
         start_time = time.time()
         commands = [
-            PANDA, 
-            '-j', str(self.analyze_opts.jobs), '--print-execution-time',
+            self.env.PANDA, 
+            '-j', str(self.env.analyze_opts.jobs), '--print-execution-time',
         ]
         # We need to use revised Clang Static Analyzer to analyze functions incrementally.
-        if self.analyze_opts.inc:
+        if self.env.analyze_opts.inc:
             commands.extend([
-                '--cc', MY_CLANG,
-                '--cxx', MY_CLANG_PLUS_PLUS
+                '--cc', self.env.MY_CLANG,
+                '--cxx', self.env.MY_CLANG_PLUS_PLUS
             ])
         else:
             commands.extend([
-                '--cc', CLANG,
-                '--cxx', CLANG_PLUS_PLUS
+                '--cc', self.env.CLANG,
+                '--cxx', self.env.CLANG_PLUS_PLUS
             ])
 
-        if self.analyze_opts.verbose:
+        if self.env.analyze_opts.verbose:
             commands.extend(['--verbose'])
 
-        if self.analyze_opts.fsum:
+        if self.env.analyze_opts.fsum:
             # We need to use revised Clang Static Analyzer to output function summmary.
             args = ['--analyze', '-Xanalyzer', '-analyzer-output=html',
                 '-Xanalyzer', '-analyzer-disable-checker=deadcode',
                 '-o', str(self.csa_path / 'csa-reports')]
-            if self.analyze_opts.verbose:
+            if self.env.analyze_opts.verbose:
                 args.extend(['-Xanalyzer', '-analyzer-display-progress'])
                 
-            if self.analyze_opts.analyze == 'ctu':
+            if self.env.analyze_opts.analyze == 'ctu':
                 ctuConfigs = [
                     'experimental-enable-naive-ctu-analysis=true',
                     'ctu-dir=' + str(self.csa_path),
                     'ctu-index-name=' + str(self.csa_path / 'externalDefMap.txt'),
                     'ctu-invocation-list=' + str(self.csa_path / 'invocations.yaml')
                 ]
-                if self.analyze_opts.verbose:
+                if self.env.analyze_opts.verbose:
                     ctuConfigs.append('display-ctu-progress=true')
                 args += ['-Xanalyzer', '-analyzer-config', '-Xanalyzer', ','.join(ctuConfigs)]
 
             plugin_path = self.csa_path / 'csa_plugin.json'
             with open(plugin_path, 'w') as f:
-                plugin = example_compiler_action_plugin
+                plugin = self.env.example_compiler_action_plugin.copy()
                 plugin['comment'] = 'Plugin used by IncAnalyzer to execute CSA'
                 plugin['action']['title'] = 'Execute CSA'
                 plugin['action']['args'] = args
@@ -779,7 +706,7 @@ class Configuration:
         else:
             # just use panda to execute CSA
             commands.append('--analyze')
-            if self.analyze_opts.analyze == 'ctu':
+            if self.env.analyze_opts.analyze == 'ctu':
                 commands.append('ctu')
             else:
                 commands.append('no-ctu')
@@ -795,7 +722,7 @@ class Configuration:
             process = run(csa_script, shell=True, capture_output=True, text=True, check=True)
             self.session_times['execute_csa'] = time.time() - start_time
             logger.info(f"[Executing CSA Files Success] {csa_script}")
-            if self.analyze_opts.verbose:
+            if self.env.analyze_opts.verbose:
                 logger.debug(f"[Panda Debug Info]\nstdout: \n{process.stdout}\n stderr: \n{process.stderr}")
         except subprocess.CalledProcessError as e:
             # self.session_times['execute_csa'] = SessionStatus.Failed
@@ -805,7 +732,7 @@ class Configuration:
     
     def prepare_diff_dir(self):
         remake_dir(self.diff_path, "[Diff Files DIR exists]")
-        with mp.Pool(self.analyze_opts.jobs) as p:
+        with mp.Pool(self.env.analyze_opts.jobs) as p:
             p.map(replace_loc_info, [(file.prep_file, file.diff_file) for file in self.file_list])
 
     def diff_with_other(self, other):
@@ -845,13 +772,13 @@ class Configuration:
             f_prep_diff_files.close()
             f_diff_lines.close()
 
-            self.incrementable = self.analyze_opts.inc and True
+            self.incrementable = self.env.analyze_opts.inc and True
             self.session_times['diff_with_other'] = time.time() - start_time
         else:
             self.session_times['diff_with_other'] = SessionStatus.Failed
 
     def diff_two_dir(self, my_dir: Path, other_dir: Path, other):
-        commands = [DIFF_PATH]
+        commands = [self.env.DIFF_PATH]
         commands.extend(['-r', '-u0'])
         # -d: Use the diff algorithm which may find smaller set of change
         # -r: Recursively compare any subdirectories found.
@@ -960,7 +887,7 @@ class Configuration:
         file_list = self.diff_file_list \
             if self.incrementable else self.file_list
         # Can't use mutilprocessing, because every process has its own memory space.
-        # with mp.Pool(self.analyze_opts.jobs) as p:
+        # with mp.Pool(self.env.analyze_opts.jobs) as p:
         #     p.starmap(virtualCall, [(file, method, False) for file in file_list])
         threads = []
         for file in file_list:
@@ -974,7 +901,7 @@ class Configuration:
 
     def parse_function_summaries(self):
         self.session_times['parse_function_summaries'] = SessionStatus.Skipped
-        if not (self.analyze_opts.fsum and self.analyze_opts.use_fsum):
+        if not (self.env.analyze_opts.fsum and self.env.analyze_opts.use_fsum):
             return
         start_time = time.time()
         self.session_times['parse_function_summaries'] = SessionStatus.Failed
@@ -1008,15 +935,15 @@ class Configuration:
         threads = []
         for file in self.diff_file_list:
             arg = None
-            if self.analyze_opts.fsum and self.analyze_opts.use_fsum:
-                # with mp.Pool(self.analyze_opts.jobs) as p:
+            if self.env.analyze_opts.fsum and self.env.analyze_opts.use_fsum:
+                # with mp.Pool(self.env.analyze_opts.jobs) as p:
                 #     p.starmap(virtualCall, [(file, FileInCDB.propagate_reanalyze_attribute, True, \
                 #                                 None if file.diff_info.entire_file \
                 #                                 else file.diff_info.origin_file.call_graph \
                 #                                 ) for file in file_list])
                 arg = None if file.diff_info.entire_file else file.diff_info.origin_file.call_graph
             else:
-                # with mp.Pool(self.analyze_opts.jobs) as p:
+                # with mp.Pool(self.env.analyze_opts.jobs) as p:
                 #     p.starmap(virtualCall, [(file, FileInCDB.propagate_reanalyze_attribute, False) for file in file_list])
                 arg = None
             # thread = threading.Thread(target=FileInCDB.propagate_reanalyze_attribute, args=[arg])
@@ -1053,37 +980,61 @@ class Configuration:
 class Repository:
     name: str
     src_path: Path
-    cmake_path: str = CMAKE_PATH
     default_config: Configuration
     configurations: List[Configuration]
     cmakeFile: Path
     running_status: bool # whether the repository sessions should keep running
+    env: Environment
 
-    def __init__(self, name, src_path, opts, options_list:List[List[Option]]=None, cmake_path=None):
+    def __init__(self, name, src_path, env: Environment, options_list:List[List[Option]]=None, build_root = None):
         self.name = name
-        self.analyze_opts = opts
         self.src_path = Path(src_path)
+        self.env = env
         self.cmakeFile = self.src_path / 'CMakeLists.txt'
         self.running_status = True
         if not self.cmakeFile.exists():
             print(f'Please make sure there is CMakeLists.txt in {self.src_path}')
             exit(1)
-        if cmake_path is not None:
-            self.cmake_path = cmake_path
         logger.TAG = self.name
-        self.default_config = Configuration(self.name, self.src_path, [], opts=self.analyze_opts)
+        self.build_root = build_root if build_root is not None else str(self.src_path / 'build')
+        self.default_config = Configuration(self.name, self.src_path, self.env, [], build_path=f"{self.build_root}/build_0")
         self.configurations = [self.default_config]
         if options_list:
             for idx, options in enumerate(options_list):
-                self.configurations.append(Configuration(self.name, self.src_path, options, build_path=f'build/build_{idx + 1}', opts=self.analyze_opts))
+                self.configurations.append(
+                    Configuration(self.name, self.src_path, self.env, options, build_path=f'{self.build_root}/build_{idx + 1}')
+                )
 
-    def process_all_session(self, inc:bool=True):
+    def add_configuration(self, options):
+        self.configurations.append(
+            Configuration(self.name, self.src_path, self.env, options, build_path=f'{self.build_root}/build_{len(self.configurations)}')
+        )
+
+    def process_all_session(self):
         self.build_every_config()
         self.preprocess_every_config()
         # if need incremental analyze, please excute diff session after preprocess immediately
         self.diff_every_config()
-        self.extract_ii_every_config(inc)
-        self.generate_efm_for_every_config(inc)
+        self.extract_ii_every_config()
+        self.generate_efm_for_every_config()
+
+    def process_one_config(self, config: Configuration):
+        # 1. build
+        config.configure()
+        # 2. preprocess and diff
+        config.preprocess_repo()
+        config.diff_with_other(self.default_config)
+        # 3. extract inc info
+        config.extract_inc_info()
+        config.parse_call_graph()
+        config.parse_functions_changed()
+        # 4. prepare for CSA
+        config.generate_efm()
+        config.merge_efm()
+        # 5. execute CSA
+        config.propagate_reanalyze_attr()
+        config.execute_csa()
+        config.parse_function_summaries()
 
     def process_every_config(self, sessions, **kwargs):
         if not self.running_status:
@@ -1137,32 +1088,10 @@ class Repository:
             ret += str(config)
         return ret
 
-def main():
-    parser = argparse.ArgumentParser(prog='IncAnalyzer', formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument('-d', '--dir', default='.', help="Path of Source Files")
-    parser.add_argument('-b', '--build', default='./build', help='Path of Build Directory')
-    parser.add_argument('-n', '--name', help='name of the project')
-    parser.add_argument('--inc', action='store_true', dest='inc', help='Incremental analyze all sessions.')
-    parser.add_argument('--verbose', action='store_true', dest='verbose', help='Record debug information.')
-    parser.add_argument('--analyze', type=str, dest='analyze', choices=['ctu', 'no-ctu'],
-            help='Execute Clang Static Analyzer.')
-    parser.add_argument('--fsum', action='store_true', dest='fsum', help='Generate function summary files.')
-    parser.add_argument('--use_fsum', action='store_true', dest='use_fsum', help='Generate function summary files.')
-    parser.add_argument('-j', '--jobs', type=int, dest='jobs', default=1,
-                        help='Number of jobs can be executed in parallel.')
-    opts = parser.parse_args()
+def main(args):
+    parser = ArgumentParser()
+    opts = parser.parse_args(args)
     logger.verbose = opts.verbose
-
-    def make_panda_command(options):
-        return [
-            PANDA, 
-            '-j', str(options.jobs), '--print-execution-time',
-            '--cc', CLANG, 
-            '--cxx', CLANG_PLUS_PLUS
-        ]
-    
-    global DEFAULT_PANDA_COMMANDS
-    DEFAULT_PANDA_COMMANDS = make_panda_command(opts)
 
     repo_info = [
         # {
@@ -1178,34 +1107,35 @@ def main():
         #         [Option('GOOGLE_TEST', 'ON')]
         #     ]
         # },
-        {
-            'name': 'opencv', 
-            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/opencv', 
-            'options_list': [
-                [Option('WITH_CLP', 'ON')]
-            ]
-        },
         # {
-        #     'name': 'ica-demo',
-        #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/ica-demo',
+        #     'name': 'opencv', 
+        #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/opencv', 
         #     'options_list': [
-        #         [Option('CHANGE_ALL', 'ON')],
-        #         # [Option('GLOBAL_CONSTANT', 'ON')],
-        #         # [Option('VIRTUAL_FUNCTION', 'ON')],
-        #         # [Option('RECORD_FIELD', 'ON')],
-        #         # [Option('FEATURE_UPGRADE', 'ON')],
-        #         # [Option('COMMON_CHANGE', 'ON')],
+        #         [Option('WITH_CLP', 'ON')]
         #     ]
-        # }
+        # },
+        {
+            'name': 'ica-demo',
+            'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/ica-demo',
+            'options_list': [
+                [Option('CHANGE_ALL', 'ON')],
+                # [Option('GLOBAL_CONSTANT', 'ON')],
+                # [Option('VIRTUAL_FUNCTION', 'ON')],
+                # [Option('RECORD_FIELD', 'ON')],
+                # [Option('FEATURE_UPGRADE', 'ON')],
+                # [Option('COMMON_CHANGE', 'ON')],
+            ]
+        }
     ]
 
     repo_list: List[Repository] = []
+    env = Environment(opts)
 
     for repo in repo_info:
-        repo_db = Repository(repo['name'], repo['src_path'], options_list=repo['options_list'], opts=opts)
+        repo_db = Repository(repo['name'], repo['src_path'], env, options_list=repo['options_list'])
         repo_list.append(repo_db)
         logger.info('-------------BEGIN SUMMARY-------------\n')
-        # repo_db.build_every_config()
+        repo_db.build_every_config()
         repo_db.preprocess_every_config()
         repo_db.diff_every_config()
         repo_db.extract_ii_every_config()
@@ -1220,4 +1150,4 @@ def main():
         logger.info('---------------END SUMMARY-------------\n'+repo_db.session_summary())
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1:])

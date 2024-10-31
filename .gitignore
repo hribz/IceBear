@@ -13,3 +13,5 @@ test.py
 *.cf
 .cache
 *.sum
+repos/*
+!repos.csv
