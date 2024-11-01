@@ -155,6 +155,9 @@ class FileInCDB:
         if extname:
             self.prep_file: str = str(self.parent.preprocess_path) + self.file_name + extname
             self.diff_file: str = str(self.parent.diff_path) + self.file_name + extname
+        else:
+            self.prep_file = None
+            self.diff_file = None
     
     def is_changed(self):
         return self.diff_file is not None
@@ -173,8 +176,12 @@ class FileInCDB:
         elif kind == FileKind.EFM:
             return (self.csa_file) + '.extdef'
         elif kind == FileKind.CG:
+            if not self.prep_file:
+                return None
             return (self.prep_file) + '.cg'
         elif kind == FileKind.CF:
+            if not self.prep_file:
+                return None
             return (self.prep_file) + '.cf'
         elif kind == FileKind.RF:
             return (self.csa_file) + '.rf'
@@ -424,17 +431,21 @@ class Configuration:
             cdb = json.load(f)
             for (idx, ccdb) in enumerate(cdb):
                 compile_command = CompileCommand(ccdb)
+                extname = '.i'
                 if compile_command.language == 'c++':
                     extname = '.ii'
                 elif compile_command.language == 'c':
                     extname = '.i'
                 else:
                     extname = ''
+                    file_name = ccdb["file"]
+                    logger.error(f"[Prepare File List] Encounter unknown extname when parse {file_name}")
                 self.file_list.append(FileInCDB(self, compile_command.file, extname))
                 self.file_list_index[compile_command.file] = idx
 
     def get_file(self, file_path: str) -> FileInCDB:
         idx = self.file_list_index.get(file_path, None)
+        # Don't use `if not idx:`, because idx maybe 0.
         if idx is None:
             logger.error(f"[Get File] {file_path} not exists in file_list_index")
             return None
@@ -454,7 +465,8 @@ class Configuration:
 
     def configure(self):
         start_time = time.time()
-        remake_dir(self.build_path, "[Config Build DIR exists]")
+        # remake_dir(self.build_path, "[Config Build DIR exists]")
+        makedir(self.build_path, "[Config Build DIR exists]")
         self.create_cmake_api_file()
         logger.debug("[Repo Config Script] " + self.configure_script)
         try:
@@ -475,7 +487,8 @@ class Configuration:
 
     def preprocess_repo(self):
         start_time = time.time()
-        remake_dir(self.preprocess_path, "[Preprocess Files DIR exists]")
+        # remake_dir(self.preprocess_path, "[Preprocess Files DIR exists]")
+        makedir(self.preprocess_path, "[Preprocess Files DIR exists]")
 
         with open(self.compile_database, 'r') as f:
             json_file = json.load(f)
@@ -518,7 +531,10 @@ class Configuration:
                     elif compile_command.language == 'c':
                         extname = '.i'
                     else:
+                        # Sometimes there are assembly code(.S, .i) in compile_commands.json
                         extname = ''
+                        file_name = ccdb["file"]
+                        logger.error(f"[Prepare File List] Encounter unknown extname when parse {file_name}")
                     file_command["file"] = str(self.preprocess_path) + compile_command.file + extname
                     # Preprocessed files still need compile options, such as c++ version and so on.
                     # And it's no need to add flags like '-xc++', because clang is able to identify
@@ -547,13 +563,16 @@ class Configuration:
             logger.error(f"[Extract Inc Info] can't extract inc info without file {self.compile_database}")
             return
         start_time = time.time()
-        remake_dir(self.inc_info_path, "[Inc Info Files DIR exists]")
+        # remake_dir(self.inc_info_path, "[Inc Info Files DIR exists]")
+        makedir(self.inc_info_path, "[Inc Info Files DIR exists]")
         plugin_path = self.inc_info_path / 'cg_plugin.json'
         with open(plugin_path, 'w') as f:
             plugin = self.env.example_clang_tool_plugin.copy()
             plugin['action']['title'] = 'Extract Inc Info'
             plugin['action']['tool'] = self.env.EXTRACT_II
             plugin['action']['args'] = ['-diff', str(self.diff_lines_path)]
+            if self.env.analyze_opts.analyze == 'ctu':
+                plugin['action']['args'].append('-ctu')
             plugin['action']['extname'] = ""
             plugin['action']['stream'] = ''
             json.dump(plugin, f, indent=4)
@@ -581,6 +600,7 @@ class Configuration:
     def generate_efm(self):
         start_time = time.time()
         # remake_dir(self.csa_path, "[EDM Files DIR exists]")
+        makedir(self.csa_path, "[EDM Files DIR exists]")
         commands = self.env.DEFAULT_PANDA_COMMANDS.copy()
         commands.append('--ctu-loading-ast-files') # Prepare CTU analysis for loading AST files.
         commands.extend(['-f', str(self.compile_database)])
@@ -734,9 +754,10 @@ class Configuration:
             logger.error(f"[Executing CSA Files Failed]\nstdout: \n{e.stdout}\n stderr: \n{e.stderr}")
     
     def prepare_diff_dir(self):
-        remake_dir(self.diff_path, "[Diff Files DIR exists]")
+        # remake_dir(self.diff_path, "[Diff Files DIR exists]")
+        makedir(self.diff_path, "[Diff Files DIR exists]")
         with mp.Pool(self.env.analyze_opts.jobs) as p:
-            p.map(replace_loc_info, [(file.prep_file, file.diff_file) for file in self.file_list])
+            p.map(replace_loc_info, [((file.prep_file, file.diff_file) if file.prep_file else (None, file.file_name)) for file in self.file_list])
 
     def diff_with_other(self, other):
         # Replace all preprocess location info to empty lines.
@@ -1094,6 +1115,7 @@ class Repository:
     def summary_to_csv_specific(self):
         headers = ["project", "version"]
         headers.extend([str(session) for session in self.default_config.session_times.keys()])
+        headers.extend(["files", "diff files"])
         data = []
         for (idx, config) in enumerate(self.configurations):
             config_data = [self.name, f"build_{idx}"]
@@ -1103,6 +1125,9 @@ class Repository:
                     config_data.append(str(exe_time._name_))
                 else:
                     config_data.append("%.3lf s" % exe_time)
+            config_data.append(len(config.file_list))
+            config_data.append(len(config.diff_file_list))
+
             data.append(config_data)
 
         return headers, data

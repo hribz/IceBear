@@ -99,7 +99,7 @@ class ArgumentParser:
     def parse_args(self, args):
         return self.parser.parse_args(args)
 
-def makedir(path: str):
+def makedir(path: str, debug_TAG=None):
     if not os.path.exists(path):
         try:
             os.makedirs(path)
@@ -139,6 +139,9 @@ def virtualCall(file, method, has_arg, arg = None):
 
 def replace_loc_info(pair):
     src, dest = pair
+    if not src:
+        logger.debug(f"[Replace Loc Info] Skip file {dest}")
+        return
     try:
         pattern = re.compile(r'^# \d+')
         with open(src, 'r', encoding='utf-8') as f:

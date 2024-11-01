@@ -73,6 +73,19 @@ void csa_test() {
 }
 #endif
 
+class FunctionPtr {
+public:
+    FunctionPtr(bool (*func)(void)): function_(func) {}
+    typedef bool (*InternalFunctionType)(void);
+    InternalFunctionType function_;
+    bool invoke() {
+        // case 5:
+        // CG don't know what is this function pointer,
+        // but CSA could get this info by symbolic execution.
+        return function_();
+    }
+};
+
 int main() {
     int number = 10;
     Parent::C1 c1(&number);
@@ -83,5 +96,13 @@ int main() {
     #if defined(__clang_analyzer__)
     csa_test();
     #endif
+    struct c_in_func {
+        static bool foo() {
+            return true;
+        }
+    };
+    FunctionPtr fp = FunctionPtr(&c_in_func::foo);
+    fp.invoke();
+
     return 0;
 }
