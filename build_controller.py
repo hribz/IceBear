@@ -197,7 +197,7 @@ class FileInCDB:
         # callees
         # ]
         cg_file = self.get_file_path(FileKind.CG)
-        if not os.path.exists(cg_file):
+        if not cg_file or not os.path.exists(cg_file):
             # The reason of .cg file doesn't exists maybe the file in compile_commands.json
             # cannot preprocess correctly. 
             logger.error(f"[Parse CG File] Callgraph file {cg_file} doesn't exist.")
@@ -222,7 +222,7 @@ class FileInCDB:
 
     def parse_cf_file(self):
         cf_file = self.get_file_path(FileKind.CF)
-        if not os.path.exists(cf_file):
+        if not cf_file or not os.path.exists(cf_file):
             return
         self.functions_changed = []
         with open(cf_file, 'r') as f:
@@ -252,7 +252,7 @@ class FileInCDB:
                 else:
                     if is_caller:
                         caller = line
-                        if self.parent.env.analyze_opts.analyze == 'ctu':
+                        if self.parent.env.ctu:
                             self.call_graph.add_fs_node(caller, callee, self.parent.global_efm)
                         else:
                             self.call_graph.add_fs_node(caller, callee)
@@ -281,7 +281,7 @@ class FileInCDB:
         if not self.functions_changed:
             logger.error(f"[Propagate Func Reanalyze] It's seems no functions changed, check if {self.get_file_path(FileKind.CF)} exists.")
             return
-        if not baseline_cg_with_fs:
+        if not baseline_cg_with_fs or self.parent.env.inc_mode != IncrementalMode.InlineLevel:
             self.propagate_reanalyze_attribute_without_fs()
             return
         # logger.debug(f"[propagate_reanalyze_attribute] Dump CallGraph\n{self.call_graph.__repr__()}")
@@ -329,7 +329,9 @@ class FileInCDB:
                         worklist.append(caller)
     
     def output_functions_need_reanalyze(self):
-        with open(self.get_file_path(FileKind.RF), 'w') as f:
+        rf_path = self.get_file_path(FileKind.RF)
+        makedir(os.path.dirname(rf_path))
+        with open(rf_path, 'w') as f:
             for fname in self.call_graph.functions_need_reanalyzed:
                 f.write(fname + '\n')
 
@@ -487,8 +489,9 @@ class Configuration:
 
     def preprocess_repo(self):
         start_time = time.time()
-        # remake_dir(self.preprocess_path, "[Preprocess Files DIR exists]")
-        makedir(self.preprocess_path, "[Preprocess Files DIR exists]")
+        # We use preprocessed file to get diff info, so this dir must remake.
+        remake_dir(self.preprocess_path, "[Preprocess Files DIR exists]")
+        # makedir(self.preprocess_path, "[Preprocess Files DIR exists]")
 
         with open(self.compile_database, 'r') as f:
             json_file = json.load(f)
@@ -571,7 +574,7 @@ class Configuration:
             plugin['action']['title'] = 'Extract Inc Info'
             plugin['action']['tool'] = self.env.EXTRACT_II
             plugin['action']['args'] = ['-diff', str(self.diff_lines_path)]
-            if self.env.analyze_opts.analyze == 'ctu':
+            if self.env.ctu:
                 plugin['action']['args'].append('-ctu')
             plugin['action']['extname'] = ""
             plugin['action']['stream'] = ''
@@ -674,26 +677,27 @@ class Configuration:
 
     def execute_csa(self):
         start_time = time.time()
+        makedir(self.csa_path, "[CSA Files DIR exists]")
         commands = [
             self.env.PANDA, 
             '-j', str(self.env.analyze_opts.jobs), '--print-execution-time',
         ]
         # We need to use revised Clang Static Analyzer to analyze functions incrementally.
-        if self.env.analyze_opts.inc:
-            commands.extend([
-                '--cc', self.env.MY_CLANG,
-                '--cxx', self.env.MY_CLANG_PLUS_PLUS
-            ])
-        else:
+        if self.env.inc_mode.value <= IncrementalMode.FileLevel.value:
             commands.extend([
                 '--cc', self.env.CLANG,
                 '--cxx', self.env.CLANG_PLUS_PLUS
+            ])
+        else:
+            commands.extend([
+                '--cc', self.env.MY_CLANG,
+                '--cxx', self.env.MY_CLANG_PLUS_PLUS
             ])
 
         if self.env.analyze_opts.verbose:
             commands.extend(['--verbose'])
 
-        if self.env.analyze_opts.fsum:
+        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             # We need to use revised Clang Static Analyzer to output function summmary.
             args = ['--analyze', '-Xanalyzer', '-analyzer-output=html',
                 '-Xanalyzer', '-analyzer-disable-checker=deadcode',
@@ -701,7 +705,7 @@ class Configuration:
             if self.env.analyze_opts.verbose:
                 args.extend(['-Xanalyzer', '-analyzer-display-progress'])
                 
-            if self.env.analyze_opts.analyze == 'ctu':
+            if self.env.ctu:
                 ctuConfigs = [
                     'experimental-enable-naive-ctu-analysis=true',
                     'ctu-dir=' + str(self.csa_path),
@@ -719,17 +723,18 @@ class Configuration:
                 plugin['action']['title'] = 'Execute CSA'
                 plugin['action']['args'] = args
                 plugin['action']['extname_inopt'] = '.rf'
-                plugin['action']['extname'] = '.fs'
-                # Incompatiable with panda, because panda consider this as one parameter.
-                # So we need to revise panda to support two parameters.
                 plugin['action']['inopt'] = ['-Xanalyzer', '-analyze-function-file=']
-                plugin['action']['outopt'] = ['-Xanalyzer', '-analyzer-dump-fsum=']
+                if self.env.inc_mode == IncrementalMode.InlineLevel:
+                    plugin['action']['extname'] = '.fs'
+                    # Incompatiable with panda, because panda consider this as one parameter.
+                    # So we need to revise panda to support two parameters.
+                    plugin['action']['outopt'] = ['-Xanalyzer', '-analyzer-dump-fsum=']
                 json.dump(plugin, f, indent=4)
             commands.extend(['--plugin', str(plugin_path)])
         else:
             # just use panda to execute CSA
             commands.append('--analyze')
-            if self.env.analyze_opts.analyze == 'ctu':
+            if self.env.ctu:
                 commands.append('ctu')
             else:
                 commands.append('no-ctu')
@@ -754,8 +759,8 @@ class Configuration:
             logger.error(f"[Executing CSA Files Failed]\nstdout: \n{e.stdout}\n stderr: \n{e.stderr}")
     
     def prepare_diff_dir(self):
-        # remake_dir(self.diff_path, "[Diff Files DIR exists]")
-        makedir(self.diff_path, "[Diff Files DIR exists]")
+        remake_dir(self.diff_path, "[Diff Files DIR exists]")
+        # makedir(self.diff_path, "[Diff Files DIR exists]")
         with mp.Pool(self.env.analyze_opts.jobs) as p:
             p.map(replace_loc_info, [((file.prep_file, file.diff_file) if file.prep_file else (None, file.file_name)) for file in self.file_list])
 
@@ -774,6 +779,8 @@ class Configuration:
         if not other.diff_path.exists():
             logger.error(f"Preprocess files DIR {other.diff_path} not exists")
             return
+        self.session_times["diff_command_time"] = 0
+        self.session_times["diff_parse_time"] = 0
         self.diff_two_dir(self.diff_path, other.diff_path, other)
         if self.status == 'DIFF':
             logger.info(f"[Parse Diff Result Success] diff file number: {len(self.diff_file_list)}")
@@ -796,12 +803,13 @@ class Configuration:
             f_prep_diff_files.close()
             f_diff_lines.close()
 
-            self.incrementable = self.env.analyze_opts.inc and True
+            self.incrementable = self.env.inc_mode != IncrementalMode.NoInc
             self.session_times['diff_with_other'] = time.time() - start_time
         else:
             self.session_times['diff_with_other'] = SessionStatus.Failed
 
     def diff_two_dir(self, my_dir: Path, other_dir: Path, other):
+        start_time = time.time()
         commands = [self.env.DIFF_PATH]
         commands.extend(['-r', '-u0'])
         # -d: Use the diff algorithm which may find smaller set of change
@@ -816,7 +824,10 @@ class Configuration:
         if process.returncode == 0 or process.returncode == 1:
             self.status = 'DIFF'
             logger.info(f"[Diff Files Success] {diff_script}")
+            command_time = time.time()
+            self.session_times["diff_command_time"] += command_time - start_time
             self.parse_diff_result(process.stdout, other)
+            self.session_times["diff_parse_time"] += time.time() - command_time
             # logger.debug(f"[Diff Files Output] \n{process.stdout}")
         else:
             logger.error(f"[Diff Files Failed] stdout: {process.stdout}\n stderr: {process.stderr}")
@@ -925,7 +936,7 @@ class Configuration:
 
     def parse_function_summaries(self):
         self.session_times['parse_function_summaries'] = SessionStatus.Skipped
-        if not (self.env.analyze_opts.fsum and self.env.analyze_opts.use_fsum):
+        if self.env.inc_mode != IncrementalMode.InlineLevel:
             return
         start_time = time.time()
         self.session_times['parse_function_summaries'] = SessionStatus.Failed
@@ -959,7 +970,7 @@ class Configuration:
         threads = []
         for file in self.diff_file_list:
             arg = None
-            if self.env.analyze_opts.fsum and self.env.analyze_opts.use_fsum:
+            if self.env.inc_mode == IncrementalMode.InlineLevel:
                 # with mp.Pool(self.env.analyze_opts.jobs) as p:
                 #     p.starmap(virtualCall, [(file, FileInCDB.propagate_reanalyze_attribute, True, \
                 #                                 None if file.diff_info.entire_file \
@@ -980,6 +991,26 @@ class Configuration:
 
         logger.info(f"[Propagate Reanalyze Attr] Propagate reanalyze attribute successfully.")
         self.session_times['propagate_reanalyze_attr'] = time.time() - start_time
+
+    def get_changed_function_num(self):
+        self.changed_function_num = 0
+        self.diff_file_with_no_cf = 0
+        for file in self.diff_file_list:
+            if file.functions_changed:
+                self.changed_function_num += len(file.functions_changed)
+            else:
+                self.diff_file_with_no_cf += 1
+        return self.changed_function_num
+    
+    def get_reanalyze_function_num(self):
+        self.reanalyze_function_num = 0
+        self.diff_file_with_no_cg = 0
+        for file in self.diff_file_list:
+            if file.call_graph:
+                self.reanalyze_function_num += len(file.call_graph.functions_need_reanalyzed)
+            else:
+                self.diff_file_with_no_cg += 1
+        return self.reanalyze_function_num
 
     def get_session_times(self):
         ret = "{\n"
@@ -1047,18 +1078,23 @@ class Repository:
         config.configure()
         # 2. preprocess and diff
         config.preprocess_repo()
-        config.diff_with_other(self.default_config)
+        if self.env.inc_mode != IncrementalMode.NoInc:
+            config.diff_with_other(self.default_config)
         # 3. extract inc info
-        config.extract_inc_info()
-        config.parse_call_graph()
-        config.parse_functions_changed()
+        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+            config.extract_inc_info()
+            config.parse_call_graph()
+            config.parse_functions_changed()
         # 4. prepare for CSA
-        config.generate_efm()
-        config.merge_efm()
+        if self.env.ctu:
+            config.generate_efm()
+            config.merge_efm()
         # 5. execute CSA
-        config.propagate_reanalyze_attr()
+        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+            config.propagate_reanalyze_attr()
         config.execute_csa()
-        config.parse_function_summaries()
+        if self.env.inc_mode == IncrementalMode.InlineLevel:
+            config.parse_function_summaries()
 
     def process_every_config(self, sessions, **kwargs):
         if not self.running_status:
@@ -1114,8 +1150,11 @@ class Repository:
     
     def summary_to_csv_specific(self):
         headers = ["project", "version"]
-        headers.extend([str(session) for session in self.default_config.session_times.keys()])
-        headers.extend(["files", "diff files"])
+        for session in self.default_config.session_times.keys():
+            headers.append(str(session))
+            if str(session) == 'diff_with_other':
+                headers.extend(["diff_command_time", "diff_parse_time"])
+        headers.extend(["files", "diff files", "changed function", "reanalyze function", "diff but no cf", "diff but no cg"])
         data = []
         for (idx, config) in enumerate(self.configurations):
             config_data = [self.name, f"build_{idx}"]
@@ -1125,9 +1164,15 @@ class Repository:
                     config_data.append(str(exe_time._name_))
                 else:
                     config_data.append("%.3lf s" % exe_time)
+                if str(session) == 'diff_with_other' and idx == 0:
+                    config_data.append('Skipped')
+                    config_data.append('Skipped')
             config_data.append(len(config.file_list))
             config_data.append(len(config.diff_file_list))
-
+            config_data.append(config.get_changed_function_num())
+            config_data.append(config.get_reanalyze_function_num())
+            config_data.append(config.diff_file_with_no_cf)
+            config_data.append(config.diff_file_with_no_cg)
             data.append(config_data)
 
         return headers, data

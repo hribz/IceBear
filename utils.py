@@ -9,7 +9,18 @@ import re
 
 class Environment:
     def __init__(self, opts):
+        # Analysis Options
         self.analyze_opts = opts
+        self.inc_mode = IncrementalMode.NoInc
+        if opts.inc == 'file':
+            self.inc_mode = IncrementalMode.FileLevel
+        elif opts.inc == 'func':
+            self.inc_mode = IncrementalMode.FuncitonLevel
+        elif opts.inc == 'inline':
+            self.inc_mode = IncrementalMode.InlineLevel
+        
+        self.ctu = opts.analyze == 'ctu'
+
         # Environment path
         self.PWD = Path(".").absolute()
         self.EXTRACT_II = str(self.PWD / 'build/clang_tool/collectIncInfo')
@@ -85,15 +96,11 @@ class Environment:
 class ArgumentParser:
     def __init__(self):
         self.parser = argparse.ArgumentParser(prog='IncAnalyzer', formatter_class=argparse.RawTextHelpFormatter)
-        self.parser.add_argument('-d', '--dir', default='.', help="Path of Source Files")
-        self.parser.add_argument('-b', '--build', default='./build', help='Path of Build Directory')
-        self.parser.add_argument('-n', '--name', help='name of the project')
-        self.parser.add_argument('--inc', action='store_true', dest='inc', help='Incremental analyze all sessions.')
+        self.parser.add_argument('--inc', type=str, dest='inc', choices=['file', 'func', 'inline'], 
+                                 help='Incremental analysis mode: file, func, inline')
         self.parser.add_argument('--verbose', action='store_true', dest='verbose', help='Record debug information.')
         self.parser.add_argument('--analyze', type=str, dest='analyze', choices=['ctu', 'no-ctu'],
                 help='Execute Clang Static Analyzer.')
-        self.parser.add_argument('--fsum', action='store_true', dest='fsum', help='Generate function summary files.')
-        self.parser.add_argument('--use_fsum', action='store_true', dest='use_fsum', help='Generate function summary files.')
         self.parser.add_argument('-j', '--jobs', type=int, dest='jobs', default=1, help='Number of jobs can be executed in parallel.')
     
     def parse_args(self, args):
@@ -117,6 +124,12 @@ class SessionStatus(Enum):
     Skipped = auto()
     Success = auto()
     Failed = auto()
+
+class IncrementalMode(Enum):
+    NoInc = auto()
+    FileLevel = auto()
+    FuncitonLevel = auto()
+    InlineLevel = auto()
 
 class FileKind(Enum):
     Preprocessed = auto()

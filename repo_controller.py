@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 from git import Repo
 import argparse
 import sys
@@ -34,8 +34,7 @@ def checkout_target_commit(repo_dir: str, commit: str) -> bool:
 
     try:
         repo.git.checkout(commit)
-        update_submodules(repo_dir)
-        return True
+        return update_submodules(repo_dir)
 
     except Exception as e:
         print(f"error while checking out commit.\n{e}")
@@ -83,8 +82,8 @@ def main(args):
     # repo_list = 'repos/repos.csv'
     repo_list = 'repos/test.csv'
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    result_file = f'result/repos/result_{timestamp}.csv'
-    result_file_specific = f'result/repos/result_specific_{timestamp}.csv'
+    result_file = f'repos/result/result_{opts.inc}_{timestamp}.csv'
+    result_file_specific = f'repos/result/result_specific_{opts.inc}_{timestamp}.csv'
     
     repo_csv = get_repo_csv(repo_list)
     previous_repo_name = ""
