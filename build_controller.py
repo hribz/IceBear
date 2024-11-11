@@ -30,15 +30,11 @@ class Option:
         return {"name": self.name, "value": self.value}
 
 class DiffResult:
-    def __init__(self, file, entire: bool=False):
+    def __init__(self, file, baseline_file):
         self.file: FileInCDB = file
         self.diff_lines: List = []
-        self.origin_file: FileInCDB = None
+        self.baseline_file: FileInCDB = baseline_file
         self.origin_diff_lines: List = []
-        # This is a new file
-        self.entire_file: bool = False
-        if entire:
-            self.entire_file = True
 
     def add_diff_line(self, start_line:int, line_count:int):
         self.diff_lines.append([start_line, line_count])
@@ -47,9 +43,7 @@ class DiffResult:
         self.origin_diff_lines.append([start_line, line_count])
 
     def __repr__(self) -> str:
-        if self.entire_file:
-            return f"Only my_file: {self.file.file_name}\n"
-        ret = f"my_file: {self.file.prep_file}\norigin_file: {self.origin_file.prep_file}\n"
+        ret = f"my_file: {self.file.prep_file}\norigin_file: {self.baseline_file.prep_file}\n"
         for idx, line in enumerate(self.diff_lines):
             ret += f"@@ -{self.origin_diff_lines[idx][0]},{self.origin_diff_lines[idx][1]} +{line[0]},{line[1]} @@\n"
         return ret
@@ -147,6 +141,7 @@ class FileInCDB:
         # The Configuration instance
         self.parent: Configuration = parent
         self.file_name: str = file_name
+        self.status = FileStatus.NEW
         self.csa_file: str = str(self.parent.csa_path) + self.file_name
         self.functions_changed: List = None
         self.diff_info: DiffResult = None
@@ -158,13 +153,29 @@ class FileInCDB:
         else:
             self.prep_file = None
             self.diff_file = None
+            self.status = FileStatus.UNKNOWN
+            return
+        if not os.path.exists(self.file_name):
+            self.status = FileStatus.UNEXIST
+            return
+        self.baseline_file: FileInCDB = None
+        if self.parent.baseline != self.parent:
+            # Find baseline file.
+            self.baseline_file = self.parent.baseline.get_file(self.file_name, False)
+            if self.baseline_file:
+                self.status = FileStatus.UNCHANGED
+            else:
+                logger.debug(f"[FileInCDB Init] Find new file {self.file_name}")
     
+    def is_new(self):
+        return self.status == FileStatus.NEW
+
     def is_changed(self):
-        return self.diff_file is not None
+        return self.status == FileStatus.CHANGED or self.status == FileStatus.NEW
 
     def get_baseline_file(self):
-        assert not self.is_changed()
-        return self.parent.baseline.get_file(self.file_name)
+        assert self.status != FileStatus.NEW
+        return self.baseline_file
 
     def get_file_path(self, kind: FileKind=None):
         if not kind:
@@ -189,6 +200,38 @@ class FileInCDB:
             return (self.csa_file) + '.fs'
         else:
             logger.error(f"[Get File Path] Unknown file kind {kind}")
+
+    def diff_with_baseline(self):
+        if not self.baseline_file:
+            # This is a new file.
+            return
+        commands = self.parent.env.DIFF_COMMAND.copy()
+        if self.parent.env.analyze_opts.use_diff_path:
+            commands.extend([str(self.baseline_file.diff_file), str(self.diff_file)])
+        else:
+            commands.extend([str(self.baseline_file.prep_file), str(self.prep_file)])
+        diff_script = ' '.join(commands)
+        process = run(diff_script, shell=True, capture_output=True, text=True)
+        if process.returncode == 0 or process.returncode == 1:
+            if process.returncode == 0:
+                # There is no change between this file and baseline.
+                return
+            self.diff_info = DiffResult(self, self.baseline_file)
+            self.status = FileStatus.CHANGED
+            for line in (process.stdout).split('\n'):
+                line: str = line.strip()
+                if not line:
+                    continue
+                # line format: old_begin,old_line_number new_begin,new_line_number
+                old_and_new = line.split(' ')
+                old_begin, old_line_number = old_and_new[0].split(",")
+                new_begin, new_line_number = old_and_new[1].split(",")
+                self.diff_info.add_origin_diff_line(old_begin, old_line_number)
+                self.diff_info.add_diff_line(new_begin, new_line_number)
+            # logger.debug(f"[Diff Files Output] \n{process.stdout}")
+        else:
+            logger.debug("[Diff Files Script] " + diff_script)
+            logger.error(f"[Diff Files Failed] stdout: {process.stdout}\n stderr: {process.stderr}")
 
     def parse_cg_file(self):
         # .cg file format: 
@@ -353,9 +396,9 @@ class Configuration:
     session_times: Dict
     # We traverse file_list most of the time, so we don't use dict[str, FileInCDB]
     file_list_index: Dict[str, int]
-    file_list: List[FileInCDB]      # Files in workspace
+    file_list: List[FileInCDB] # Files in workspace, only record files exists and has normal extname.
 
-    def __init__(self, name, src_path, env, options: List[Option], args=None, build_path=None):
+    def __init__(self, name, src_path, env, options: List[Option], args=None, build_path=None, baseline=None):
         self.name = name
         self.src_path = src_path
         self.env = env
@@ -374,6 +417,8 @@ class Configuration:
         self.session_times = {}
         # Baseline Configuration
         self.baseline: Configuration = self
+        if baseline:
+            self.baseline = baseline
         self.global_efm: Dict[str, FileInCDB] = None
         if os.path.exists(self.compile_database):
             # If there is compile_commands.json exists, we can prepare file list early.
@@ -429,6 +474,8 @@ class Configuration:
             return
         self.file_list_index = {}
         self.file_list  = []
+        self.session_times["unknown file number"] = 0
+        self.session_times["unexist file number"] = 0
         with open(self.compile_database, 'r') as f:
             cdb = json.load(f)
             for (idx, ccdb) in enumerate(cdb):
@@ -442,14 +489,21 @@ class Configuration:
                     extname = ''
                     file_name = ccdb["file"]
                     logger.error(f"[Prepare File List] Encounter unknown extname when parse {file_name}")
-                self.file_list.append(FileInCDB(self, compile_command.file, extname))
-                self.file_list_index[compile_command.file] = idx
+                file_in_cdb = FileInCDB(self, compile_command.file, extname)
+                if file_in_cdb.status == FileStatus.UNKNOWN:
+                    self.session_times["unknown file number"] += 1
+                elif file_in_cdb.status == FileStatus.UNEXIST:
+                    self.session_times["unexist file number"] += 1
+                else:
+                    self.file_list_index[compile_command.file] = len(self.file_list)
+                    self.file_list.append(file_in_cdb)
 
-    def get_file(self, file_path: str) -> FileInCDB:
+    def get_file(self, file_path: str, report=True) -> FileInCDB:
         idx = self.file_list_index.get(file_path, None)
         # Don't use `if not idx:`, because idx maybe 0.
         if idx is None:
-            logger.error(f"[Get File] {file_path} not exists in file_list_index")
+            if report:
+                logger.error(f"[Get File] {file_path} not exists in file_list_index")
             return None
         return self.file_list[idx]
 
@@ -536,8 +590,8 @@ class Configuration:
                     else:
                         # Sometimes there are assembly code(.S, .i) in compile_commands.json
                         extname = ''
-                        file_name = ccdb["file"]
-                        logger.error(f"[Prepare File List] Encounter unknown extname when parse {file_name}")
+                        file_name = file_command["file"]
+                        logger.error(f"[Preprocess File] Encounter unknown extname when parse {file_name}")
                     file_command["file"] = str(self.preprocess_path) + compile_command.file + extname
                     # Preprocessed files still need compile options, such as c++ version and so on.
                     # And it's no need to add flags like '-xc++', because clang is able to identify
@@ -664,7 +718,7 @@ class Configuration:
                         if self.global_efm[usr].is_changed():
                             fout.write('%s %s\n' % (usr, self.global_efm[usr].get_file_path(FileKind.AST)))
                         else:
-                            fout.write('%s %s\n' % (usr, self.baseline.get_file(self.global_efm[usr].file_name).get_file_path(FileKind.AST)))
+                            fout.write('%s %s\n' % (usr, self.global_efm[usr].get_baseline_file().get_file_path(FileKind.AST)))
 
             GenerateFinalExternalFunctionMapIncrementally(self.env.analyze_opts, self.diff_file_list, str(baseline_edm_file))
         else:
@@ -759,6 +813,9 @@ class Configuration:
             logger.error(f"[Executing CSA Files Failed]\nstdout: \n{e.stdout}\n stderr: \n{e.stderr}")
     
     def prepare_diff_dir(self):
+        if not self.env.analyze_opts.use_diff_path:
+            self.diff_path = self.preprocess_path
+            return
         remake_dir(self.diff_path, "[Diff Files DIR exists]")
         # makedir(self.diff_path, "[Diff Files DIR exists]")
         with mp.Pool(self.env.analyze_opts.jobs) as p:
@@ -779,9 +836,15 @@ class Configuration:
         if not other.diff_path.exists():
             logger.error(f"Preprocess files DIR {other.diff_path} not exists")
             return
-        self.session_times["diff_command_time"] = 0
-        self.session_times["diff_parse_time"] = 0
-        self.diff_two_dir(self.diff_path, other.diff_path, other)
+        self.status = 'DIFF'
+        # self.session_times["diff_command_time"] = 0
+        # self.session_times["diff_parse_time"] = 0
+        # self.diff_two_dir(self.diff_path, other.diff_path, other)
+        # We just need to diff files in compile database.
+        self.process_file_list(FileInCDB.diff_with_baseline)
+        for file in self.file_list:
+            if file.is_changed():
+                self.diff_file_list.append(file)
         if self.status == 'DIFF':
             logger.info(f"[Parse Diff Result Success] diff file number: {len(self.diff_file_list)}")
             
@@ -793,7 +856,7 @@ class Configuration:
             for diff_file in self.diff_file_list:
                 f_diff_files.write(diff_file.file_name + '\n')
                 f_prep_diff_files.write(diff_file.prep_file + '\n')
-                if diff_file.diff_info.entire_file:
+                if diff_file.is_new():
                     diff_json[diff_file.prep_file] = 1
                 else:
                     diff_json[diff_file.prep_file] = diff_file.diff_info.diff_lines
@@ -810,11 +873,17 @@ class Configuration:
 
     def diff_two_dir(self, my_dir: Path, other_dir: Path, other):
         start_time = time.time()
-        commands = [self.env.DIFF_PATH]
-        commands.extend(['-r', '-u0'])
         # -d: Use the diff algorithm which may find smaller set of change
         # -r: Recursively compare any subdirectories found.
         # -x: Don't compare files or directories matching the given patterns.
+        commands = [self.env.DIFF_PATH]
+        commands.extend(['-r', '-u0', '-b', '-B'])
+        if not self.env.analyze_opts.use_diff_path:
+            # If we don't generate files which eliminate lines begin with "# %d",
+            # we should use '-I' commands to tell `diff` ignore these loc info lines.
+            # Note that diff won't ignore all these lines if there is any line doesn't
+            # match the regex.
+            commands.extend(['-I', "'^# [[:digit:]]'"])
         commands.extend(['-d', '--exclude=*.json'])
         commands.extend([str(other_dir), str(my_dir)])
         diff_script = ' '.join(commands)
@@ -864,7 +933,7 @@ class Configuration:
                 if file_in_cdb:
                     self.diff_file_list.append(file_in_cdb)
                     file_in_cdb.diff_info = DiffResult(file_in_cdb)
-                    file_in_cdb.diff_info.origin_file = other.get_file(origin_file)
+                    file_in_cdb.diff_info.baseline_file = other.get_file(origin_file)
             elif line.startswith("Only in"):
                 spilt_line = line.split()
                 file_in_cdb = None
@@ -976,7 +1045,7 @@ class Configuration:
                 #                                 None if file.diff_info.entire_file \
                 #                                 else file.diff_info.origin_file.call_graph \
                 #                                 ) for file in file_list])
-                arg = None if file.diff_info.entire_file else file.diff_info.origin_file.call_graph
+                arg = None if file.is_new() else file.baseline_file.call_graph
             else:
                 # with mp.Pool(self.env.analyze_opts.jobs) as p:
                 #     p.starmap(virtualCall, [(file, FileInCDB.propagate_reanalyze_attribute, False) for file in file_list])
@@ -1018,6 +1087,8 @@ class Configuration:
             exe_time = self.session_times[session]
             if isinstance(exe_time, SessionStatus):
                 ret += ("   %s: %s\n" % (session, exe_time._name_))
+            elif isinstance(exe_time, int):
+                ret += ("   %s: %d\n" % (session, exe_time))
             else:
                 ret += ("   %s: %.3lf sec\n" % (session, exe_time))
         ret += "}\n"
@@ -1041,7 +1112,7 @@ class Repository:
     running_status: bool # whether the repository sessions should keep running
     env: Environment
 
-    def __init__(self, name, src_path, env: Environment, options_list:List[List[Option]]=None, build_root = None):
+    def __init__(self, name, src_path, env: Environment, options_list:List[List[Option]]=None, build_root = None, build_dir_name=None):
         self.name = name
         self.src_path = Path(src_path).absolute()
         self.env = env
@@ -1052,17 +1123,20 @@ class Repository:
             exit(1)
         logger.TAG = self.name
         self.build_root = build_root if build_root is not None else str(self.src_path / 'build')
-        self.default_config = Configuration(self.name, self.src_path, self.env, [], build_path=f"{self.build_root}/build_0")
+        self.default_config = Configuration(self.name, self.src_path, self.env, [], 
+                                            build_path=f"{self.build_root}/{build_dir_name}" if build_dir_name else f"{self.build_root}/build_0")
         self.configurations = [self.default_config]
         if options_list:
             for idx, options in enumerate(options_list):
                 self.configurations.append(
-                    Configuration(self.name, self.src_path, self.env, options, build_path=f'{self.build_root}/build_{idx + 1}')
+                    Configuration(self.name, self.src_path, self.env, options, build_path=f'{self.build_root}/build_{idx + 1}', baseline=self.default_config)
                 )
 
-    def add_configuration(self, options):
+    def add_configuration(self, options, build_dir_name=None):
         self.configurations.append(
-            Configuration(self.name, self.src_path, self.env, options, build_path=f'{self.build_root}/build_{len(self.configurations)}')
+            Configuration(self.name, self.src_path, self.env, options, 
+                          build_path=f"{self.build_root}/{build_dir_name}" if build_dir_name else f'{self.build_root}/build_{len(self.configurations)}',
+                          baseline=self.default_config)
         )
 
     def process_all_session(self):
@@ -1081,20 +1155,20 @@ class Repository:
         if self.env.inc_mode != IncrementalMode.NoInc:
             config.diff_with_other(self.default_config)
         # 3. extract inc info
-        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
-            config.extract_inc_info()
-            config.parse_call_graph()
-            config.parse_functions_changed()
-        # 4. prepare for CSA
-        if self.env.ctu:
-            config.generate_efm()
-            config.merge_efm()
-        # 5. execute CSA
-        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
-            config.propagate_reanalyze_attr()
-        config.execute_csa()
-        if self.env.inc_mode == IncrementalMode.InlineLevel:
-            config.parse_function_summaries()
+        # if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+        #     config.extract_inc_info()
+        #     config.parse_call_graph()
+        #     config.parse_functions_changed()
+        # # 4. prepare for CSA
+        # if self.env.ctu:
+        #     config.generate_efm()
+        #     config.merge_efm()
+        # # 5. execute CSA
+        # if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+        #     config.propagate_reanalyze_attr()
+        # config.execute_csa()
+        # if self.env.inc_mode == IncrementalMode.InlineLevel:
+        #     config.parse_function_summaries()
 
     def process_every_config(self, sessions, **kwargs):
         if not self.running_status:
@@ -1157,7 +1231,7 @@ class Repository:
         headers.extend(["files", "diff files", "changed function", "reanalyze function", "diff but no cf", "diff but no cg"])
         data = []
         for (idx, config) in enumerate(self.configurations):
-            config_data = [self.name, f"build_{idx}"]
+            config_data = [self.name, os.path.basename(config.build_path)]
             for session in config.session_times.keys():
                 exe_time = config.session_times[session]
                 if isinstance(exe_time, SessionStatus):
@@ -1184,7 +1258,7 @@ class Repository:
         prepare_for_csa = {"generate_efm", "merge_efm"}
         data = []
         for (idx, config) in enumerate(self.configurations):
-            config_data = [self.name, f"build_{idx}"]
+            config_data = [self.name, os.path.basename(config.build_path)]
             config_time = 0.0
             inc_time = 0.0
             csa_time = 0.0
@@ -1258,9 +1332,9 @@ def main(args):
         repo_db.build_every_config()
         repo_db.preprocess_every_config()
         repo_db.diff_every_config()
-        repo_db.extract_ii_every_config()
-        repo_db.generate_efm_for_every_config()
-        repo_db.execute_csa_for_every_config()
+        # repo_db.extract_ii_every_config()
+        # repo_db.generate_efm_for_every_config()
+        # repo_db.execute_csa_for_every_config()
 
         # Copy compile_commands.json to build dir for clangd.
         shutil.copy(str(repo_db.default_config.compile_database), str(repo_db.src_path / 'build'))

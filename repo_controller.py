@@ -80,7 +80,7 @@ def main(args):
     opts = parser.parse_args(args)
     env = Environment(opts)
     # repo_list = 'repos/repos.csv'
-    repo_list = 'repos/test.csv'
+    repo_list = 'repos/test_grpc.csv'
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     result_file = f'repos/result/result_{opts.inc}_{timestamp}.csv'
     result_file_specific = f'repos/result/result_specific_{opts.inc}_{timestamp}.csv'
@@ -121,11 +121,11 @@ def main(args):
             if previous_repo_name != repo_name:
                 # Analysis first commit as baseline.
                 previous_repo_name = repo_name
-                Repo = Repository(repo_name, abs_repo_path, env, build_root=f"{abs_repo_path}_build")
+                Repo = Repository(repo_name, abs_repo_path, env, build_root=f"{abs_repo_path}_build", build_dir_name=f"build_0_{commit_sha[:6]}")
                 Repo.process_one_config(Repo.configurations[-1])
             else:
                 # Analysis subsequent commit incrementally.
-                Repo.add_configuration([])
+                Repo.add_configuration([], build_dir_name=f"build_{len(Repo.configurations)}_{commit_sha[:6]}")
                 Repo.process_one_config(Repo.configurations[-1])
         else:
             status = STATUS.CHECK_FAILED

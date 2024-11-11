@@ -21,6 +21,9 @@ class Environment:
         
         self.ctu = opts.analyze == 'ctu'
 
+        self.prepare_env_path()
+
+    def prepare_env_path(self):
         # Environment path
         self.PWD = Path(".").absolute()
         self.EXTRACT_II = str(self.PWD / 'build/clang_tool/collectIncInfo')
@@ -64,6 +67,14 @@ class Environment:
         self.DIFF_PATH = shutil.which('diff')
         if self.DIFF_PATH:
             print(f'diff found at: {self.CMAKE_PATH}')
+            # -b, -B: Try to ignore more space.
+            # -d: Identify smaller changes.
+            self.DIFF_COMMAND = [self.DIFF_PATH, '-b', '-B', '-d']
+            if not self.analyze_opts.use_diff_path:
+                self.DIFF_COMMAND.extend(['-I', "'^# [[:digit:]]'"])
+            # Only output line change, don't output specific code.
+            self.DIFF_COMMAND.extend(["--old-group-format='%de,%dn %dE,%dN\n'", "--unchanged-group-format=''", 
+                                      "--new-group-format='%de,%dn %dE,%dN\n'", "--changed-group-format='%de,%dn %dE,%dN\n'"])
         else:
             print('diff not found in the system path')
             exit(1)
@@ -102,6 +113,7 @@ class ArgumentParser:
         self.parser.add_argument('--analyze', type=str, dest='analyze', choices=['ctu', 'no-ctu'],
                 help='Execute Clang Static Analyzer.')
         self.parser.add_argument('-j', '--jobs', type=int, dest='jobs', default=1, help='Number of jobs can be executed in parallel.')
+        self.parser.add_argument('-d', '--udp', action='store_true', dest='use_diff_path', help='Use files in diff path to `diff`.')
     
     def parse_args(self, args):
         return self.parser.parse_args(args)
@@ -141,6 +153,13 @@ class FileKind(Enum):
     RF = auto()
     FS = auto()
 
+class FileStatus(Enum):
+    UNKNOWN = auto() # File's extname is unknown.
+    UNEXIST = auto() # File does not exist.
+    NEW = auto()
+    UNCHANGED = auto()
+    CHANGED = auto()
+    DELETED = auto()
 
 def getExtDefMap(efmfile): return open(efmfile).read()
 

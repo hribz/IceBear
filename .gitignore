@@ -9,9 +9,10 @@ __pycache__
 *.cg
 *.rf
 *.fs
-test.py
+test*.py
 *.cf
 .cache
 *.sum
 repos/*
 !repos.csv
+*.txt
