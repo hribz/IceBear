@@ -1,6 +1,7 @@
 import json
-from logger import logger
 import os
+
+from IncAnalysis.logger import logger
 
 class CompileCommand:
     def __init__(self, ccmd=None):

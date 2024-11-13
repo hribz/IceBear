@@ -3,9 +3,10 @@ from git import Repo
 import argparse
 import sys
 import pandas as pd
-from build_controller import Configuration, Repository
-from utils import *
-from logger import logger
+from IncAnalysis.repository import Repository
+from IncAnalysis.utils import *
+from IncAnalysis.environment import *
+from IncAnalysis.logger import logger
 import csv
 import subprocess
 

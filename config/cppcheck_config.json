@@ -1,0 +1,7 @@
+[
+    "--cppcheck-build-dir=<dir>",
+    "--file-list=<file>",
+    "--max-ctu-depth=2",
+    "--output-file=<file>",
+    "-j 16"
+]

@@ -1,0 +1,5 @@
+{
+    "jobs": 16,
+    "analyze": "no-ctu",
+    "inc": "inline"
+}
