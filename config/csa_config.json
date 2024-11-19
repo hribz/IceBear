@@ -1,8 +1,17 @@
 {
-    "CSAOptions": {
-
-    },
-    "CSAConfig": {
-        
-    }
+    "CSAOptions": [
+        "-analyzer-disable-all-checks",
+        "-analyzer-opt-analyze-headers",
+        "-analyzer-inline-max-stack-depth=5",
+        "-analyzer-inlining-mode=noredundancy"
+    ],
+    "CSAConfig": [
+        "crosscheck-with-z3=true",
+        "mode=deep",
+        "ipa=dynamic-bifurcate",
+        "crosscheck-with-z3=true",
+        "ctu-import-cpp-threshold=8",
+        "ctu-import-threshold=24",
+        "ipa-always-inline-size=3"
+    ]
 }

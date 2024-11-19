@@ -67,10 +67,10 @@ class Repository:
         # if self.env.ctu:
         #     config.generate_efm()
         #     config.merge_efm()
-        # # 5. execute CSA
+        # # 5. execute analyzers
         # if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
         #     config.propagate_reanalyze_attr()
-        # config.execute_csa()
+        # config.analyze()
         # if self.env.inc_mode == IncrementalMode.InlineLevel:
         #     config.parse_function_summaries()
 
@@ -113,10 +113,10 @@ class Repository:
         self.process_every_config(Configuration.generate_efm)
         self.process_every_config(Configuration.merge_efm)
 
-    def execute_csa_for_every_config(self):
+    def analyze_for_every_config(self):
         self.process_every_config([
             Configuration.propagate_reanalyze_attr,
-            Configuration.execute_csa,
+            Configuration.analyze,
             Configuration.parse_function_summaries
         ])
 
@@ -165,7 +165,7 @@ class Repository:
             config_data = [self.name, os.path.basename(config.build_path)]
             config_time = 0.0
             inc_time = 0.0
-            csa_time = 0.0
+            prepare_time = 0.0
             exe_csa_time = 0.0
             for session in config.session_times.keys():
                 exe_time = config.session_times[session]
@@ -173,14 +173,14 @@ class Repository:
                     if session in prepare_for_inc:
                         inc_time += exe_time
                     elif session in prepare_for_csa:
-                        csa_time += exe_time
+                        prepare_time += exe_time
                     elif session == "configure":
                         config_time = exe_time
-                    elif session == "execute_csa":
+                    elif session == "CSA":
                         exe_csa_time = exe_time
             config_data.append("%.3lf s" % config_time)
             config_data.append("%.3lf s" % inc_time)
-            config_data.append("%.3lf s" % csa_time)
+            config_data.append("%.3lf s" % prepare_time)
             config_data.append("%.3lf s" % exe_csa_time)
             data.append(config_data)
 

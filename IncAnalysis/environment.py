@@ -2,8 +2,13 @@ import os
 from pathlib import Path
 import shutil
 import argparse
+from enum import Enum, auto
 
-from IncAnalysis.analyzer_config import *
+class IncrementalMode(Enum):
+    NoInc = auto()
+    FileLevel = auto()
+    FuncitonLevel = auto()
+    InlineLevel = auto()
 
 class Environment:
     def __init__(self, opts):
@@ -68,7 +73,7 @@ class Environment:
             # -b, -B: Try to ignore more space.
             # -d: Identify smaller changes.
             self.DIFF_COMMAND = [self.DIFF_PATH, '-b', '-B', '-d']
-            if not self.analyze_opts.use_diff_path:
+            if not self.analyze_opts.udp:
                 self.DIFF_COMMAND.extend(['-I', "'^# [[:digit:]]'"])
             # Only output line change, don't output specific code.
             self.DIFF_COMMAND.extend(["--old-group-format='%de,%dn %dE,%dN\n'", "--unchanged-group-format=''", 
@@ -112,7 +117,8 @@ class ArgumentParser:
         self.parser.add_argument('--analyze', type=str, dest='analyze', choices=['ctu', 'no-ctu'],
                 help='Execute Clang Static Analyzer.')
         self.parser.add_argument('-j', '--jobs', type=int, dest='jobs', default=1, help='Number of jobs can be executed in parallel.')
-        self.parser.add_argument('-d', '--udp', action='store_true', dest='use_diff_path', help='Use files in diff path to `diff`.')
+        self.parser.add_argument('-d', '--udp', action='store_true', dest='udp', help='Use files in diff path to `diff`.')
+        self.parser.add_argument('--csa-config', type=str, dest='csa_config', default=None, help='Incremental analysis mode: file, func, inline')
     
     def parse_args(self, args):
         return self.parser.parse_args(args)

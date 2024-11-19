@@ -70,9 +70,9 @@ def main(args):
         repo_db.build_every_config()
         repo_db.preprocess_every_config()
         repo_db.diff_every_config()
-        # repo_db.extract_ii_every_config()
-        # repo_db.generate_efm_for_every_config()
-        # repo_db.execute_csa_for_every_config()
+        repo_db.extract_ii_every_config()
+        repo_db.generate_efm_for_every_config()
+        repo_db.analyze_for_every_config()
 
         # Copy compile_commands.json to build dir for clangd.
         shutil.copy(str(repo_db.default_config.compile_database), str(repo_db.src_path / 'build'))

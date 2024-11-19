@@ -1,5 +1,6 @@
-{
-    "jobs": 16,
-    "analyze": "no-ctu",
-    "inc": "inline"
-}
+[
+    "--jobs=16",
+    "--analyze=no-ctu",
+    "--inc=inline",
+    "--csa-config=/home/xiaoyu/cmake-analyzer/IncAnalyzer/config/csa_config.json"
+]

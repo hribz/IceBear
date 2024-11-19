@@ -27,8 +27,6 @@ class SessionStatus(Enum):
     Success = auto()
     Failed = auto()
 
-
-
 def getExtDefMap(efmfile): return open(efmfile).read()
 
 def virtualCall(file, method, has_arg, arg = None): 

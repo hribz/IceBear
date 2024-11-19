@@ -6,6 +6,7 @@ from enum import Enum, auto
 from IncAnalysis.utils import makedir
 from IncAnalysis.analyzer_config import *
 from IncAnalysis.logger import logger
+from IncAnalysis.compile_command import CompileCommand
 
 class FileKind(Enum):
     Preprocessed = auto()
@@ -133,17 +134,26 @@ class CallGraph:
         return ret
 
 class FileInCDB:
-    def __init__(self, parent, file_name: str, extname: str = None):
+    def __init__(self, parent, compile_command: CompileCommand):
         # The Configuration instance
         from IncAnalysis.configuration import Configuration
         self.parent: Configuration = parent
-        self.file_name: str = file_name
+        self.file_name: str = compile_command.file
         self.status = FileStatus.NEW
         self.csa_file: str = str(self.parent.csa_path) + self.file_name
         self.functions_changed: List = None
         self.diff_info: DiffResult = None
         self.call_graph: CallGraph = None
         self.efm: Dict[str, str] = {}
+        self.compile_command: CompileCommand = compile_command
+        extname = ""
+        if self.compile_command.language == 'c++':
+            extname = '.ii'
+        elif self.compile_command.language == 'c':
+            extname = '.i'
+        else:
+            logger.error(f"[Create FileInCDB] Encounter unknown extname when parse {self.file_name}")
+
         if extname:
             self.prep_file: str = str(self.parent.preprocess_path) + self.file_name + extname
             self.diff_file: str = str(self.parent.diff_path) + self.file_name + extname
@@ -203,7 +213,7 @@ class FileInCDB:
             # This is a new file.
             return
         commands = self.parent.env.DIFF_COMMAND.copy()
-        if self.parent.env.analyze_opts.use_diff_path:
+        if self.parent.env.analyze_opts.udp:
             commands.extend([str(self.baseline_file.diff_file), str(self.diff_file)])
         else:
             commands.extend([str(self.baseline_file.prep_file), str(self.prep_file)])

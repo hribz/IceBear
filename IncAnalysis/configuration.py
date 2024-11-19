@@ -20,6 +20,7 @@ from IncAnalysis.analyzer_config import *
 from IncAnalysis.environment import *
 from IncAnalysis.compile_command import CompileCommand
 from IncAnalysis.file_in_cdb import *
+from IncAnalysis.analyzer import *
 
 class Option:
     def __init__(self, name: str, value: str):
@@ -78,6 +79,9 @@ class Configuration:
             # If there is compile_commands.json exists, we can prepare file list early.
             # Otherwise, we need execute configure to generate compile_commands.json.
             self.prepare_file_list()
+        self.analyzers: List[Analyzer] = [
+            CSA(CSAConfig(self.env, self.csa_path, self.env.analyze_opts.csa_config), self.file_list)
+        ]
 
     def create_configure_script(self, cmake_path, options):
         self.options = []
@@ -134,16 +138,7 @@ class Configuration:
             cdb = json.load(f)
             for (idx, ccdb) in enumerate(cdb):
                 compile_command = CompileCommand(ccdb)
-                extname = '.i'
-                if compile_command.language == 'c++':
-                    extname = '.ii'
-                elif compile_command.language == 'c':
-                    extname = '.i'
-                else:
-                    extname = ''
-                    file_name = ccdb["file"]
-                    logger.error(f"[Prepare File List] Encounter unknown extname when parse {file_name}")
-                file_in_cdb = FileInCDB(self, compile_command.file, extname)
+                file_in_cdb = FileInCDB(self, compile_command)
                 if file_in_cdb.status == FileStatus.UNKNOWN:
                     self.session_times["unknown file number"] += 1
                 elif file_in_cdb.status == FileStatus.UNEXIST:
@@ -233,33 +228,21 @@ class Configuration:
             process = run(preprocess_script, shell=True, capture_output=True, text=True, check=True)
             self.status = 'PREPROCESSED'
             self.session_times['preprocess_repo'] = time.time() - start_time
-            with open(self.compile_database, 'r') as f:
-                json_file = json.load(f)
-                for file_command in json_file:
-                    compile_command = CompileCommand(file_command)
-                    if compile_command.language == 'c++':
-                        extname = '.ii'
-                    elif compile_command.language == 'c':
-                        extname = '.i'
-                    else:
-                        # Sometimes there are assembly code(.S, .i) in compile_commands.json
-                        extname = ''
-                        file_name = file_command["file"]
-                        logger.error(f"[Preprocess File] Encounter unknown extname when parse {file_name}")
-                    file_command["file"] = str(self.preprocess_path) + compile_command.file + extname
-                    # Preprocessed files still need compile options, such as c++ version and so on.
-                    # And it's no need to add flags like '-xc++', because clang is able to identify
-                    # preprocessed files automatically, unless open the '-P' option. 
-                    #
-                    # When use CSA analyze the file, macro `__clang_analyzer__` will defined automatically.
-                    compile_command.arguments.append('-D__clang_analyzer__')
-                    if file_command.get("command"):
-                        file_command["command"] = " ".join(compile_command.arguments)
-                    else:
-                        file_command["arguments"] = compile_command.arguments
-                pre_cdb = open(self.preprocess_compile_database, 'w')
-                json.dump(json_file, pre_cdb, indent=4)
-                pre_cdb.close()
+            cdb = []
+            for file in self.file_list:
+                # Preprocessed files still need compile options, such as c++ version and so on.
+                # And it's no need to add flags like '-xc++', because clang is able to identify
+                # preprocessed files automatically, unless open the '-P' option. 
+                #
+                # When use CSA analyze the file, macro `__clang_analyzer__` will defined automatically.
+                prep_arguments = file.compile_command.arguments + ['-D__clang_analyzer__']
+                cdb.append({
+                    "directory": file.compile_command.directory,
+                    "command": " ".join([file.compile_command.compiler] + prep_arguments),
+                    "file": file.prep_file
+                })
+            with open(self.preprocess_compile_database, 'w') as f:
+                json.dump(cdb, f, indent=4)
             logger.info(f"[Preprocess Files Success] {preprocess_script}")
             logger.debug(f"[Preprocess Files Success] stdout: {process.stdout}\n stderr: {process.stderr}")
         except subprocess.CalledProcessError as e:
@@ -383,91 +366,23 @@ class Configuration:
                         self.global_efm[usr] = self.get_file(get_origin_file_name(path, str(self.csa_path), ['.ast']))
         self.session_times['merge_efm'] = time.time() - start_time
 
-    def execute_csa(self):
+    def analyze(self):
         start_time = time.time()
-        makedir(self.csa_path, "[CSA Files DIR exists]")
-        commands = [
-            self.env.PANDA, 
-            '-j', str(self.env.analyze_opts.jobs), '--print-execution-time',
-        ]
-        # We need to use revised Clang Static Analyzer to analyze functions incrementally.
-        if self.env.inc_mode.value <= IncrementalMode.FileLevel.value:
-            commands.extend([
-                '--cc', self.env.CLANG,
-                '--cxx', self.env.CLANG_PLUS_PLUS
-            ])
-        else:
-            commands.extend([
-                '--cc', self.env.MY_CLANG,
-                '--cxx', self.env.MY_CLANG_PLUS_PLUS
-            ])
-
-        if self.env.analyze_opts.verbose:
-            commands.extend(['--verbose'])
-
-        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
-            # We need to use revised Clang Static Analyzer to output function summmary.
-            args = ['--analyze', '-Xanalyzer', '-analyzer-output=html',
-                '-Xanalyzer', '-analyzer-disable-checker=deadcode',
-                '-o', str(self.csa_path / 'csa-reports')]
-            if self.env.analyze_opts.verbose:
-                args.extend(['-Xanalyzer', '-analyzer-display-progress'])
-                
-            if self.env.ctu:
-                ctuConfigs = [
-                    'experimental-enable-naive-ctu-analysis=true',
-                    'ctu-dir=' + str(self.csa_path),
-                    'ctu-index-name=' + str(self.csa_path / 'externalDefMap.txt'),
-                    'ctu-invocation-list=' + str(self.csa_path / 'invocations.yaml')
-                ]
-                if self.env.analyze_opts.verbose:
-                    ctuConfigs.append('display-ctu-progress=true')
-                args += ['-Xanalyzer', '-analyzer-config', '-Xanalyzer', ','.join(ctuConfigs)]
-
-            plugin_path = self.csa_path / 'csa_plugin.json'
-            with open(plugin_path, 'w') as f:
-                plugin = self.env.example_compiler_action_plugin.copy()
-                plugin['comment'] = 'Plugin used by IncAnalyzer to execute CSA'
-                plugin['action']['title'] = 'Execute CSA'
-                plugin['action']['args'] = args
-                plugin['action']['extname_inopt'] = '.rf'
-                plugin['action']['inopt'] = ['-Xanalyzer', '-analyze-function-file=']
-                if self.env.inc_mode == IncrementalMode.InlineLevel:
-                    plugin['action']['extname'] = '.fs'
-                    # Incompatiable with panda, because panda consider this as one parameter.
-                    # So we need to revise panda to support two parameters.
-                    plugin['action']['outopt'] = ['-Xanalyzer', '-analyzer-dump-fsum=']
-                json.dump(plugin, f, indent=4)
-            commands.extend(['--plugin', str(plugin_path)])
-        else:
-            # just use panda to execute CSA
-            commands.append('--analyze')
-            if self.env.ctu:
-                commands.append('ctu')
+        for analyzer in self.analyzers:
+            analyzer_time = time.time()
+            self.session_times[analyzer.get_analyzer_name()] = SessionStatus.Skipped
+            if self.incrementable:
+                analyzer.file_list = self.diff_file_list
             else:
-                commands.append('no-ctu')
+                analyzer.file_list = self.file_list
+            if analyzer.analyze_all_files():
+                self.session_times[analyzer.get_analyzer_name()] = time.time() - analyzer_time
+            else:
+                self.session_times[analyzer.get_analyzer_name()] = SessionStatus.Failed
+        self.session_times['analyze'] = time.time() - start_time
 
-        commands.extend(['-f', str(self.compile_database)])
-        commands.extend(['-o', str(self.csa_path)])
-        
-        if self.incrementable:
-            commands.extend(['--file-list', f"{self.diff_files_path}"])
-        csa_script = ' '.join(commands)
-        logger.debug("[Executing CSA Files Script] " + csa_script)
-        try:
-            process = run(csa_script, shell=True, capture_output=True, text=True, check=True)
-            self.session_times['execute_csa'] = time.time() - start_time
-            logger.info(f"[Executing CSA Files Success] {csa_script}")
-            if self.env.analyze_opts.verbose:
-                logger.debug(f"[Panda Debug Info]\nstdout: \n{process.stdout}\n stderr: \n{process.stderr}")
-        except subprocess.CalledProcessError as e:
-            # self.session_times['execute_csa'] = SessionStatus.Failed
-            # TODO: 由于panda此处可能返回failed，待修复后再储存为FAILED
-            self.session_times['execute_csa'] = time.time() - start_time
-            logger.error(f"[Executing CSA Files Failed]\nstdout: \n{e.stdout}\n stderr: \n{e.stderr}")
-    
     def prepare_diff_dir(self):
-        if not self.env.analyze_opts.use_diff_path:
+        if not self.env.analyze_opts.udp:
             self.diff_path = self.preprocess_path
             return
         remake_dir(self.diff_path, "[Diff Files DIR exists]")
@@ -532,7 +447,7 @@ class Configuration:
         # -x: Don't compare files or directories matching the given patterns.
         commands = [self.env.DIFF_PATH]
         commands.extend(['-r', '-u0', '-b', '-B'])
-        if not self.env.analyze_opts.use_diff_path:
+        if not self.env.analyze_opts.udp:
             # If we don't generate files which eliminate lines begin with "# %d",
             # we should use '-I' commands to tell `diff` ignore these loc info lines.
             # Note that diff won't ignore all these lines if there is any line doesn't
