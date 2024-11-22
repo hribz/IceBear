@@ -28,7 +28,7 @@ class Environment:
 
     def prepare_env_path(self):
         # Environment path
-        self.PWD = Path(".").absolute()
+        self.PWD: Path = Path(".").absolute()
         self.EXTRACT_II = str(self.PWD / 'build/clang_tool/collectIncInfo')
         self.EXTRACT_CG = str(self.PWD / 'build/clang_tool/extractCG')
         self.PANDA = str(self.PWD / 'panda/panda')

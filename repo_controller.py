@@ -3,12 +3,14 @@ from git import Repo
 import argparse
 import sys
 import pandas as pd
-from IncAnalysis.repository import Repository
+import json
+
+from IncAnalysis.repository import Repository, BuildType
 from IncAnalysis.utils import *
 from IncAnalysis.environment import *
 from IncAnalysis.logger import logger
-import csv
 import subprocess
+from IncAnalysis.utils import add_to_csv
 
 def get_repo_csv(csv_path: str) -> pd.DataFrame:
     commit_df = pd.read_csv(csv_path)
@@ -66,28 +68,19 @@ def get_local_repo_commit_parents(repo_dir: str, commit: str) -> list:
     # return parent commits
     return [commit.hexsha for commit in repo.head.commit.parents]
 
-init_csv = True
-
-def add_to_csv(headers, data, csv_file):
-    with open(csv_file, 'w' if init_csv else 'a', newline='') as f:
-        writer = csv.writer(f)
-        if init_csv:
-            writer.writerow(headers)
-        writer.writerows(data)
-
 def main(args):
-    global init_csv
     parser = ArgumentParser()
     opts = parser.parse_args(args)
     env = Environment(opts)
-    # repo_list = 'repos/repos.csv'
-    repo_list = 'repos/test_grpc.csv'
+    # repo_list = 'repos/repos.json'
+    repo_list = 'repos/test_grpc.json'
+    # repo_list = 'repos/test_ffmpeg.json'
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     result_file = f'repos/result/result_{opts.inc}_{timestamp}.csv'
     result_file_specific = f'repos/result/result_specific_{opts.inc}_{timestamp}.csv'
     
-    repo_csv = get_repo_csv(repo_list)
-    previous_repo_name = ""
+    with open(repo_list, 'r') as f:
+        repo_json = json.load(f)
     Repo = None
     
     class STATUS(Enum):
@@ -96,41 +89,47 @@ def main(args):
         CLONE_FAILED = auto()
         CHECK_FAILED = auto()
     status = STATUS.BEGIN
+    init_csv = True
 
-    for _, repo in repo_csv.iterrows():
+    for repo in repo_json:
         repo_name = repo["project"]
+        build_type = repo["build_type"]
+        default_options = repo["config_options"] if repo.get("config_options") else []
         os.chdir(env.PWD)
         repo_dir = Path(env.PWD / f"repos/{repo_name}")
         abs_repo_path = str(repo_dir.absolute())
         print(abs_repo_path)
-        commit_sha = repo["hash"]
 
-        if previous_repo_name != repo_name:
-            if status == STATUS.NORMAL:
-                logger.info('---------------END SUMMARY-------------\n'+Repo.session_summary())
-                headers, data = Repo.summary_to_csv_specific()
-                add_to_csv(headers, data, result_file_specific)
-                headers, data = Repo.summary_to_csv()
-                add_to_csv(headers, data, result_file)
-                init_csv = False
+        for commit in repo["commits"]:
+            commit_sha = commit["hash"]
+            if Repo is None:
+                if not clone_project(repo_name):
+                    status = STATUS.CLONE_FAILED
+                    continue
             status = STATUS.NORMAL
-            if not clone_project(repo_name):
-                status = STATUS.CLONE_FAILED
-                continue
-        status = STATUS.NORMAL
-        if checkout_target_commit(abs_repo_path, commit_sha):
-            if previous_repo_name != repo_name:
-                # Analysis first commit as baseline.
-                previous_repo_name = repo_name
-                Repo = Repository(repo_name, abs_repo_path, env, build_root=f"{abs_repo_path}_build", build_dir_name=f"build_0_{commit_sha[:6]}")
-                Repo.process_one_config(Repo.configurations[-1])
+            if checkout_target_commit(abs_repo_path, commit_sha):
+                if Repo is None:
+                    # Analysis first commit as baseline.
+                    Repo = Repository(repo_name, abs_repo_path, env, build_root=f"{abs_repo_path}_build", default_options=default_options,
+                                    build_dir_name=f"build_0_{commit_sha[:6]}", default_build_type=build_type)
+                    Repo.process_one_config(Repo.configurations[-1])
+                else:
+                    # Analysis subsequent commit incrementally.
+                    Repo.add_configuration(default_options, build_dir_name=f"build_{len(Repo.configurations)}_{commit_sha[:6]}")
+                    Repo.process_one_config(Repo.configurations[-1])
             else:
-                # Analysis subsequent commit incrementally.
-                Repo.add_configuration([], build_dir_name=f"build_{len(Repo.configurations)}_{commit_sha[:6]}")
-                Repo.process_one_config(Repo.configurations[-1])
-        else:
-            status = STATUS.CHECK_FAILED
-            logger.error(f"[Checkout Commit] {repo_name} checkout to {commit_sha} failed!")
+                status = STATUS.CHECK_FAILED
+                logger.error(f"[Checkout Commit] {repo_name} checkout to {commit_sha} failed!")
+        if Repo:
+            logger.info('---------------END SUMMARY-------------\n'+Repo.session_summary())
+            headers, data = Repo.summary_to_csv_specific()
+            add_to_csv(headers, data, result_file_specific, init_csv)
+            headers, data = Repo.summary_to_csv()
+            add_to_csv(headers, data, result_file, init_csv)
+            init_csv = False
+            Repo.file_status_to_csv()
+            Repo = None
+
     if Repo:
         logger.info('---------------END SUMMARY-------------\n'+Repo.session_summary())
         headers, data = Repo.summary_to_csv_specific()

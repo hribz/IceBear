@@ -36,26 +36,26 @@ def main(args):
         #     'name': 'xgboost', 
         #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/xgboost', 
         #     'options_list': [
-        #         [Option('GOOGLE_TEST', 'ON')]
+        #         [('GOOGLE_TEST=ON')]
         #     ]
         # },
         # {
         #     'name': 'opencv', 
         #     'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/opencv', 
         #     'options_list': [
-        #         [Option('WITH_CLP', 'ON')]
+        #         [('WITH_CLP=ON')]
         #     ]
         # },
         {
             'name': 'ica-demo',
             'src_path': '/home/xiaoyu/cmake-analyzer/cmake-projects/ica-demo',
             'options_list': [
-                [Option('CHANGE_ALL', 'ON')],
-                # [Option('GLOBAL_CONSTANT', 'ON')],
-                # [Option('VIRTUAL_FUNCTION', 'ON')],
-                # [Option('RECORD_FIELD', 'ON')],
-                # [Option('FEATURE_UPGRADE', 'ON')],
-                # [Option('COMMON_CHANGE', 'ON')],
+                [('CHANGE_ALL=ON')],
+                # [('GLOBAL_CONSTANT=ON')],
+                # [('VIRTUAL_FUNCTION=ON')],
+                # [('RECORD_FIELD=ON')],
+                # [('FEATURE_UPGRADE=ON')],
+                # [('COMMON_CHANGE=ON')],
             ]
         }
     ]
@@ -73,6 +73,7 @@ def main(args):
         repo_db.extract_ii_every_config()
         repo_db.generate_efm_for_every_config()
         repo_db.analyze_for_every_config()
+        repo_db.file_status_to_csv()
 
         # Copy compile_commands.json to build dir for clangd.
         shutil.copy(str(repo_db.default_config.compile_database), str(repo_db.src_path / 'build'))

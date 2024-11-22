@@ -2,10 +2,11 @@ from typing import List
 import multiprocessing as mp
 import subprocess as proc
 from abc import ABC, abstractmethod
+import os
 
 from IncAnalysis.analyzer_config import *
 from IncAnalysis.file_in_cdb import FileInCDB, FileKind
-from IncAnalysis.utils import makedir
+from IncAnalysis.utils import makedir, process_file_list
 from IncAnalysis.logger import logger
 
 class Analyzer(ABC):
@@ -20,11 +21,15 @@ class Analyzer(ABC):
 
     def analyze_all_files(self):
         makedir(self.analyzer_config.workspace)
+        for file in self.file_list:
+            makedir(os.path.dirname(file.csa_file))
         ret = True
-        with mp.Pool(self.analyzer_config.env.analyze_opts.jobs) as p:
-            for retcode in p.map(self.analyze_one_file, [i for i in self.file_list]):
-                ret = ret and retcode
-        return ret
+        # with mp.Pool(self.analyzer_config.env.analyze_opts.jobs) as p:
+        #     for retcode in p.map(self.analyze_one_file, [i for i in self.file_list]):
+        #         ret = ret and retcode
+        
+        # Open one process in every thread to simulate multi-process.
+        return process_file_list(self.analyze_one_file, self.file_list, self.analyzer_config.env.analyze_opts.jobs)
     
     def get_analyzer_name(self):
         return self.__class__.__name__
@@ -42,6 +47,31 @@ class CSA(Analyzer):
                 'c': env.CLANG,
                 'c++': env.CLANG_PLUS_PLUS
             }
+
+    def analyze_one_file(self, file: FileInCDB):
+        compiler = self.compilers[file.compile_command.language]
+        commands = [compiler] + file.compile_command.arguments
+        commands.extend(self.analyzer_config.analyze_args())
+        # Add file specific args.
+        if self.analyzer_config.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+            if file.parent.incrementable:
+                commands.extend(['-Xanalyzer', f'-analyze-function-file={file.get_file_path(FileKind.RF)}'])
+            if self.analyzer_config.env.inc_mode == IncrementalMode.InlineLevel:
+                commands.extend(['-Xanalyzer', f'-analyzer-dump-fsum={file.get_file_path(FileKind.FS)}'])
+        with proc.Popen(commands, cwd=file.compile_command.directory) as p:
+            ret = p.wait()
+            if ret != 0:
+                stdout = p.stdout.read().decode('utf-8') if p.stdout else ""
+                stderr = p.stderr.read().decode('utf-8') if p.stderr else ""
+                logger.error(f"[{self.get_analyzer_name()} Analyze Failed] {commands}\nstdout:\n{stdout}\nstderr:\n{stderr}")
+            else:
+                logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")                
+        return ret == 0
+    
+class CppCheck(Analyzer):
+    def __init__(self, analyzer_config: CppCheckConfig, file_list: List[FileInCDB]):
+        super().__init__(analyzer_config, file_list)
+        self.cppcheck = 'cppcheck'
 
     def analyze_one_file(self, file: FileInCDB):
         compiler = self.compilers[file.compile_command.language]

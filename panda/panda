@@ -472,7 +472,7 @@ def ParseArguments(argv): # {{{
 def CompilerAction(opts, ccdb, action):
     compiler = {'c': opts.cc, 'c++': opts.cxx}
     if ccdb.language == 'Unknown':
-        print('skip unknown file: %s' % (ccdb.file))
+        print('Skip unknown file: %s' % (ccdb.file))
         return
     arguments = [compiler[ccdb.language]] + ccdb.arguments + action.args
 

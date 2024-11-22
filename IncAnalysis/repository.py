@@ -5,30 +5,28 @@ import os
 from IncAnalysis.logger import logger
 from IncAnalysis.utils import * 
 from IncAnalysis.environment import *
-from IncAnalysis.configuration import Configuration, Option
+from IncAnalysis.configuration import Configuration, Option, BuildType
 
 class Repository:
     name: str
     src_path: Path
     default_config: Configuration
     configurations: List[Configuration]
-    cmakeFile: Path
     running_status: bool # whether the repository sessions should keep running
     env: Environment
 
-    def __init__(self, name, src_path, env: Environment, options_list:List[List[Option]]=None, build_root = None, build_dir_name=None):
+    def __init__(self, name, src_path, env: Environment, default_options: List[str] = [], options_list:List[List[str]]=None, 
+                 build_root = None, build_dir_name=None, default_build_type: str="cmake"):
         self.name = name
         self.src_path = Path(src_path).absolute()
         self.env = env
-        self.cmakeFile = self.src_path / 'CMakeLists.txt'
         self.running_status = True
-        if not self.cmakeFile.exists():
-            print(f'Please make sure there is CMakeLists.txt in {self.src_path}')
-            exit(1)
         logger.TAG = self.name
+        self.default_build_type = BuildType.getType(default_build_type)
         self.build_root = build_root if build_root is not None else str(self.src_path / 'build')
-        self.default_config = Configuration(self.name, self.src_path, self.env, [], 
-                                            build_path=f"{self.build_root}/{build_dir_name}" if build_dir_name else f"{self.build_root}/build_0")
+        self.default_config = Configuration(self.name, self.src_path, self.env, default_options, 
+                                            build_path=f"{self.build_root}/{build_dir_name}" if build_dir_name else f"{self.build_root}/build_0",
+                                            build_type=self.default_build_type)
         self.configurations = [self.default_config]
         if options_list:
             for idx, options in enumerate(options_list):
@@ -37,10 +35,11 @@ class Repository:
                 )
 
     def add_configuration(self, options, build_dir_name=None):
+        previous_config = self.configurations[-1] if len(self.configurations) > 0 else self.default_config
         self.configurations.append(
             Configuration(self.name, self.src_path, self.env, options, 
                           build_path=f"{self.build_root}/{build_dir_name}" if build_dir_name else f'{self.build_root}/build_{len(self.configurations)}',
-                          baseline=self.default_config)
+                          baseline=self.default_config, build_type=self.default_build_type)
         )
 
     def process_all_session(self):
@@ -52,27 +51,28 @@ class Repository:
         self.generate_efm_for_every_config()
 
     def process_one_config(self, config: Configuration):
-        # 1. build
+        # 1. configure & build
         config.configure()
+        config.build()
         # 2. preprocess and diff
         config.preprocess_repo()
         if self.env.inc_mode != IncrementalMode.NoInc:
             config.diff_with_other(self.default_config)
         # 3. extract inc info
-        # if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
-        #     config.extract_inc_info()
-        #     config.parse_call_graph()
-        #     config.parse_functions_changed()
-        # # 4. prepare for CSA
-        # if self.env.ctu:
-        #     config.generate_efm()
-        #     config.merge_efm()
-        # # 5. execute analyzers
-        # if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
-        #     config.propagate_reanalyze_attr()
-        # config.analyze()
-        # if self.env.inc_mode == IncrementalMode.InlineLevel:
-        #     config.parse_function_summaries()
+        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+            config.extract_inc_info()
+            config.parse_call_graph()
+            config.parse_functions_changed()
+        # 4. prepare for CSA
+        if self.env.ctu:
+            config.generate_efm()
+            config.merge_efm()
+        # 5. execute analyzers
+        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+            config.propagate_reanalyze_attr()
+        config.analyze()
+        if self.env.inc_mode == IncrementalMode.InlineLevel:
+            config.parse_function_summaries()
 
     def process_every_config(self, sessions, **kwargs):
         if not self.running_status:
@@ -95,6 +95,7 @@ class Repository:
 
     def build_every_config(self):
         self.process_every_config(Configuration.configure)
+        self.preprocess_every_config(Configuration.build)
 
     def extract_ii_every_config(self):
         self.process_every_config([
@@ -130,8 +131,8 @@ class Repository:
         headers = ["project", "version"]
         for session in self.default_config.session_times.keys():
             headers.append(str(session))
-            if str(session) == 'diff_with_other':
-                headers.extend(["diff_command_time", "diff_parse_time"])
+            # if str(session) == 'diff_with_other':
+            #     headers.extend(["diff_command_time", "diff_parse_time"])
         headers.extend(["files", "diff files", "changed function", "reanalyze function", "diff but no cf", "diff but no cg"])
         data = []
         for (idx, config) in enumerate(self.configurations):
@@ -142,9 +143,9 @@ class Repository:
                     config_data.append(str(exe_time._name_))
                 else:
                     config_data.append("%.3lf s" % exe_time)
-                if str(session) == 'diff_with_other' and idx == 0:
-                    config_data.append('Skipped')
-                    config_data.append('Skipped')
+                # if str(session) == 'diff_with_other' and idx == 0:
+                #     config_data.append('Skipped')
+                #     config_data.append('Skipped')
             config_data.append(len(config.file_list))
             config_data.append(len(config.diff_file_list))
             config_data.append(config.get_changed_function_num())
@@ -156,7 +157,7 @@ class Repository:
         return headers, data
     
     def summary_to_csv(self):
-        headers = ["project", "version", "configure", "prepare for inc", "prepare for CSA", "execute CSA"]
+        headers = ["project", "version", "configure", "build", "prepare for inc", "prepare for CSA", "execute CSA"]
         prepare_for_inc = {"preprocess_repo", "diff_with_other", "extract_inc_info", "parse_call_graph", 
                            "parse_functions_changed", "propagate_reanalyze_attr", "parse_function_summaries"}
         prepare_for_csa = {"generate_efm", "merge_efm"}
@@ -185,3 +186,8 @@ class Repository:
             data.append(config_data)
 
         return headers, data
+    
+    def file_status_to_csv(self):
+        for config in self.configurations:
+            headers, data = config.file_status()
+            add_to_csv(headers, data, str(config.workspace / 'file_status.csv'))

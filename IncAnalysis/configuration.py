@@ -23,15 +23,35 @@ from IncAnalysis.file_in_cdb import *
 from IncAnalysis.analyzer import *
 
 class Option:
-    def __init__(self, name: str, value: str):
-        self.name = name
-        self.value = value
+    def __init__(self, cmd: str):
+        split_cmd = cmd.split('=')
+        self.name = split_cmd[0]
+        self.value = None
+        if len(split_cmd) == 2:
+            self.value = split_cmd[1]
     
     def __repr__(self) -> str:
-        return f"{{'name': {self.name}, 'value': {self.value}}}"
+        return f"{{'name': {self.name}, 'value': {self.value}}}" if self.value is not None else f"{{'name': {self.name}}}"
     
     def obj_to_json(self):
-        return {"name": self.name, "value": self.value}
+        return {"name": self.name, "value": self.value} if self.value is not None else {"name": self.name}
+
+    def origin_cmd(self):
+        return f"{self.name}={self.value}" if self.value is not None else f"{self.name}"
+
+class BuildType(Enum):
+    CMAKE = auto()
+    CONFIGURE = auto()
+    KBUILD = auto()
+
+    @staticmethod
+    def getType(build_type: str):
+        if build_type == 'cmake':
+            return BuildType.CMAKE
+        elif build_type == 'configure':
+            return BuildType.CONFIGURE
+        elif build_type == 'kbuild':
+            return BuildType.KBUILD
 
 class Configuration:
     env: Environment
@@ -51,20 +71,27 @@ class Configuration:
     session_times: Dict
     # We traverse file_list most of the time, so we don't use dict[str, FileInCDB]
     file_list_index: Dict[str, int]
-    file_list: List[FileInCDB] # Files in workspace, only record files exists and has normal extname.
+    # Files in workspace, only record files exists and has normal extname.
+    file_list: List[FileInCDB]
+    abnormal_file_list: List[FileInCDB]
 
-    def __init__(self, name, src_path, env, options: List[Option], args=None, build_path=None, baseline=None):
+    def __init__(self, name, src_path, env, options: List[str], args=None, build_path=None, 
+                 baseline=None, update_mode:bool=False, build_type: BuildType=BuildType.CMAKE):
         self.name = name
         self.src_path = src_path
         self.env = env
         self.update_build_path(build_path)
         self.file_list_index = None
         self.file_list = None
+        self.abnormal_file_list = []
         if args:
             self.args = args
         else:
             self.args = None
-        self.create_configure_script(self.env.CMAKE_PATH, options)
+        self.options = [Option(i) for i in options]
+        self.build_type = build_type
+        self.create_configure_script()
+        self.create_build_script()
         self.reply_database = []
         self.diff_file_list = []
         self.status = 'WAIT'
@@ -74,6 +101,8 @@ class Configuration:
         self.baseline: Configuration = self
         if baseline:
             self.baseline = baseline
+        # Update One Configuration.
+        self.update_mode = update_mode
         self.global_efm: Dict[str, FileInCDB] = None
         if os.path.exists(self.compile_database):
             # If there is compile_commands.json exists, we can prepare file list early.
@@ -83,23 +112,6 @@ class Configuration:
             CSA(CSAConfig(self.env, self.csa_path, self.env.analyze_opts.csa_config), self.file_list)
         ]
 
-    def create_configure_script(self, cmake_path, options):
-        self.options = []
-        self.options.append(Option('CMAKE_EXPORT_COMPILE_COMMANDS', '1'))
-        self.options.append(Option('CMAKE_BUILD_TYPE', 'Release'))
-        self.options.append(Option('CMAKE_C_COMPILER', self.env.CLANG))
-        self.options.append(Option('CMAKE_CXX_COMPILER', self.env.CLANG_PLUS_PLUS))
-        self.options.extend(options)
-
-        commands = [cmake_path]
-        commands.append(f"-S {str(self.src_path)}")
-        commands.append(f"-B {str(self.build_path)}")
-        for option in self.options:
-            commands.append(f"-D{option.name}={option.value}")
-        if self.args:
-            commands.extend(self.args)
-        self.configure_script = ' '.join(commands)
-    
     def update_build_path(self, build_path=None):
         if build_path is None:
             self.build_path = self.src_path / 'build/build_0'
@@ -126,23 +138,19 @@ class Configuration:
             
     def prepare_file_list(self):
         if not os.path.exists(self.compile_database):
-            logger.error(f"[Prepare File List] Please make sure {self.compile_database} exists, may be you should configure first.")
+            logger.error(f"[Prepare File List] Please make sure {self.compile_database} exists, may be you should `configure & build` first.")
             return
         if self.file_list is not None:
             return
         self.file_list_index = {}
         self.file_list  = []
-        self.session_times["unknown file number"] = 0
-        self.session_times["unexist file number"] = 0
         with open(self.compile_database, 'r') as f:
             cdb = json.load(f)
             for (idx, ccdb) in enumerate(cdb):
                 compile_command = CompileCommand(ccdb)
                 file_in_cdb = FileInCDB(self, compile_command)
-                if file_in_cdb.status == FileStatus.UNKNOWN:
-                    self.session_times["unknown file number"] += 1
-                elif file_in_cdb.status == FileStatus.UNEXIST:
-                    self.session_times["unexist file number"] += 1
+                if file_in_cdb.status == FileStatus.UNKNOWN or file_in_cdb.status == FileStatus.UNEXIST:
+                    self.abnormal_file_list.append(file_in_cdb)
                 else:
                     self.file_list_index[compile_command.file] = len(self.file_list)
                     self.file_list.append(file_in_cdb)
@@ -167,28 +175,95 @@ class Configuration:
         for query in query_list:
             with open(self.query_path / query, 'w') as f:
                 f.write('')
+    
+    def create_configure_script(self):
+        if self.build_type == BuildType.CMAKE:
+            cmakeFile = self.src_path / 'CMakeLists.txt'
+            if not cmakeFile.exists():
+                print(f'Please make sure there is CMakeLists.txt in {self.src_path}')
+                exit(1)
+            self.options.append(Option('CMAKE_EXPORT_COMPILE_COMMANDS=1'))
+            self.options.append(Option('CMAKE_BUILD_TYPE=Release'))
+            self.options.append(Option(f'CMAKE_C_COMPILER={self.env.CLANG}'))
+            self.options.append(Option(f'CMAKE_CXX_COMPILER={self.env.CLANG_PLUS_PLUS}'))
+            commands = [self.env.CMAKE_PATH]
+            commands.append(f"-S {str(self.src_path)}")
+            commands.append(f"-B {str(self.build_path)}")
+            for option in self.options:
+                commands.append(f"-D{option.name}={option.value}")
+        elif self.build_type == BuildType.CONFIGURE:
+            commands = [f'{self.src_path}/configure']
+            commands.append(f"--prefix={self.build_path}")
+            for option in self.options:
+                commands.append(option.origin_cmd())
+        elif self.build_type == BuildType.KBUILD:
+            commands = ['make']
+            commands.extend([f'KBUILD_SRC={self.src_path}', '-f', f'{self.src_path}/Makefile'])
+            commands.extend(['-C', f'{self.build_path}'])
+            for option in self.options:
+                commands.append(option.origin_cmd())
+        if self.args:
+            commands.extend(self.args)
+        self.configure_script = ' '.join(commands)
+
+    def create_build_script(self):
+        # Use bear to intercept build process and record compile commands.
+        commands = ['bear', '-o', f'{self.compile_database}']
+        if self.build_type == BuildType.CMAKE:
+            commands.extend([self.env.CMAKE_PATH, "--build", f"{self.build_path}"])
+            commands.extend([f"-j{self.env.analyze_opts.jobs}"])
+        elif self.build_type == BuildType.CONFIGURE:
+            commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
+            # TODO: Change to directory contain Makefile.
+            commands.extend(['-C', f'{self.src_path}'])
+        elif self.build_type == BuildType.KBUILD:
+            commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
+            # Some KBuild project(like busybox) support out of tree build.
+            commands.extend(['-C', f'{self.build_path}'])
+        self.build_script = ' '.join(commands)
 
     def configure(self):
         start_time = time.time()
         # remake_dir(self.build_path, "[Config Build DIR exists]")
         makedir(self.build_path, "[Config Build DIR exists]")
-        self.create_cmake_api_file()
+        if self.build_type == BuildType.CMAKE:
+            self.create_cmake_api_file()
         logger.debug("[Repo Config Script] " + self.configure_script)
+        # Some projects need to `configure & build` in source tree. 
+        # CMake will not be influenced by path.
+        os.chdir(self.src_path)
         try:
-            # os.chdir(self.build_path)
             process = run(self.configure_script, shell=True, capture_output=True, text=True, check=True)
-            logger.info(f"[Repo Config Success] {process.stdout}")
             self.session_times['configure'] = time.time() - start_time
+            logger.info(f"[Repo Config Success] {process.stdout}")
+            
             with open(self.build_path / 'options.json', 'w') as f:
                 tmp_json_data = {"options": []}
                 for option in self.options:
                     tmp_json_data['options'].append(option.obj_to_json())
                 json.dump(tmp_json_data, f, indent=4)
-            self.prepare_file_list()
             # self.reply_database.append(Reply(self.reply_path, logger))
         except subprocess.CalledProcessError as e:
             self.session_times['configure'] = SessionStatus.Failed
             logger.error(f"[Repo Config Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
+        self.prepare_file_list()
+        os.chdir(self.env.PWD)
+    
+    def build(self):
+        start_time = time.time()
+        makedir(self.build_path, "[Config Build DIR exists]")
+        # Some projects need to `configure & build` in source tree. 
+        # CMake will not be influenced by path.
+        os.chdir(self.src_path)
+        try:
+            process = run(self.build_script, shell=True, capture_output=True, text=True, check=True)
+            self.session_times['build'] = time.time() - start_time
+            logger.info(f"[Repo Build Success] {self.build_script}")
+        except subprocess.CalledProcessError as e:
+            self.session_times['build'] = SessionStatus.Failed
+            logger.error(f"[Repo Build Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
+        self.prepare_file_list()
+        os.chdir(self.env.PWD)
 
     def preprocess_repo(self):
         start_time = time.time()
@@ -212,7 +287,7 @@ class Configuration:
             plugin['action']['title'] = 'Preprocess Files'
             # '-P' will clean line information in preprocessed files.
             # Error! Line information should not ignored!
-            plugin['action']['args'] = ['-E'] 
+            plugin['action']['args'] = ['-E']
             plugin['action']['extname'] = ['.i', '.ii']
             json.dump(plugin, f, indent=4)
         commands = self.env.DEFAULT_PANDA_COMMANDS.copy()
@@ -399,18 +474,19 @@ class Configuration:
             return
         start_time = time.time()
         self.baseline = other
-        if not self.diff_path.exists():
-            logger.error(f"Preprocess files DIR {self.diff_path} not exists")
-            return
-        if not other.diff_path.exists():
-            logger.error(f"Preprocess files DIR {other.diff_path} not exists")
-            return
+        if self.env.analyze_opts.udp:
+            if not self.diff_path.exists():
+                logger.error(f"Preprocess files DIR {self.diff_path} not exists")
+                return
+            if not other.diff_path.exists():
+                logger.error(f"Preprocess files DIR {other.diff_path} not exists")
+                return
         self.status = 'DIFF'
         # self.session_times["diff_command_time"] = 0
         # self.session_times["diff_parse_time"] = 0
         # self.diff_two_dir(self.diff_path, other.diff_path, other)
         # We just need to diff files in compile database.
-        self.process_file_list(FileInCDB.diff_with_baseline)
+        process_file_list(FileInCDB.diff_with_baseline, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
         for file in self.file_list:
             if file.is_changed():
                 self.diff_file_list.append(file)
@@ -556,22 +632,6 @@ class Configuration:
                                     file_in_cdb.diff_info = DiffResult(file_in_cdb, True)
                                     self.diff_file_list.append(file_in_cdb)
 
-    def process_file_list(self, method):
-        file_list = self.diff_file_list \
-            if self.incrementable else self.file_list
-        # Can't use mutilprocessing, because every process has its own memory space.
-        # with mp.Pool(self.env.analyze_opts.jobs) as p:
-        #     p.starmap(virtualCall, [(file, method, False) for file in file_list])
-        threads = []
-        for file in file_list:
-            thread = threading.Thread(target=getattr(file, method.__name__))
-            thread.start()
-            threads.append(thread)
-            # getattr(file, method.__name__)()
-
-        for thread in threads:
-            thread.join()
-
     def parse_function_summaries(self):
         self.session_times['parse_function_summaries'] = SessionStatus.Skipped
         if self.env.inc_mode != IncrementalMode.InlineLevel:
@@ -579,7 +639,7 @@ class Configuration:
         start_time = time.time()
         self.session_times['parse_function_summaries'] = SessionStatus.Failed
         assert (self.file_list is not None)
-        self.process_file_list(FileInCDB.parse_fs_file)
+        process_file_list(FileInCDB.parse_fs_file, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
         logger.info(f"[Parse Function Summaries] Parse function summaries successfully.")
         self.session_times['parse_function_summaries'] = time.time() - start_time
 
@@ -587,7 +647,7 @@ class Configuration:
         start_time = time.time()
         self.session_times['parse_call_graph'] = SessionStatus.Failed
         assert (self.file_list is not None)
-        self.process_file_list(FileInCDB.parse_cg_file)
+        process_file_list(FileInCDB.parse_cg_file, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
         logger.info(f"[Parse Call Graph] Parse call graph successfully.")
         self.session_times['parse_call_graph'] = time.time() - start_time
 
@@ -595,7 +655,7 @@ class Configuration:
         start_time = time.time()
         self.session_times['parse_functions_changed'] = SessionStatus.Failed
         assert (self.file_list is not None)
-        self.process_file_list(FileInCDB.parse_cf_file)
+        process_file_list(FileInCDB.parse_cf_file, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
         logger.info(f"[Parse Function Changed] Parse function changed successfully.")
         self.session_times['parse_functions_changed'] = time.time() - start_time
 
@@ -670,3 +730,36 @@ class Configuration:
             ret += f"   {option.name:<40} | {option.value}\n"    
         ret += f"execution time: {self.get_session_times()}\n"
         return ret
+
+    def file_status(self):
+        headers = ['file', 'status', 'cg nodes', 'changed functions', 'reanalyze functions', 'function summaries']
+        datas = []
+        unexists_number, unknown_number = 0, 0
+        for ab_file in self.abnormal_file_list:
+            datas.append([ab_file.file_name, str(ab_file.status)])
+            if ab_file.status == FileStatus.UNEXIST:
+                unexists_number += 1
+            else:
+                unknown_number += 1
+        new_file_num, changed_file_num, unchanged_file_num = 0, 0, 0
+        for file in self.file_list:
+            # file, status, cg nodes num, cf num, rf num, fs num
+            data = [file.file_name, str(file.status), 0, 0, 0, 0]
+            if file.has_cg:
+                data[2] = (len(file.call_graph.fname_to_cg_node.keys()))
+            if file.has_cf:
+                data[3] = (len(file.functions_changed))
+            if file.has_rf:
+                data[4] = len(file.call_graph.functions_need_reanalyzed)
+            if file.has_fs:
+                data[5] = 1
+            datas.append(data)
+            if file.status == FileStatus.NEW:
+                new_file_num += 1
+            elif file.status == FileStatus.CHANGED:
+                changed_file_num += 1
+            elif file.status == FileStatus.UNCHANGED:
+                unchanged_file_num += 1
+        datas.append([f"unexist files:{unexists_number}", f"unknown files:{unknown_number}", 
+                      f"new files:{new_file_num}", f"changed files:{changed_file_num}", f"unchanged files:{unchanged_file_num}"])
+        return headers, datas

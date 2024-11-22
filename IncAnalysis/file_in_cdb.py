@@ -19,11 +19,14 @@ class FileKind(Enum):
     FS = auto()
 
 class FileStatus(Enum):
-    UNKNOWN = auto() # File's extname is unknown.
-    UNEXIST = auto() # File does not exist.
-    NEW = auto()
+    # Abnormal status
+    UNKNOWN = auto()     # File's extname is unknown.
+    UNEXIST = auto()     # File does not exist.
+    # Normal status
     UNCHANGED = auto()
     CHANGED = auto()
+    NEW = auto()
+    DIFF_FAILED = auto() # Fail to get diff info, just consider it as new.     
     DELETED = auto()
 
 class DiffResult:
@@ -34,10 +37,10 @@ class DiffResult:
         self.origin_diff_lines: List = []
 
     def add_diff_line(self, start_line:int, line_count:int):
-        self.diff_lines.append([start_line, line_count])
+        self.diff_lines.append([int(start_line), int(line_count)])
 
     def add_origin_diff_line(self, start_line:int, line_count:int):
-        self.origin_diff_lines.append([start_line, line_count])
+        self.origin_diff_lines.append([int(start_line), int(line_count)])
 
     def __repr__(self) -> str:
         ret = f"my_file: {self.file.prep_file}\norigin_file: {self.baseline_file.prep_file}\n"
@@ -78,7 +81,6 @@ class CallGraphNode:
             ret += f"{inline_caller} "
         ret += '\n'
         return ret
-
 
 class CallGraph:
     root: CallGraphNode
@@ -141,12 +143,16 @@ class FileInCDB:
         self.file_name: str = compile_command.file
         self.status = FileStatus.NEW
         self.csa_file: str = str(self.parent.csa_path) + self.file_name
-        self.functions_changed: List = None
         self.diff_info: DiffResult = None
+        self.functions_changed: List = None
+        self.has_cf = False # File has .cf.
         self.call_graph: CallGraph = None
+        self.has_cg = False # File has .cg.
+        self.has_rf = False # Propogate reanalyze attribute(if needed) successfully.
+        self.has_fs = False # Analysis finished successfully.
         self.efm: Dict[str, str] = {}
         self.compile_command: CompileCommand = compile_command
-        extname = ""
+        extname = ''
         if self.compile_command.language == 'c++':
             extname = '.ii'
         elif self.compile_command.language == 'c':
@@ -175,10 +181,10 @@ class FileInCDB:
                 logger.debug(f"[FileInCDB Init] Find new file {self.file_name}")
     
     def is_new(self):
-        return self.status == FileStatus.NEW
+        return self.status == FileStatus.NEW or self.status == FileStatus.DIFF_FAILED
 
     def is_changed(self):
-        return self.status == FileStatus.CHANGED or self.status == FileStatus.NEW
+        return self.status.value >= FileStatus.CHANGED.value
 
     def get_baseline_file(self):
         assert self.status != FileStatus.NEW
@@ -208,10 +214,10 @@ class FileInCDB:
         else:
             logger.error(f"[Get File Path] Unknown file kind {kind}")
 
-    def diff_with_baseline(self):
+    def diff_with_baseline(self) -> bool:
         if not self.baseline_file:
             # This is a new file.
-            return
+            return True
         commands = self.parent.env.DIFF_COMMAND.copy()
         if self.parent.env.analyze_opts.udp:
             commands.extend([str(self.baseline_file.diff_file), str(self.diff_file)])
@@ -222,7 +228,7 @@ class FileInCDB:
         if process.returncode == 0 or process.returncode == 1:
             if process.returncode == 0:
                 # There is no change between this file and baseline.
-                return
+                return True
             self.diff_info = DiffResult(self, self.baseline_file)
             self.status = FileStatus.CHANGED
             for line in (process.stdout).split('\n'):
@@ -237,10 +243,13 @@ class FileInCDB:
                 self.diff_info.add_diff_line(new_begin, new_line_number)
             # logger.debug(f"[Diff Files Output] \n{process.stdout}")
         else:
+            self.status = FileStatus.DIFF_FAILED
             logger.debug("[Diff Files Script] " + diff_script)
             logger.error(f"[Diff Files Failed] stdout: {process.stdout}\n stderr: {process.stderr}")
+            return False
+        return True
 
-    def parse_cg_file(self):
+    def parse_cg_file(self) -> bool:
         # .cg file format: 
         # caller
         # [
@@ -251,8 +260,9 @@ class FileInCDB:
             # The reason of .cg file doesn't exists maybe the file in compile_commands.json
             # cannot preprocess correctly. 
             logger.error(f"[Parse CG File] Callgraph file {cg_file} doesn't exist.")
-            return
+            return False
         self.call_graph = CallGraph(self)
+        self.has_cg = True
         with open(cg_file, 'r') as f:
             caller, callee = None, None
             is_caller = True
@@ -269,18 +279,21 @@ class FileInCDB:
                     else:
                         callee = line
                         self.call_graph.add_node(caller, callee)
+        return True
 
-    def parse_cf_file(self):
+    def parse_cf_file(self) -> bool:
         cf_file = self.get_file_path(FileKind.CF)
         if not cf_file or not os.path.exists(cf_file):
-            return
+            return False
         self.functions_changed = []
+        self.has_cf = True
         with open(cf_file, 'r') as f:
             for line in f.readlines():
                 line = line.strip()
                 self.functions_changed.append(line)
+        return True
     
-    def parse_fs_file(self):
+    def parse_fs_file(self) -> bool:
         # .fs file format
         # callee
         # [
@@ -289,7 +302,8 @@ class FileInCDB:
         fs_file = self.get_file_path(FileKind.FS)
         if not os.path.exists(fs_file):
             logger.error(f"[Parse FS File] Function Summary file {fs_file} doesn't exist.")
-            return
+            return False
+        self.has_fs = True
         with open(fs_file, 'r') as f:
             caller, callee = None, None
             is_caller = False
@@ -308,6 +322,7 @@ class FileInCDB:
                             self.call_graph.add_fs_node(caller, callee)
                     else:
                         callee = line
+        return True
 
     def propagate_reanalyze_attribute_without_fs(self):
         # Without function summary information, we have to mark all caller as reanalyzed.
@@ -384,3 +399,4 @@ class FileInCDB:
         with open(rf_path, 'w') as f:
             for fname in self.call_graph.functions_need_reanalyzed:
                 f.write(fname + '\n')
+        self.has_rf = True
