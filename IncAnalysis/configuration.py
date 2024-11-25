@@ -134,7 +134,6 @@ class Configuration:
         self.diff_path = self.workspace / 'diff'
         self.inc_info_path = self.workspace / 'inc_info'
         self.diff_files_path = self.workspace / 'diff_files.txt'
-        self.diff_lines_path = self.workspace / 'diff_lines.json'
             
     def prepare_file_list(self):
         if not os.path.exists(self.compile_database):
@@ -339,7 +338,9 @@ class Configuration:
             plugin = self.env.example_clang_tool_plugin.copy()
             plugin['action']['title'] = 'Extract Inc Info'
             plugin['action']['tool'] = self.env.EXTRACT_II
-            plugin['action']['args'] = ['-diff', str(self.diff_lines_path)]
+            plugin['action']['args'] = ''
+            plugin['action']['inopt'] = "-diff="
+            plugin['action']['extname_inopt'] = '.txt'
             if self.env.ctu:
                 plugin['action']['args'].append('-ctu')
             plugin['action']['extname'] = ""
@@ -482,9 +483,6 @@ class Configuration:
                 logger.error(f"Preprocess files DIR {other.diff_path} not exists")
                 return
         self.status = 'DIFF'
-        # self.session_times["diff_command_time"] = 0
-        # self.session_times["diff_parse_time"] = 0
-        # self.diff_two_dir(self.diff_path, other.diff_path, other)
         # We just need to diff files in compile database.
         process_file_list(FileInCDB.diff_with_baseline, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
         for file in self.file_list:
@@ -495,169 +493,18 @@ class Configuration:
             
             f_diff_files = open(self.diff_files_path, 'w')
             f_prep_diff_files = open(self.preprocess_diff_files_path, 'w')
-            f_diff_lines = open(self.diff_lines_path, 'w')
-            diff_json = {}
 
             for diff_file in self.diff_file_list:
                 f_diff_files.write(diff_file.file_name + '\n')
                 f_prep_diff_files.write(diff_file.prep_file + '\n')
-                if diff_file.is_new():
-                    diff_json[diff_file.prep_file] = 1
-                else:
-                    diff_json[diff_file.prep_file] = diff_file.diff_info.diff_lines
             
-            json.dump(diff_json, f_diff_lines, indent=4)
             f_diff_files.close()
             f_prep_diff_files.close()
-            f_diff_lines.close()
 
             self.incrementable = self.env.inc_mode != IncrementalMode.NoInc
             self.session_times['diff_with_other'] = time.time() - start_time
         else:
             self.session_times['diff_with_other'] = SessionStatus.Failed
-
-    def diff_two_dir(self, my_dir: Path, other_dir: Path, other):
-        start_time = time.time()
-        # -d: Use the diff algorithm which may find smaller set of change
-        # -r: Recursively compare any subdirectories found.
-        # -x: Don't compare files or directories matching the given patterns.
-        commands = [self.env.DIFF_PATH]
-        commands.extend(['-r', '-u0', '-b', '-B'])
-        if not self.env.analyze_opts.udp:
-            # If we don't generate files which eliminate lines begin with "# %d",
-            # we should use '-I' commands to tell `diff` ignore these loc info lines.
-            # Note that diff won't ignore all these lines if there is any line doesn't
-            # match the regex.
-            commands.extend(['-I', "'^# [[:digit:]]'"])
-        commands.extend(['-d', '--exclude=*.json'])
-        commands.extend([str(other_dir), str(my_dir)])
-        diff_script = ' '.join(commands)
-        logger.debug("[Diff Files Script] " + diff_script)
-        self.status = 'DIFF FAILED'
-        process = run(diff_script, shell=True, capture_output=True, text=True)
-        if process.returncode == 0 or process.returncode == 1:
-            self.status = 'DIFF'
-            logger.info(f"[Diff Files Success] {diff_script}")
-            command_time = time.time()
-            self.session_times["diff_command_time"] += command_time - start_time
-            self.parse_diff_result(process.stdout, other)
-            self.session_times["diff_parse_time"] += time.time() - command_time
-            # logger.debug(f"[Diff Files Output] \n{process.stdout}")
-        else:
-            logger.error(f"[Diff Files Failed] stdout: {process.stdout}\n stderr: {process.stderr}")
-
-    def parse_diff_result(self, diff_out, other):
-        diff_line_pattern = re.compile(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@$')
-        file: str
-        file_in_cdb: FileInCDB
-        origin_file: str
-        my_build_dir_in_diff_path = None
-        my_build_dir_in_diff_path = None
-        for line in (diff_out).split('\n'):
-            line: str
-            if line.startswith('@@'):
-                if not file_in_cdb:
-                    continue
-                match = diff_line_pattern.match(line)
-                if match:
-                    # diff lines range [my_start, my_start + my_count)
-                    origin_start = int(match.group(1))
-                    origin_count = int(match.group(2)) if match.group(2) else 1
-                    start = int(match.group(3))
-                    count = int(match.group(4)) if match.group(4) else 1
-                    file_in_cdb.diff_info.add_diff_line(start, count)
-                    file_in_cdb.diff_info.add_origin_diff_line(origin_start, origin_count)
-            elif line.startswith('---'):
-                file_in_cdb = None
-                spilt_line = line.split()
-                origin_file = get_origin_file_name(spilt_line[1], str(other.diff_path), ['.i', '.ii'])
-            elif line.startswith('+++'):
-                spilt_line = line.split()
-                file = spilt_line[1]
-                file_in_cdb = self.get_file(get_origin_file_name(file, str(self.diff_path), ['.i', '.ii']))
-                if file_in_cdb:
-                    self.diff_file_list.append(file_in_cdb)
-                    file_in_cdb.diff_info = DiffResult(file_in_cdb)
-                    file_in_cdb.diff_info.baseline_file = other.get_file(origin_file)
-            elif line.startswith("Only in"):
-                spilt_line = line.split()
-                file_in_cdb = None
-                diff = Path(spilt_line[2][:-1]) / spilt_line[3]
-                logger.debug(f"[Parse Diff Result Only in] {diff}")
-                try:
-                    diff.relative_to(self.diff_path)
-                    is_my_file_or_dir = True
-                except ValueError:
-                    is_my_file_or_dir = False
-                
-                if diff.is_file():
-                    # is file
-                    if is_my_file_or_dir:
-                        # only record new file in my build directory
-                        # diff = get_origin_file_name(str(diff), str(self.diff_path), ['.i', '.ii'])
-                        file_in_cdb = self.get_file(get_origin_file_name(str(diff), str(self.diff_path), ['.i', '.ii']))
-                        if file_in_cdb:
-                            file_in_cdb.diff_info = DiffResult(file_in_cdb, True)
-                            self.diff_file_list.append(file_in_cdb)
-                else:
-                    # is directory
-                    if is_my_file_or_dir:
-                        # diff = /path_to_preprocess/path_to_build0
-                        # relative_dir = path_to_build0
-                        relative_dir = diff.relative_to(self.diff_path)
-                        logger.debug(f"[Parse Diff Result] Find my dir: {diff} relative_dir : {relative_dir} build_path {self.build_path}")
-                        if "/" + str(relative_dir) == str(self.build_path):
-                            my_build_dir_in_diff_path = str(diff)
-                    else:
-                        # diff = /path_to_preprocess/path_to_build
-                        # relative_dir = path_to_build
-                        relative_dir = diff.relative_to(other.diff_path)
-                        logger.debug(f"[Parse Diff Result] Find other dir: {diff} relative_dir : {relative_dir} build_path {other.build_path}")
-                        if "/" + str(relative_dir) == str(other.build_path):
-                            my_build_dir_in_diff_path = str(diff)
-                    if my_build_dir_in_diff_path or my_build_dir_in_diff_path:
-                        if my_build_dir_in_diff_path and my_build_dir_in_diff_path:
-                            # eliminate the impact of different build path
-                            logger.debug(f"[Parse Diff Result Recursively] diff build directory {diff} in preprocess path")
-                            self.diff_two_dir(my_build_dir_in_diff_path, my_build_dir_in_diff_path, other)
-                            my_build_dir_in_diff_path = my_build_dir_in_diff_path = None
-                    elif is_my_file_or_dir:
-                        logger.debug(f"[Parse Diff Directory] find dir {diff} only in one build path")
-                        for diff_file in diff.rglob("*"):
-                            if diff_file.is_file():
-                                file = str(diff_file)
-                                file = get_origin_file_name(str(diff_file), str(self.diff_path), ['.i', '.ii'])
-                                file_in_cdb = self.get_file(file)
-                                if file_in_cdb:
-                                    file_in_cdb.diff_info = DiffResult(file_in_cdb, True)
-                                    self.diff_file_list.append(file_in_cdb)
-
-    def parse_function_summaries(self):
-        self.session_times['parse_function_summaries'] = SessionStatus.Skipped
-        if self.env.inc_mode != IncrementalMode.InlineLevel:
-            return
-        start_time = time.time()
-        self.session_times['parse_function_summaries'] = SessionStatus.Failed
-        assert (self.file_list is not None)
-        process_file_list(FileInCDB.parse_fs_file, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
-        logger.info(f"[Parse Function Summaries] Parse function summaries successfully.")
-        self.session_times['parse_function_summaries'] = time.time() - start_time
-
-    def parse_call_graph(self):
-        start_time = time.time()
-        self.session_times['parse_call_graph'] = SessionStatus.Failed
-        assert (self.file_list is not None)
-        process_file_list(FileInCDB.parse_cg_file, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
-        logger.info(f"[Parse Call Graph] Parse call graph successfully.")
-        self.session_times['parse_call_graph'] = time.time() - start_time
-
-    def parse_functions_changed(self):
-        start_time = time.time()
-        self.session_times['parse_functions_changed'] = SessionStatus.Failed
-        assert (self.file_list is not None)
-        process_file_list(FileInCDB.parse_cf_file, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
-        logger.info(f"[Parse Function Changed] Parse function changed successfully.")
-        self.session_times['parse_functions_changed'] = time.time() - start_time
 
     def propagate_reanalyze_attr(self):
         self.session_times['propagate_reanalyze_attr'] = SessionStatus.Skipped
@@ -665,50 +512,29 @@ class Configuration:
             return
         start_time = time.time()
         self.session_times['propagate_reanalyze_attr'] = SessionStatus.Failed
-        threads = []
-        for file in self.diff_file_list:
-            arg = None
-            if self.env.inc_mode == IncrementalMode.InlineLevel:
-                # with mp.Pool(self.env.analyze_opts.jobs) as p:
-                #     p.starmap(virtualCall, [(file, FileInCDB.propagate_reanalyze_attribute, True, \
-                #                                 None if file.diff_info.entire_file \
-                #                                 else file.diff_info.origin_file.call_graph \
-                #                                 ) for file in file_list])
-                arg = None if file.is_new() else file.baseline_file.call_graph
-            else:
-                # with mp.Pool(self.env.analyze_opts.jobs) as p:
-                #     p.starmap(virtualCall, [(file, FileInCDB.propagate_reanalyze_attribute, False) for file in file_list])
-                arg = None
-            # thread = threading.Thread(target=FileInCDB.propagate_reanalyze_attribute, args=[arg])
-            # thread.start()
-            # threads.append(thread)
-            file.propagate_reanalyze_attribute(arg)
-            file.output_functions_need_reanalyze()
-        # for thread in threads:
-        #     thread.join()
-
+        process_file_list(FileInCDB.propagate_reanalyze_attribute(), self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
         logger.info(f"[Propagate Reanalyze Attr] Propagate reanalyze attribute successfully.")
         self.session_times['propagate_reanalyze_attr'] = time.time() - start_time
 
     def get_changed_function_num(self):
-        self.changed_function_num = 0
+        changed_function_num = 0
         self.diff_file_with_no_cf = 0
         for file in self.diff_file_list:
-            if file.functions_changed:
-                self.changed_function_num += len(file.functions_changed)
+            if file.cf_num:
+                changed_function_num += (file.cf_num)
             else:
                 self.diff_file_with_no_cf += 1
-        return self.changed_function_num
+        return changed_function_num
     
     def get_reanalyze_function_num(self):
-        self.reanalyze_function_num = 0
+        reanalyze_function_num = 0
         self.diff_file_with_no_cg = 0
         for file in self.diff_file_list:
-            if file.call_graph:
-                self.reanalyze_function_num += len(file.call_graph.functions_need_reanalyzed)
+            if file.rf_num:
+                reanalyze_function_num += file.rf_num
             else:
                 self.diff_file_with_no_cg += 1
-        return self.reanalyze_function_num
+        return reanalyze_function_num
 
     def get_session_times(self):
         ret = "{\n"
@@ -746,11 +572,11 @@ class Configuration:
             # file, status, cg nodes num, cf num, rf num, fs num
             data = [file.file_name, str(file.status), 0, 0, 0, 0]
             if file.has_cg:
-                data[2] = (len(file.call_graph.fname_to_cg_node.keys()))
+                data[2] = (file.cg_node_num)
             if file.has_cf:
-                data[3] = (len(file.functions_changed))
+                data[3] = (file.cf_num)
             if file.has_rf:
-                data[4] = len(file.call_graph.functions_need_reanalyzed)
+                data[4] = (file.rf_num)
             if file.has_fs:
                 data[5] = 1
             datas.append(data)

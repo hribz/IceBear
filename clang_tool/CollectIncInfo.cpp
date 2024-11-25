@@ -44,10 +44,10 @@ using namespace clang::tooling;
 
 class IncInfoCollectConsumer : public clang::ASTConsumer {
 public:
-    explicit IncInfoCollectConsumer(ASTContext *Context, const std::string &outputPath, std::string &diffPath, const IncOptions &incOpt)
-    : CG(), OutputPath(outputPath), IncOpt(incOpt), DLM(Context->getSourceManager()), 
-      IncVisitor(Context, DLM, CG, FunctionsNeedReanalyze, IncOpt) {
-        const SourceManager &SM = Context->getSourceManager();
+    explicit IncInfoCollectConsumer(CompilerInstance &CI, const std::string &outputPath, std::string &diffPath, const IncOptions &incOpt)
+    : CG(), OutputPath(outputPath), IncOpt(incOpt), DLM(CI.getASTContext().getSourceManager()), PP(CI.getPreprocessor()),
+      IncVisitor(&CI.getASTContext(), DLM, CG, FunctionsNeedReanalyze, IncOpt) {
+        const SourceManager &SM = CI.getASTContext().getSourceManager();
         FileID MainFileID = SM.getMainFileID();
         const FileEntry *FE = SM.getFileEntryForID(MainFileID);
         MainFilePath = FE->tryGetRealPathName();
@@ -80,7 +80,30 @@ public:
     }
 
     void HandleTranslationUnit(clang::ASTContext &Context) override {
-        CG.addToCallGraph(Context.getTranslationUnitDecl());
+        // Don't run the actions if an error has occurred with parsing the file.
+        DiagnosticsEngine &Diags = PP.getDiagnostics();
+        if (Diags.hasErrorOccurred() || Diags.hasFatalErrorOccurred())
+            return;
+
+        if (DLM.isNoChange()) {
+            // If there is no change in this file, just use old call graph.
+            // DO NOTHING.
+            return;
+        }
+
+        // Same as CSA, we just consider initialzed local decl, ignore
+        // addition declarations from pch deserialization.
+        const unsigned LocalTUDeclsSize = LocalTUDecls.size();
+        for (int i = 0; i < LocalTUDeclsSize; i++) {
+            auto D = LocalTUDecls[i];
+            CG.addToCallGraph(D);
+        }
+        DumpCallGraph();
+        if (DLM.isNewFile()) {
+            // If this is a new file, we just output its callgraph.
+            return;
+        }
+        
         llvm::ReversePostOrderTraversal<clang::CallGraph*> RPOT(&CG);
         SourceManager &SM = Context.getSourceManager();
         for (CallGraphNode *N : RPOT) {
@@ -90,14 +113,12 @@ public:
             if (!loc) continue;
             auto StartLoc = loc->first;
             auto EndLoc = loc->second;
-            CGToRange[D] = std::make_pair(StartLoc, EndLoc);
             // CG only record canonical decls, so it's neccessary to
             // judge if there are changes in Function Definition scope. 
             if (DLM.isChangedLine(StartLoc, EndLoc)) {
                 FunctionsNeedReanalyze.insert(D);
             }
         }
-        DumpCallGraph();
         IncVisitor.TraverseDecl(Context.getTranslationUnitDecl());
         IncVisitor.DumpGlobalConstantSet();
         IncVisitor.DumpTaintDecls();
@@ -148,7 +169,11 @@ public:
                 *OS << AnalysisDeclContext::getFunctionName(D->getCanonicalDecl());
             }
             if (IncOpt.PrintLoc) {
-                *OS << " -> " << CGToRange[D].first << ", " << CGToRange[D].second;
+                auto loc = DLM.StartAndEndLineOfDecl(D);
+                if (!loc) continue;
+                auto StartLoc = loc->first;
+                auto EndLoc = loc->second;
+                *OS << " -> " << StartLoc << ", " << EndLoc;
             }
             *OS << "\n[\n";
             SetOfConstDecls CalleeSet;
@@ -165,7 +190,11 @@ public:
                     *OS << AnalysisDeclContext::getFunctionName(Callee->getCanonicalDecl());
                 }
                 if (IncOpt.PrintLoc) {
-                    *OS << " -> " << CGToRange[Callee].first << "-" << CGToRange[Callee].second;
+                    auto loc = DLM.StartAndEndLineOfDecl(Callee);
+                    if (!loc) continue;
+                    auto StartLoc = loc->first;
+                    auto EndLoc = loc->second;
+                    *OS << " -> " << StartLoc << "-" << EndLoc;
                 }
                 *OS << "\n";
             }
@@ -204,7 +233,11 @@ public:
                 *OS << AnalysisDeclContext::getFunctionName(D->getCanonicalDecl());
             }
             if (IncOpt.PrintLoc) {
-                *OS << " -> " << CGToRange[D].first << "-" << CGToRange[D].second;
+                auto loc = DLM.StartAndEndLineOfDecl(D);
+                if (!loc) continue;
+                auto StartLoc = loc->first;
+                auto EndLoc = loc->second;
+                *OS << " -> " << StartLoc << "-" << EndLoc;
             }
             *OS << "\n";
         }
@@ -219,10 +252,10 @@ private:
     DiffLineManager DLM;
     CallGraph CG;
     IncInfoCollectASTVisitor IncVisitor;
-    std::unordered_map<const Decl *, std::pair<unsigned int, unsigned int>> CGToRange;
     std::string OutputPath;
     std::deque<Decl *> LocalTUDecls;
     std::unordered_set<const Decl *> FunctionsNeedReanalyze;
+    Preprocessor &PP;
 };
 
 class IncInfoCollectAction : public clang::ASTFrontendAction {
@@ -231,7 +264,7 @@ public:
     OutputPath(outputPath), DiffPath(diffPath), IncOpt(incOpt) {}
 
     std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &CI, llvm::StringRef file) override {
-        return std::make_unique<IncInfoCollectConsumer>(&CI.getASTContext(), OutputPath, DiffPath, IncOpt);
+        return std::make_unique<IncInfoCollectConsumer>(CI, OutputPath, DiffPath, IncOpt);
     }
 
 private:

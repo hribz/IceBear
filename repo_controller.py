@@ -68,16 +68,28 @@ def get_local_repo_commit_parents(repo_dir: str, commit: str) -> list:
     # return parent commits
     return [commit.hexsha for commit in repo.head.commit.parents]
 
+class RepoParser(ArgumentParser):
+    def __init__(self):
+        super().__init__()
+        self.parser.add_argument('--repo', type=str, dest='repo', help='Only analyse specific repos.')
+
 def main(args):
-    parser = ArgumentParser()
+    parser = RepoParser()
     opts = parser.parse_args(args)
     env = Environment(opts)
-    # repo_list = 'repos/repos.json'
-    repo_list = 'repos/test_grpc.json'
-    # repo_list = 'repos/test_ffmpeg.json'
+    repos = 'repos/repos.json'
+    test_repos = 'repos/test_grpc.json'
+    FFmpeg = 'repos/test_ffmpeg.json'
+    grpc = 'repos/test_grpc.json'
+    ica_demo = 'repos/test_ica_demo.json'
+
+    repo_list = ica_demo
+
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    result_file = f'repos/result/result_{opts.inc}_{timestamp}.csv'
-    result_file_specific = f'repos/result/result_specific_{opts.inc}_{timestamp}.csv'
+    result_file = f'repos/result/{opts.inc}_{timestamp}_result.csv'
+    result_file_specific = f'repos/result/{opts.inc}_{timestamp}_result_specific.csv'
+    # result_file = 'repos/result/result_all.csv'
+    # result_file_specific = 'repos/result/result_all_specific.csv'
     
     with open(repo_list, 'r') as f:
         repo_json = json.load(f)
@@ -93,6 +105,8 @@ def main(args):
 
     for repo in repo_json:
         repo_name = repo["project"]
+        if opts.repo and opts.repo != repo_name:
+            continue
         build_type = repo["build_type"]
         default_options = repo["config_options"] if repo.get("config_options") else []
         os.chdir(env.PWD)
@@ -108,6 +122,7 @@ def main(args):
                     continue
             status = STATUS.NORMAL
             if checkout_target_commit(abs_repo_path, commit_sha):
+                logger.info(f"[Git Checkout] checkout {repo_name} to {commit_sha}")
                 if Repo is None:
                     # Analysis first commit as baseline.
                     Repo = Repository(repo_name, abs_repo_path, env, build_root=f"{abs_repo_path}_build", default_options=default_options,

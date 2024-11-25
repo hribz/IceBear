@@ -3,6 +3,7 @@ import multiprocessing as mp
 import subprocess as proc
 from abc import ABC, abstractmethod
 import os
+import concurrent.futures
 
 from IncAnalysis.analyzer_config import *
 from IncAnalysis.file_in_cdb import FileInCDB, FileKind
@@ -24,12 +25,20 @@ class Analyzer(ABC):
         for file in self.file_list:
             makedir(os.path.dirname(file.csa_file))
         ret = True
+        
         # with mp.Pool(self.analyzer_config.env.analyze_opts.jobs) as p:
         #     for retcode in p.map(self.analyze_one_file, [i for i in self.file_list]):
         #         ret = ret and retcode
         
         # Open one process in every thread to simulate multi-process.
-        return process_file_list(self.analyze_one_file, self.file_list, self.analyzer_config.env.analyze_opts.jobs)
+        ret = True
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.analyzer_config.env.analyze_opts.jobs) as executor:
+            futures = [executor.submit(self.analyze_one_file, file) for file in self.file_list]
+
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()  # 获取任务结果，如果有的话
+                ret = ret and result
+        return ret
     
     def get_analyzer_name(self):
         return self.__class__.__name__
@@ -80,7 +89,9 @@ class CppCheck(Analyzer):
         # Add file specific args.
         if self.analyzer_config.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             if file.parent.incrementable:
-                commands.extend(['-Xanalyzer', f'-analyze-function-file={file.get_file_path(FileKind.RF)}'])
+                if not file.is_new():
+                    # Do func/inline level incremental analysis when file is not new.
+                    commands.extend(['-Xanalyzer', f'-analyze-function-file={file.get_file_path(FileKind.RF)}'])
             if self.analyzer_config.env.inc_mode == IncrementalMode.InlineLevel:
                 commands.extend(['-Xanalyzer', f'-analyzer-dump-fsum={file.get_file_path(FileKind.FS)}'])
         with proc.Popen(commands, cwd=file.compile_command.directory) as p:

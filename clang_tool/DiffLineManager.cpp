@@ -14,36 +14,29 @@ void DiffLineManager::Initialize(std::string &DiffPath, std::string mainFilePath
         llvm::errs() << "Failed to open " << DiffPath << ".\n";
         return ;
     }
-    std::string jsonStr((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    file.close();
-    llvm::Expected<llvm::json::Value> jsonValue = llvm::json::parse(jsonStr);
-    if (!jsonValue) {
-        llvm::errs() << "Failed to parse JSON.\n";
-        return ;
-    }
 
-    auto GlobalDiffLines = jsonValue->getAsObject();
-
-    if (GlobalDiffLines) {
-        // printJsonObject(*GlobalDiffLines);
-        if (auto diff_array = GlobalDiffLines->getArray(MainFilePath)) {
-            DiffLines = std::vector<std::pair<int, int>>();
-            for (auto line: *diff_array) {
-                auto line_arr = line.getAsArray();
-                auto line_start = (*line_arr)[0].getAsInteger();
-                auto line_count = (*line_arr)[1].getAsInteger();
-                if (line_start && line_count) {
-                    auto pair = std::make_pair<int, int>(*line_start, *line_count);
-                    DiffLines->push_back(pair);
-                }
-            }
-        } else if (auto new_file = GlobalDiffLines->getInteger(MainFilePath)) {
+    std::string line;
+    DiffLines = std::vector<std::pair<int, int>>();
+    while (std::getline(file, line)) {
+        if (line == "new") {
             DiffLines = std::nullopt;
             llvm::outs() << MainFilePath << " is new file.\n";
+            break;
+        }
+        if (line.empty()) {
+            continue;
+        }
+
+        int x1, y1, line_start, line_count;
+        char leftParen, rightParen, space;
+        if (std::sscanf(line.c_str(), "%d,%d %d,%d", &x1, &y1, &line_start, &line_count) != 4) {
+            llvm::errs() << "Error parsing line: " << line << "";
         } else {
-            llvm::errs() << MainFilePath << " has no diff lines information.\n";
+            auto pair = std::make_pair(line_start, line_count);
+            DiffLines->push_back(pair);
         }
     }
+    file.close();
 }
 
 std::optional<std::pair<int, int>> DiffLineManager::StartAndEndLineOfDecl(const Decl *D) {

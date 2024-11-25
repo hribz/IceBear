@@ -20,6 +20,14 @@ public:
 
     std::optional<std::pair<int, int>> StartAndEndLineOfDecl(const Decl *);
 
+    bool isNewFile() {
+        return !DiffLines;
+    }
+
+    bool isNoChange() {
+        return DiffLines && DiffLines->empty();
+    }
+
     static void printJsonObject(const llvm::json::Object &);
 
     static void printJsonValue(const llvm::json::Value &);

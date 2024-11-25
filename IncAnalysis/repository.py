@@ -61,8 +61,6 @@ class Repository:
         # 3. extract inc info
         if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             config.extract_inc_info()
-            config.parse_call_graph()
-            config.parse_functions_changed()
         # 4. prepare for CSA
         if self.env.ctu:
             config.generate_efm()
@@ -71,8 +69,6 @@ class Repository:
         if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             config.propagate_reanalyze_attr()
         config.analyze()
-        if self.env.inc_mode == IncrementalMode.InlineLevel:
-            config.parse_function_summaries()
 
     def process_every_config(self, sessions, **kwargs):
         if not self.running_status:
@@ -80,6 +76,8 @@ class Repository:
         for config in self.configurations:
             if isinstance(sessions, list):
                 for session in sessions:
+                    if session is None:
+                        continue
                     getattr(config, session.__name__)(**kwargs)
                     if config.session_times[session.__name__] == SessionStatus.Failed:
                         print(f"Session {session.__name__} failed, stop all sessions.")
@@ -95,14 +93,10 @@ class Repository:
 
     def build_every_config(self):
         self.process_every_config(Configuration.configure)
-        self.preprocess_every_config(Configuration.build)
+        self.process_every_config(Configuration.build)
 
     def extract_ii_every_config(self):
-        self.process_every_config([
-            Configuration.extract_inc_info,
-            Configuration.parse_call_graph,
-            Configuration.parse_functions_changed
-        ])
+        self.process_every_config(Configuration.extract_inc_info)
 
     def diff_every_config(self):
         self.process_every_config(Configuration.diff_with_other, other=self.default_config)
@@ -111,15 +105,18 @@ class Repository:
         self.process_every_config(Configuration.preprocess_repo)
 
     def generate_efm_for_every_config(self):
-        self.process_every_config(Configuration.generate_efm)
-        self.process_every_config(Configuration.merge_efm)
+        if self.env.ctu:
+            self.process_every_config(Configuration.generate_efm)
+            self.process_every_config(Configuration.merge_efm)
 
     def analyze_for_every_config(self):
-        self.process_every_config([
+        analyze_sessions = [
             Configuration.propagate_reanalyze_attr,
-            Configuration.analyze,
-            Configuration.parse_function_summaries
-        ])
+            Configuration.analyze
+        ]
+        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+            analyze_sessions[0] = None
+        self.process_every_config(analyze_sessions)
 
     def session_summary(self):
         ret = f"name: {self.name}\nsrc: {self.src_path}\n"

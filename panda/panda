@@ -483,8 +483,8 @@ def CompilerAction(opts, ccdb, action):
             action.inopt[-1] += input
             arguments += action.inopt
         else:
-            arguments.append(action.outopt)
-            arguments.append(output)
+            arguments.append(action.inopt)
+            arguments.append(input)
 
     if action.hasOutput:
         output = action.getOutputName(opts.output, ccdb)
