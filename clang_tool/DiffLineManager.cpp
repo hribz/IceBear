@@ -6,7 +6,7 @@ void DiffLineManager::Initialize(std::string &DiffPath, std::string mainFilePath
     MainFilePath = mainFilePath;
 
     if (DiffPath.empty()) {
-        llvm::errs() << "No diff lines information.\n";
+        // llvm::errs() << "No diff lines information.\n";
         return ;
     }
     std::ifstream file(DiffPath);

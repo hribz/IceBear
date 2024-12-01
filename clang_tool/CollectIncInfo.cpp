@@ -88,6 +88,7 @@ public:
         if (DLM.isNoChange()) {
             // If there is no change in this file, just use old call graph.
             // DO NOTHING.
+            llvm::errs() << DLM.MainFilePath << " has no change, do nothing.\n";
             return;
         }
 
@@ -101,6 +102,7 @@ public:
         DumpCallGraph();
         if (DLM.isNewFile()) {
             // If this is a new file, we just output its callgraph.
+            llvm::errs() << DLM.MainFilePath << " is new, do not analyze changed functions.\n";
             return;
         }
         

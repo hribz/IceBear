@@ -32,10 +32,10 @@ public:
 
     static void printJsonValue(const llvm::json::Value &);
 
+    std::string MainFilePath;
 private:
     // empty means no change, nullopt means new file.
     // We should consider no diff info as no change.
     std::optional<std::vector<std::pair<int, int>>> DiffLines; 
-    std::string MainFilePath;
     const clang::SourceManager &SM;
 };
