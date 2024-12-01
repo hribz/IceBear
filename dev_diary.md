@@ -316,3 +316,26 @@ int main () {
   -      grpc(1316/1724)   FFmpeg(11/2048)
   - j24     21.680 s           7.351 s
   - -r      244.457 s          0.380 s
+
+# 2024/11/26
+## 问题
+- 当某些方法未被使用，并且发生了修改的情况下，会出现`CallGraph`无法找到changed function的情况。
+## 解决方案
+- 这种情况应当在`CollectIncInfo`时进行处理，因为生成的`CallGraph`可能并不完整，需要找到那些被忽略的`CallExpr`，包括生命周期上的隐式析构，虚函数，函数指针等不确定的情况，CSA是具备处理这三种情况的能力的，所以必须处理这几种情况：
+  - 对于虚函数和函数指针：一种最保守的做法是将出现了这类`CallExpr`的函数都标记为changed。
+  - 对于隐式析构函数调用，他们仅出现在CFG上，需要考虑是否值得为此生成CFG，或者仅仅去记录使用了对应class的函数，认为它们都可能调用析构函数，不过这样的开销过大。
+## 发现
+- `FFmpeg`项目出现了不`configure & build`的情况下，`preprocess`得到的文件不同的情况，例如`version.c.i`中`avutil_configuration`返回的字符串记录了`configure`时的配置项，该配置项保存在宏`FFMPEG_CONFIGURATION`内，并且该项目不能做到完全`out of tree`的构建，所以后续每次`preprocess`时，读取的都是最后一次`configure`生成的`config.h`中的宏。因此第一次构建每个commit版本的项目时，出现了一些diff file，这些diff file都是因为`configure`的差异引起的，并不是commit本身修改的代码，后续跳过`configure & build`的情况下，显示这几个版本的预处理后文件没有差别。
+- 这就引申出一个新的问题，为什么checkout不同的commit之后，预处理后的文件没有区别？以`FFmpeg aad40fed3376f52006eb519833650a80ab115198`为例，修改了`libavutil/vulkan.c`文件，但是该文件并没有在`compile_commands.json`中出现，换言之当前配置下没有被编译，这也是为什么需要在多配置下进行代码检测。
+- 此外，推测`ISSTA 2024`的那篇综述之所以CSA检测的BUG数目较少，原因可能为：
+  - CSA没有开启CTU
+  - CSA默认配置下没有编译到bug文件，而flawfinder不依赖于编译就能进行检测，codeql确实也需要先编译再检测
+
+# 2024/11/27
+## 解决方案
+- 尝试实现`update_mode`的`Configuration`，有如下步骤要实现：
+  - 首先，维护一个增量变化的`Configuration`
+  - 对于每次更新，可选择`configure & build` 或者仅执行 `build`
+  - 读取`compile_commmands.json`，更新`file_list`
+  - 根据`file_list`执行`preprocess & diff`任务
+  - 根据`diff_file_list`执行后续准备工作以及执行分析任务

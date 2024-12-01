@@ -1,5 +1,6 @@
 import os
 from subprocess import CompletedProcess, run
+import subprocess
 from typing import List, Dict
 from enum import Enum, auto
 
@@ -130,14 +131,14 @@ class FileInCDB:
         self.file_name: str = compile_command.file
         self.status = FileStatus.NEW
         self.csa_file: str = str(self.parent.csa_path) + self.file_name
-        # self.diff_info: DiffResult = None
         self.cf_num: int = 0
         self.has_cf = False # File has .cf.
-        self.cg_node_num = 0
         # self.call_graph: CallGraph = None
+        self.cg_node_num = 'Skip'
         self.has_cg = False # File has .cg.
-        self.rf_num = 0
+        self.rf_num = 'All'
         self.has_rf = False # Propogate reanalyze attribute(if needed) successfully.
+        self.fs_num = 'Skip'
         self.has_fs = False # Analysis finished successfully.
         self.efm: Dict[str, str] = {}
         self.compile_command: CompileCommand = compile_command
@@ -221,6 +222,7 @@ class FileInCDB:
         if process.returncode == 0 or process.returncode == 1:
             if process.returncode == 0:
                 # There is no change between this file and baseline.
+                self.status = FileStatus.UNCHANGED
                 return True
             self.status = FileStatus.CHANGED
             # Don't record diff_info anymore, but write them to correspond files.
@@ -233,6 +235,22 @@ class FileInCDB:
             logger.error(f"[Diff Files Failed] stdout: {process.stdout}\n stderr: {process.stderr}")
             return False
         return True
+    
+    def extract_inc_info(self) -> bool:
+        commands = [self.parent.env.EXTRACT_II]
+        commands.append(self.prep_file)
+        if self.parent.incrementable:
+            commands.extend(['-diff', self.diff_info_file])
+        if self.parent.env.ctu:
+            commands += '-ctu'
+        commands += ['--', '-w'] + self.compile_command.arguments + ['-D__clang_analyzer__']
+        ii_script = ' '.join(commands)
+        try:
+            process = run(ii_script, shell=True, capture_output=True, text=True, check=True)
+            if self.parent.env.analyze_opts.verbose:
+                logger.info(f"[File Inc Info Success] {ii_script}\n {process.stdout} {process.stderr}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"[File Inc Info Failed] {ii_script}\n stdout: {e.stdout}\n stderr: {e.stderr}")
 
     def parse_cg_file(self) -> CallGraph:
         # .cg file format: 
@@ -270,6 +288,7 @@ class FileInCDB:
     def parse_cf_file(self) -> list:
         cf_file = self.get_file_path(FileKind.CF)
         if not cf_file or not os.path.exists(cf_file):
+            logger.error(f"[Parse CF File] It's seems no functions changed, check if {cf_file} exists.")
             return None
         functions_changed = []
         self.has_cf = True
@@ -277,10 +296,10 @@ class FileInCDB:
             for line in f.readlines():
                 line = line.strip()
                 functions_changed.append(line)
-        self.cf_num += len(functions_changed)
+        self.cf_num = len(functions_changed)
         return functions_changed
     
-    def parse_fs_file(self) -> Dict:
+    def parse_fs_file(self) -> Dict[str, FunctionSummary]:
         # .fs file format
         # func_name
         # TotalBasicBlocks,InlineChecked,MayInline,TimesInlined
@@ -300,11 +319,21 @@ class FileInCDB:
                 if is_func:
                     func_name = line
                 else:
-                    fs = ",".split(line)
+                    fs = line.split(",")
                     fs = [int(i) for i in fs]
                     function_summaries[func_name] = FunctionSummary(fs)
                 is_func = (not is_func)
+        self.fs_num = len(function_summaries)
         return function_summaries
+    
+    def output_reanalyzed_functions(self, functions_need_reanalyzed):
+        self.rf_num = len(functions_need_reanalyzed)
+        rf_path = self.get_file_path(FileKind.RF)
+        makedir(os.path.dirname(rf_path))
+        with open(rf_path, 'w') as f:
+            for fname in functions_need_reanalyzed:
+                f.write(fname + '\n')
+        self.has_rf = True
 
     def propagate_reanalyze_attribute_without_fs(self, functions_changed: List[str], call_graph: CallGraph):
         # Without function summary information, we have to mark all caller as reanalyzed.
@@ -323,6 +352,7 @@ class FileInCDB:
                 call_graph.mark_as_reanalye(node)
                 for caller in node.callers:
                     worklist.append(caller)
+        self.output_reanalyzed_functions(call_graph.functions_need_reanalyzed)
 
     def propagate_reanalyze_attribute(self):
         if self.is_new():
@@ -333,7 +363,6 @@ class FileInCDB:
         functions_changed = self.parse_cf_file()
 
         if not functions_changed:
-            logger.error(f"[Propagate Func Reanalyze] It's seems no functions changed, check if {self.get_file_path(FileKind.CF)} exists.")
             return
         
         # Step 2:Parse call graph file.
@@ -346,7 +375,9 @@ class FileInCDB:
             return
         
         # Step 3:Parse function summaries.
-        baseline_fs = self.baseline_file.parse_fs_file()
+        baseline_fs: Dict[FunctionSummary] = self.baseline_file.parse_fs_file()
+        if baseline_fs is None:
+            return
 
         # logger.debug(f"[propagate_reanalyze_attribute] Dump CallGraph\n{self.call_graph.__repr__()}")
         # logger.debug(f"[propagate_reanalyze_attribute] Dump Baseline CG\n{baseline_cg_with_fs.__repr__()}")
@@ -381,23 +412,14 @@ class FileInCDB:
                 if node.should_reanalyze:
                     continue
                 call_graph.mark_as_reanalye(node)
-                node_in_baseline_cg = baseline_cg_with_fs.get_node_if_exist(node.fname)
-                if node_in_baseline_cg:
-                    for caller in node.callers:
-                        if node_in_baseline_cg.in_callers(caller.fname):
-                            if caller.fname in node_in_baseline_cg.inline_callers:
-                                worklist.append(caller)
-                        else:
-                            worklist.append(caller)
+                fs_in_baseline: FunctionSummary = baseline_fs.get(node.fname)
+                if fs_in_baseline:
+                    if not fs_in_baseline.ok_to_ignore():
+                        worklist.extend(node.callers)
                 else:
                     # New function node, don't need to consider its inline information.
                     for caller in node.callers:
                         worklist.append(caller)
         # Step 4:Output functions need reanalyze.
-        self.rf_num += len(call_graph.functions_need_reanalyzed)
-        rf_path = self.get_file_path(FileKind.RF)
-        makedir(os.path.dirname(rf_path))
-        with open(rf_path, 'w') as f:
-            for fname in call_graph.functions_need_reanalyzed:
-                f.write(fname + '\n')
-        self.has_rf = True
+        self.output_reanalyzed_functions(call_graph.functions_need_reanalyzed)
+        

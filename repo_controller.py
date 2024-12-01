@@ -1,15 +1,15 @@
-from datetime import datetime
 from git import Repo
 import argparse
 import sys
 import pandas as pd
 import json
+import subprocess
+from datetime import datetime, timedelta
 
 from IncAnalysis.repository import Repository, BuildType
 from IncAnalysis.utils import *
 from IncAnalysis.environment import *
 from IncAnalysis.logger import logger
-import subprocess
 from IncAnalysis.utils import add_to_csv
 
 def get_repo_csv(csv_path: str) -> pd.DataFrame:
@@ -37,7 +37,7 @@ def checkout_target_commit(repo_dir: str, commit: str) -> bool:
 
     try:
         repo.git.checkout(commit)
-        return update_submodules(repo_dir)
+        return True
 
     except Exception as e:
         print(f"error while checking out commit.\n{e}")
@@ -58,6 +58,11 @@ def update_submodules(repo_dir: str):
         print(f"error while updating submodules.\n{e}")
         return False
 
+def get_head_commit_date(repo_dir: str):
+    assert os.path.isabs(repo_dir)
+    repo = Repo(repo_dir)
+    return datetime.fromtimestamp(repo.head.commit.committed_date).date()
+
 def get_local_repo_commit_parents(repo_dir: str, commit: str) -> list:
     assert os.path.isabs(repo_dir)
     repo = Repo(repo_dir)
@@ -68,10 +73,45 @@ def get_local_repo_commit_parents(repo_dir: str, commit: str) -> list:
     # return parent commits
     return [commit.hexsha for commit in repo.head.commit.parents]
 
+def get_recent_n_daily_commits(repo_dir: str, n: int, branch):
+    assert n>=0
+    assert os.path.isabs(repo_dir)
+    repo = Repo(repo_dir)
+    repo_name = os.path.basename(repo_dir)
+    commits_dir = f"{repo_dir}_commits"
+    makedir(commits_dir)
+    later_commit = None
+    later_commit_date = None
+    daily_commits = []
+    for commit in repo.iter_commits(branch):
+        commit_date = datetime.fromtimestamp(commit.committed_date).date()
+        if later_commit is None:
+            later_commit = commit
+            later_commit_date = commit_date
+            daily_commits.append(commit.hexsha)
+        else:
+            time_delta =  later_commit_date - commit_date
+            if time_delta >= timedelta(days=1):
+                daily_commits.append(commit.hexsha)
+                later_commit_file = f"{commits_dir}/{repo_name}_{later_commit_date}_{later_commit.hexsha[:6]}.diff"
+                if not os.path.exists(later_commit_file):
+                    with open(later_commit_file, 'w') as f:
+                        f.write(f"Old Date: {commit.committed_datetime}\nOld Commit: {commit.hexsha}\nNew Date: {later_commit.committed_datetime}\n"+\
+                                f"New Commit: {later_commit.hexsha}\nAuthor: {later_commit.author}\nMessage:\n{later_commit.message}\n")
+                        diff = repo.git.diff(commit.hexsha, later_commit.hexsha)
+                        f.write(diff)
+                later_commit = commit
+                later_commit_date = commit_date
+        if len(daily_commits) >= n:
+            break
+    daily_commits.reverse()
+    return daily_commits
+
 class RepoParser(ArgumentParser):
     def __init__(self):
         super().__init__()
         self.parser.add_argument('--repo', type=str, dest='repo', help='Only analyse specific repos.')
+        self.parser.add_argument('--daily', type=int, default=10, dest='daily', help='Analyse n daily commits.')
 
 def main(args):
     parser = RepoParser()
@@ -83,11 +123,10 @@ def main(args):
     grpc = 'repos/test_grpc.json'
     ica_demo = 'repos/test_ica_demo.json'
 
-    repo_list = ica_demo
+    repo_list = repos
 
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    result_file = f'repos/result/{opts.inc}_{timestamp}_result.csv'
-    result_file_specific = f'repos/result/{opts.inc}_{timestamp}_result_specific.csv'
+    result_file = f'repos/result/{opts.inc}_{env.timestamp}_result.csv'
+    result_file_specific = f'repos/result/{opts.inc}_{env.timestamp}_result_specific.csv'
     # result_file = 'repos/result/result_all.csv'
     # result_file_specific = 'repos/result/result_all_specific.csv'
     
@@ -105,32 +144,36 @@ def main(args):
 
     for repo in repo_json:
         repo_name = repo["project"]
-        if opts.repo and opts.repo != repo_name:
+        repo_dir = Path(env.PWD / f"repos/{repo_name}")
+        if opts.repo and opts.repo != repo_name and opts.repo != os.path.basename(repo_dir):
             continue
         build_type = repo["build_type"]
         default_options = repo["config_options"] if repo.get("config_options") else []
+        branch = repo["branch"]
         os.chdir(env.PWD)
-        repo_dir = Path(env.PWD / f"repos/{repo_name}")
         abs_repo_path = str(repo_dir.absolute())
         print(abs_repo_path)
 
-        for commit in repo["commits"]:
-            commit_sha = commit["hash"]
-            if Repo is None:
-                if not clone_project(repo_name):
-                    status = STATUS.CLONE_FAILED
-                    continue
+        if Repo is None:
+            if not clone_project(repo_name):
+                status = STATUS.CLONE_FAILED
+                continue
+            update_submodules(repo_dir)
+
+        commits = get_recent_n_daily_commits(repo_dir, opts.daily, branch) if opts.daily>0 else [commit['hash'] for commit in repo['commits']]
+        for commit_sha in commits:
             status = STATUS.NORMAL
             if checkout_target_commit(abs_repo_path, commit_sha):
                 logger.info(f"[Git Checkout] checkout {repo_name} to {commit_sha}")
+                commit_date = get_head_commit_date(repo_dir)
                 if Repo is None:
                     # Analysis first commit as baseline.
                     Repo = Repository(repo_name, abs_repo_path, env, build_root=f"{abs_repo_path}_build", default_options=default_options,
-                                    build_dir_name=f"build_0_{commit_sha[:6]}", default_build_type=build_type)
+                                    build_dir_name=f"build_{commit_date}_{commit_sha[:6]}", default_build_type=build_type)
                     Repo.process_one_config(Repo.configurations[-1])
                 else:
                     # Analysis subsequent commit incrementally.
-                    Repo.add_configuration(default_options, build_dir_name=f"build_{len(Repo.configurations)}_{commit_sha[:6]}")
+                    Repo.add_configuration(default_options, build_dir_name=f"build_{commit_date}_{commit_sha[:6]}")
                     Repo.process_one_config(Repo.configurations[-1])
             else:
                 status = STATUS.CHECK_FAILED

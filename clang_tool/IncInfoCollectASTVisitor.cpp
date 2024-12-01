@@ -94,8 +94,9 @@ bool IncInfoCollectASTVisitor::TraverseDecl(Decl *D) {
     bool isFunctionDecl = isa<FunctionDecl>(D);
     if (isFunctionDecl) {
         auto FD = dyn_cast<FunctionDecl>(D);
-        if (!IncOpt.CTU && !FD->isDefined()) {
-            // Don't care functions don't have definition if under no-ctu mode.
+        if (!FD->isThisDeclarationADefinition()) {
+            // Just handle function definition, functions don't have definition
+            // maybe inlined only when ctu analysis.
             return true;
         }
         if (CountCanonicalDeclInSet(FunctionsNeedReanalyze, D) || DLM.isChangedDecl(D)) {

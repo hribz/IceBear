@@ -104,10 +104,6 @@ class Configuration:
         # Update One Configuration.
         self.update_mode = update_mode
         self.global_efm: Dict[str, FileInCDB] = None
-        if os.path.exists(self.compile_database):
-            # If there is compile_commands.json exists, we can prepare file list early.
-            # Otherwise, we need execute configure to generate compile_commands.json.
-            self.prepare_file_list()
         self.analyzers: List[Analyzer] = [
             CSA(CSAConfig(self.env, self.csa_path, self.env.analyze_opts.csa_config), self.file_list)
         ]
@@ -132,17 +128,41 @@ class Configuration:
         self.preprocess_diff_files_path = self.preprocess_path / 'preprocess_diff_files.txt'
         self.csa_path = self.workspace / 'csa-ctu-scan'
         self.diff_path = self.workspace / 'diff'
-        self.inc_info_path = self.workspace / 'inc_info'
         self.diff_files_path = self.workspace / 'diff_files.txt'
-            
+    
+    def process_this_config(self, skip_configure: bool):
+        logger.TAG = f"{self.name}/{os.path.basename(str(self.build_path))}"
+        # 1. selfure & build
+        if not skip_configure:
+            self.configure()
+        self.build()
+        self.prepare_file_list()
+        # 2. preprocess and diff
+        self.preprocess_repo()
+        if self.env.inc_mode != IncrementalMode.NoInc:
+            self.diff_with_other(self.baseline)
+        # 3. extract inc info
+        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+            self.extract_inc_info()
+        # 4. prepare for CSA
+        if self.env.ctu:
+            self.generate_efm()
+            self.merge_efm()
+        # 5. execute analyzers
+        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+            self.propagate_reanalyze_attr()
+        self.analyze()
+
     def prepare_file_list(self):
+        # Don't invoke this function after `configure & build` automatically,
+        # but invoke and make sure be invoked mannually before any other sessions.
         if not os.path.exists(self.compile_database):
             logger.error(f"[Prepare File List] Please make sure {self.compile_database} exists, may be you should `configure & build` first.")
             return
-        if self.file_list is not None:
-            return
-        self.file_list_index = {}
-        self.file_list  = []
+        if not self.update_mode:
+            self.file_list_index = {}
+            self.file_list  = []
+        self.abnormal_file_list = []
         with open(self.compile_database, 'r') as f:
             cdb = json.load(f)
             for (idx, ccdb) in enumerate(cdb):
@@ -245,7 +265,6 @@ class Configuration:
         except subprocess.CalledProcessError as e:
             self.session_times['configure'] = SessionStatus.Failed
             logger.error(f"[Repo Config Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
-        self.prepare_file_list()
         os.chdir(self.env.PWD)
     
     def build(self):
@@ -261,14 +280,14 @@ class Configuration:
         except subprocess.CalledProcessError as e:
             self.session_times['build'] = SessionStatus.Failed
             logger.error(f"[Repo Build Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
-        self.prepare_file_list()
         os.chdir(self.env.PWD)
 
     def preprocess_repo(self):
         start_time = time.time()
         # We use preprocessed file to get diff info, so this dir must remake.
-        remake_dir(self.preprocess_path, "[Preprocess Files DIR exists]")
-        # makedir(self.preprocess_path, "[Preprocess Files DIR exists]")
+        # remake_dir(self.preprocess_path, "[Preprocess Files DIR exists]")
+        # We don't diff -r preprocess dir anymore, no need to remake dir.
+        makedir(self.preprocess_path, "[Preprocess Files DIR exists]")
 
         with open(self.compile_database, 'r') as f:
             json_file = json.load(f)
@@ -331,41 +350,9 @@ class Configuration:
             logger.error(f"[Extract Inc Info] can't extract inc info without file {self.compile_database}")
             return
         start_time = time.time()
-        # remake_dir(self.inc_info_path, "[Inc Info Files DIR exists]")
-        makedir(self.inc_info_path, "[Inc Info Files DIR exists]")
-        plugin_path = self.inc_info_path / 'cg_plugin.json'
-        with open(plugin_path, 'w') as f:
-            plugin = self.env.example_clang_tool_plugin.copy()
-            plugin['action']['title'] = 'Extract Inc Info'
-            plugin['action']['tool'] = self.env.EXTRACT_II
-            plugin['action']['args'] = ''
-            plugin['action']['inopt'] = "-diff="
-            plugin['action']['extname_inopt'] = '.txt'
-            if self.env.ctu:
-                plugin['action']['args'].append('-ctu')
-            plugin['action']['extname'] = ""
-            plugin['action']['stream'] = ''
-            json.dump(plugin, f, indent=4)
-
-        commands = self.env.DEFAULT_PANDA_COMMANDS.copy()
-        if self.env.analyze_opts.verbose:
-            commands.extend(['--verbose'])
-        commands.extend(['--plugin', str(plugin_path)])
-        commands.extend(['-f', str(self.preprocess_compile_database)])
-        commands.extend(['-o', str(self.inc_info_path)])
-        if self.incrementable:
-            commands.extend(['--file-list', f"{self.preprocess_diff_files_path}"])
-        
-        extract_ii_script = ' '.join(commands)
-        logger.debug("[Extract Inc Info Script] " + extract_ii_script)
-        try:
-            process = run(extract_ii_script, shell=True, capture_output=True, text=True, check=True)
-            self.session_times['extract_inc_info'] = time.time() - start_time
-            if self.env.analyze_opts.verbose:
-                logger.info(f"[Extract Inc Info Success] {process.stdout} {process.stderr}")
-        except subprocess.CalledProcessError as e:
-            self.session_times['extract_inc_info'] = SessionStatus.Failed
-            logger.error(f"[Extract Inc Info Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
+        makedir(self.preprocess_path, "[Inc Info Files DIR exists]")
+        process_file_list(FileInCDB.extract_inc_info, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
+        self.session_times['extract_inc_info'] = time.time() - start_time
 
     def generate_efm(self):
         start_time = time.time()
@@ -461,8 +448,8 @@ class Configuration:
         if not self.env.analyze_opts.udp:
             self.diff_path = self.preprocess_path
             return
-        remake_dir(self.diff_path, "[Diff Files DIR exists]")
-        # makedir(self.diff_path, "[Diff Files DIR exists]")
+        # remake_dir(self.diff_path, "[Diff Files DIR exists]")
+        makedir(self.diff_path, "[Diff Files DIR exists]")
         with mp.Pool(self.env.analyze_opts.jobs) as p:
             p.map(replace_loc_info, [((file.prep_file, file.diff_file) if file.prep_file else (None, file.file_name)) for file in self.file_list])
 
@@ -512,7 +499,7 @@ class Configuration:
             return
         start_time = time.time()
         self.session_times['propagate_reanalyze_attr'] = SessionStatus.Failed
-        process_file_list(FileInCDB.propagate_reanalyze_attribute(), self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
+        process_file_list(FileInCDB.propagate_reanalyze_attribute, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
         logger.info(f"[Propagate Reanalyze Attr] Propagate reanalyze attribute successfully.")
         self.session_times['propagate_reanalyze_attr'] = time.time() - start_time
 
@@ -520,7 +507,7 @@ class Configuration:
         changed_function_num = 0
         self.diff_file_with_no_cf = 0
         for file in self.diff_file_list:
-            if file.cf_num:
+            if file.cf_num and isinstance(file.cf_num, int):
                 changed_function_num += (file.cf_num)
             else:
                 self.diff_file_with_no_cf += 1
@@ -530,7 +517,7 @@ class Configuration:
         reanalyze_function_num = 0
         self.diff_file_with_no_cg = 0
         for file in self.diff_file_list:
-            if file.rf_num:
+            if file.rf_num and isinstance(file.rf_num, int):
                 reanalyze_function_num += file.rf_num
             else:
                 self.diff_file_with_no_cg += 1
@@ -571,14 +558,15 @@ class Configuration:
         for file in self.file_list:
             # file, status, cg nodes num, cf num, rf num, fs num
             data = [file.file_name, str(file.status), 0, 0, 0, 0]
-            if file.has_cg:
-                data[2] = (file.cg_node_num)
-            if file.has_cf:
-                data[3] = (file.cf_num)
-            if file.has_rf:
-                data[4] = (file.rf_num)
-            if file.has_fs:
-                data[5] = 1
+            if not file.has_cg:
+                # Parse CG maybe skipped.
+                file.parse_cg_file()
+            data[2] = (file.cg_node_num)
+            data[3] = (file.cf_num)
+            data[4] = (file.rf_num)
+            if not file.has_fs:
+                file.parse_fs_file()
+            data[5] = (file.fs_num)
             datas.append(data)
             if file.status == FileStatus.NEW:
                 new_file_num += 1

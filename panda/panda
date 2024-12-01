@@ -227,11 +227,18 @@ class CompilerActionControl:
 
 class ClangToolActionControl:
     def __init__(self, title, tool, args, extname=None, stdout=None,
-            stderr=None):
+            stderr=None, extname_inopt=None, inopt=None):
         self.title = title
         self.tool = tool
         self.args = args
         self.extname = extname
+        if inopt:
+            self.hasInput = True
+            self.inopt = inopt
+            self.extname_inopt = extname_inopt if extname_inopt is not None else ''
+        else:
+            self.hasInput = False
+
         self.stdout = stdout
         self.stderr = stderr
         assert not (self.stdout and self.stderr), \
@@ -245,6 +252,9 @@ class ClangToolActionControl:
         tool = GetIndex(action, 'tool', 'action')
         args = GetIndex(action, 'args', 'action')
         extname = GetIndexOrNone(action, 'extname')
+        extname_inopt = GetIndexOrNone(action, 'extname_inopt')
+        inopt = GetIndexOrNone(action, 'inopt')
+
         stdout, stderr = None, None
         if extname:
             stream = GetIndex(action, 'stream', 'action')
@@ -255,12 +265,15 @@ class ClangToolActionControl:
             if not stdout and not stderr:
                 raise SyntaxError('Invalid value for index "stream" in action')
         return ClangToolActionControl(
-                title, tool, args, extname, stdout, stderr)
+                title, tool, args, extname, stdout, stderr, extname_inopt, inopt)
 
     def getOutputName(self, outdir, ccdb):
         assert os.path.isabs(ccdb.file), "'file' in cdb unit is not abspath"
         return outdir + ccdb.file + self.extname
 
+    def getInputName(self, outdir, ccdb):
+        assert os.path.isabs(ccdb.file), "'file' in cdb unit is not abspath"
+        return outdir + ccdb.file + self.extname_inopt
 
 def ParsePlugins(plugins):
     ret = []
@@ -539,6 +552,17 @@ def ClangToolAction(opts, ccdb, action):
     actionargs = []
     for i in action.args:
         actionargs.append(i.replace('/path/to/output', opts.output))
+    
+    if action.hasInput:
+        input = action.getInputName(opts.output, ccdb)
+        if isinstance(action.inopt, list):
+            # -analyze-function-file=input_file
+            action.inopt[-1] += input
+            actionargs += action.inopt
+        else:
+            actionargs.append(action.inopt)
+            actionargs.append(input)
+
     arguments = [action.tool, ccdb.file] + actionargs + ['--', '-w'] + \
              ccdb.arguments
     log('!: ' + json.dumps(arguments))

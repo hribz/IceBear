@@ -3,6 +3,7 @@ from pathlib import Path
 import shutil
 import argparse
 from enum import Enum, auto
+from datetime import datetime
 
 class IncrementalMode(Enum):
     NoInc = auto()
@@ -23,7 +24,7 @@ class Environment:
             self.inc_mode = IncrementalMode.InlineLevel
         
         self.ctu = opts.analyze == 'ctu'
-
+        self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.prepare_env_path()
 
     def prepare_env_path(self):

@@ -13,8 +13,13 @@ public:
     // C1's copy ctor declared at here, argument `other` has type `const C1 &`
     // in writing.
     C1(const C1 &other);
-
     C1(int *other) : a(other) {}
+
+    // case 5: 
+    // These function not be used in this file, call graph won't contain these
+    // functions, but collectIncInfo will mark these as changed.
+    C1& operator=(const C1&other) = default;
+    void function_never_used() {}
 
     int *a;
   };

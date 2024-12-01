@@ -63,7 +63,7 @@ class CSA(Analyzer):
         commands.extend(self.analyzer_config.analyze_args())
         # Add file specific args.
         if self.analyzer_config.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
-            if file.parent.incrementable:
+            if file.parent.incrementable and file.has_rf:
                 commands.extend(['-Xanalyzer', f'-analyze-function-file={file.get_file_path(FileKind.RF)}'])
             if self.analyzer_config.env.inc_mode == IncrementalMode.InlineLevel:
                 commands.extend(['-Xanalyzer', f'-analyzer-dump-fsum={file.get_file_path(FileKind.FS)}'])
@@ -74,7 +74,7 @@ class CSA(Analyzer):
                 stderr = p.stderr.read().decode('utf-8') if p.stderr else ""
                 logger.error(f"[{self.get_analyzer_name()} Analyze Failed] {commands}\nstdout:\n{stdout}\nstderr:\n{stderr}")
             else:
-                logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")                
+                logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
         return ret == 0
     
 class CppCheck(Analyzer):

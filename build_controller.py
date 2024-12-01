@@ -17,7 +17,7 @@ from functools import partial
 from data_struct.reply import Reply
 from IncAnalysis.utils import *
 from IncAnalysis.environment import *
-from IncAnalysis.repository import Repository
+from IncAnalysis.repository import MultiConfigRepository
 from IncAnalysis.configuration import Option
 
 def main(args):
@@ -60,14 +60,15 @@ def main(args):
         }
     ]
 
-    repo_list: List[Repository] = []
+    repo_list: List[MultiConfigRepository] = []
     env = Environment(opts)
 
     for repo in repo_info:
-        repo_db = Repository(repo['name'], repo['src_path'], env, options_list=repo['options_list'])
+        repo_db = MultiConfigRepository(repo['name'], repo['src_path'], env, options_list=repo['options_list'])
         repo_list.append(repo_db)
         logger.info('-------------BEGIN SUMMARY-------------\n')
-        repo_db.build_every_config()
+        # repo_db.build_every_config()
+        repo_db.prepare_file_list_every_config()
         repo_db.preprocess_every_config()
         repo_db.diff_every_config()
         repo_db.extract_ii_every_config()

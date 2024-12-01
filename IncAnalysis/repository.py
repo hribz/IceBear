@@ -1,21 +1,21 @@
 from pathlib import Path
 from typing import List
 import os
+from abc import ABC, abstractmethod
 
 from IncAnalysis.logger import logger
 from IncAnalysis.utils import * 
 from IncAnalysis.environment import *
 from IncAnalysis.configuration import Configuration, Option, BuildType
 
-class Repository:
+class Repository(ABC):
     name: str
     src_path: Path
     default_config: Configuration
-    configurations: List[Configuration]
     running_status: bool # whether the repository sessions should keep running
     env: Environment
 
-    def __init__(self, name, src_path, env: Environment, default_options: List[str] = [], options_list:List[List[str]]=None, 
+    def __init__(self, name, src_path, env: Environment, default_options: List[str] = [],
                  build_root = None, build_dir_name=None, default_build_type: str="cmake"):
         self.name = name
         self.src_path = Path(src_path).absolute()
@@ -27,7 +27,32 @@ class Repository:
         self.default_config = Configuration(self.name, self.src_path, self.env, default_options, 
                                             build_path=f"{self.build_root}/{build_dir_name}" if build_dir_name else f"{self.build_root}/build_0",
                                             build_type=self.default_build_type)
-        self.configurations = [self.default_config]
+
+    @abstractmethod
+    def process_one_config(self, config: Configuration):
+        pass
+    
+    @abstractmethod
+    def session_summary(self):
+        pass
+    
+    @abstractmethod
+    def summary_to_csv_specific(self):
+        pass
+    
+    @abstractmethod
+    def summary_to_csv(self):
+        pass
+    
+    @abstractmethod
+    def file_status_to_csv(self):
+        pass
+
+class MultiConfigRepository(Repository):
+    def __init__(self, name, src_path, env: Environment, default_options: List[str] = [], options_list:List[List[str]]=None, 
+                 build_root = None, build_dir_name=None, default_build_type: str="cmake"):
+        super().__init__(name, src_path, env, default_options, build_root, build_dir_name, default_build_type)
+        self.configurations: List[Configuration] = [self.default_config]
         if options_list:
             for idx, options in enumerate(options_list):
                 self.configurations.append(
@@ -50,30 +75,11 @@ class Repository:
         self.extract_ii_every_config()
         self.generate_efm_for_every_config()
 
-    def process_one_config(self, config: Configuration):
-        # 1. configure & build
-        config.configure()
-        config.build()
-        # 2. preprocess and diff
-        config.preprocess_repo()
-        if self.env.inc_mode != IncrementalMode.NoInc:
-            config.diff_with_other(self.default_config)
-        # 3. extract inc info
-        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
-            config.extract_inc_info()
-        # 4. prepare for CSA
-        if self.env.ctu:
-            config.generate_efm()
-            config.merge_efm()
-        # 5. execute analyzers
-        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
-            config.propagate_reanalyze_attr()
-        config.analyze()
-
     def process_every_config(self, sessions, **kwargs):
         if not self.running_status:
             return
         for config in self.configurations:
+            logger.TAG = f"{config.name}/{os.path.basename(str(config.build_path))}"
             if isinstance(sessions, list):
                 for session in sessions:
                     if session is None:
@@ -90,10 +96,12 @@ class Repository:
                     self.running_status = False
                     return
 
-
     def build_every_config(self):
         self.process_every_config(Configuration.configure)
         self.process_every_config(Configuration.build)
+    
+    def prepare_file_list_every_config(self):
+        self.process_every_config(Configuration.prepare_file_list)
 
     def extract_ii_every_config(self):
         self.process_every_config(Configuration.extract_inc_info)
@@ -114,10 +122,10 @@ class Repository:
             Configuration.propagate_reanalyze_attr,
             Configuration.analyze
         ]
-        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+        if self.env.inc_mode.value < IncrementalMode.FuncitonLevel.value:
             analyze_sessions[0] = None
         self.process_every_config(analyze_sessions)
-
+    
     def session_summary(self):
         ret = f"name: {self.name}\nsrc: {self.src_path}\n"
         for config in self.configurations:
@@ -162,6 +170,7 @@ class Repository:
         for (idx, config) in enumerate(self.configurations):
             config_data = [self.name, os.path.basename(config.build_path)]
             config_time = 0.0
+            build_time = 0.0
             inc_time = 0.0
             prepare_time = 0.0
             exe_csa_time = 0.0
@@ -174,9 +183,12 @@ class Repository:
                         prepare_time += exe_time
                     elif session == "configure":
                         config_time = exe_time
+                    elif session == "build":
+                        build_time = exe_time
                     elif session == "CSA":
                         exe_csa_time = exe_time
             config_data.append("%.3lf s" % config_time)
+            config_data.append("%.3lf s" % build_time)
             config_data.append("%.3lf s" % inc_time)
             config_data.append("%.3lf s" % prepare_time)
             config_data.append("%.3lf s" % exe_csa_time)
@@ -187,4 +199,18 @@ class Repository:
     def file_status_to_csv(self):
         for config in self.configurations:
             headers, data = config.file_status()
-            add_to_csv(headers, data, str(config.workspace / 'file_status.csv'))
+            add_to_csv(headers, data, str(config.workspace / f'file_status_{self.env.timestamp}.csv'))
+
+class UpdateConfigRepository(Repository):
+    def __init__(self, name, src_path, env: Environment, default_options: List[str] = [], 
+                 build_root = None, build_dir_name=None, default_build_type: str="cmake", can_skip_configure: bool = True):
+        super().__init__(name, src_path, env, default_options, build_root, build_dir_name, default_build_type)
+        self.can_skip_configure = can_skip_configure
+        self.init: bool = False # Baseline has init.
+    
+    def update(self, options=None):
+        self.process_one_config(self.default_config)
+
+    def process_one_config(self, config: Configuration):
+        config.process_this_config(self.can_skip_configure or self.init)
+        self.init = True
