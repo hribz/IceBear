@@ -6,7 +6,7 @@ import json
 import subprocess
 from datetime import datetime, timedelta
 
-from IncAnalysis.repository import Repository, BuildType
+from IncAnalysis.repository import UpdateConfigRepository, BuildType
 from IncAnalysis.utils import *
 from IncAnalysis.environment import *
 from IncAnalysis.logger import logger
@@ -152,6 +152,7 @@ def main(args):
         branch = repo["branch"]
         os.chdir(env.PWD)
         abs_repo_path = str(repo_dir.absolute())
+        workspace = f"{abs_repo_path}_workspace/{env.timestamp}_{env.analyze_opts.inc}"
         print(abs_repo_path)
 
         if Repo is None:
@@ -166,30 +167,23 @@ def main(args):
             if checkout_target_commit(abs_repo_path, commit_sha):
                 logger.info(f"[Git Checkout] checkout {repo_name} to {commit_sha}")
                 commit_date = get_head_commit_date(repo_dir)
+                version_stamp = f"{commit_date}_{commit_sha[:6]}"
                 if Repo is None:
                     # Analysis first commit as baseline.
-                    Repo = Repository(repo_name, abs_repo_path, env, build_root=f"{abs_repo_path}_build", default_options=default_options,
-                                    build_dir_name=f"build_{commit_date}_{commit_sha[:6]}", default_build_type=build_type)
-                    Repo.process_one_config(Repo.configurations[-1])
+                    Repo = UpdateConfigRepository(repo_name, abs_repo_path, env, build_root=f"{abs_repo_path}_build", default_options=default_options,
+                                    version_stamp=version_stamp, default_build_type=build_type, can_skip_configure=False, workspace=workspace)
                 else:
-                    # Analysis subsequent commit incrementally.
-                    Repo.add_configuration(default_options, build_dir_name=f"build_{commit_date}_{commit_sha[:6]}")
-                    Repo.process_one_config(Repo.configurations[-1])
+                    Repo.update_version(version_stamp)
+                Repo.process_one_config()
             else:
                 status = STATUS.CHECK_FAILED
                 logger.error(f"[Checkout Commit] {repo_name} checkout to {commit_sha} failed!")
         if Repo:
-            logger.info('---------------END SUMMARY-------------\n'+Repo.session_summary())
-            headers, data = Repo.summary_to_csv_specific()
-            add_to_csv(headers, data, result_file_specific, init_csv)
-            headers, data = Repo.summary_to_csv()
-            add_to_csv(headers, data, result_file, init_csv)
-            init_csv = False
-            Repo.file_status_to_csv()
+            logger.info('---------------END SUMMARY-------------\n'+Repo.session_summaries)
             Repo = None
 
     if Repo:
-        logger.info('---------------END SUMMARY-------------\n'+Repo.session_summary())
+        logger.info('---------------END SUMMARY-------------\n'+Repo.session_summaries)
         headers, data = Repo.summary_to_csv_specific()
         add_to_csv(headers, data, result_file_specific)
         headers, data = Repo.summary_to_csv()

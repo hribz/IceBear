@@ -139,10 +139,6 @@ public:
     }
 
     void DumpCallGraph() {
-        if (!CG.size()) {
-            return;
-        }
-
         std::ostream* OS = &std::cout;
         // `outFile`'s life time should persist until dump finished.
         // And don't create file if don't need to dump to file.
@@ -208,10 +204,7 @@ public:
     }
 
     void DumpFunctionsNeedReanalyze() {
-        if (FunctionsNeedReanalyze.empty()) {
-            return;
-        }
-
+        // Although there maybe no function changed, we still create .cf file.
         std::ostream* OS = &std::cout;
         std::shared_ptr<std::ofstream> outFile;
         if (IncOpt.DumpToFile) {

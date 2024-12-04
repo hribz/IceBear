@@ -69,21 +69,34 @@ class Configuration:
     diff_origin_file_list: List[str]
     incrementable: bool
     session_times: Dict
-    # We traverse file_list most of the time, so we don't use dict[str, FileInCDB]
-    file_list_index: Dict[str, int]
-    # Files in workspace, only record files exists and has normal extname.
-    file_list: List[FileInCDB]
-    abnormal_file_list: List[FileInCDB]
 
-    def __init__(self, name, src_path, env, options: List[str], args=None, build_path=None, 
+    def __init__(self, name, src_path, env, options: List[str], version_stamp, args=None, build_path=None, workspace_path=None,
                  baseline=None, update_mode:bool=False, build_type: BuildType=BuildType.CMAKE):
         self.name = name
         self.src_path = src_path
         self.env = env
-        self.update_build_path(build_path)
-        self.file_list_index = None
-        self.file_list = None
-        self.abnormal_file_list = []
+        self.version_stamp = version_stamp
+        # Record all files' latest version in repo history.
+        self.global_file_dict: Dict[str, FileInCDB] = {}
+        # We traverse file_list most of the time, so we don't use Dict[str, FileInCDB].
+        self.file_list_index: Dict[str, int] = {}
+        # Files in workspace, only record files exists and has normal extname.
+        self.file_list: List[FileInCDB] = []
+        self.merged_files = 0
+        self.abnormal_file_list: List[FileInCDB] = []
+        if build_path is None:
+            self.build_path = self.src_path / 'build/build_0'
+        else:
+            tmp_path = Path(build_path)
+            if tmp_path.is_absolute():
+                self.build_path = tmp_path
+            else:
+                self.build_path = self.src_path / build_path
+        self.workspace = Path(workspace_path)
+        if workspace_path is None:
+            self.workspace = self.build_path / 'workspace_for_cdb'
+        makedir(str(self.workspace))
+        self.update_workspace_path()
         if args:
             self.args = args
         else:
@@ -103,44 +116,44 @@ class Configuration:
             self.baseline = baseline
         # Update One Configuration.
         self.update_mode = update_mode
-        self.global_efm: Dict[str, FileInCDB] = None
+        self.global_efm: Dict[str, FileInCDB] = {}
         self.analyzers: List[Analyzer] = [
-            CSA(CSAConfig(self.env, self.csa_path, self.env.analyze_opts.csa_config), self.file_list)
+            CSA(CSAConfig(self.env, self.csa_path, self.csa_output_path, self.env.analyze_opts.csa_config), self.file_list)
         ]
 
-    def update_build_path(self, build_path=None):
-        if build_path is None:
-            self.build_path = self.src_path / 'build/build_0'
-        else:
-            tmp_path = Path(build_path)
-            if tmp_path.is_absolute():
-                self.build_path = tmp_path
-            else:
-                self.build_path = self.src_path / build_path
+    def update_workspace_path(self):
         self.cmake_api_path = self.build_path / '.cmake/api/v1'
         self.query_path = self.cmake_api_path / 'query'
         self.reply_path = self.cmake_api_path / 'reply'
         self.compile_database = self.build_path / 'compile_commands.json'
-        self.workspace = self.build_path / 'workspace_for_cdb'
-        self.preprocess_path = self.workspace / 'preprocess'
+        self.preprocess_path = self.workspace / 'preprocess' / self.version_stamp
         self.compile_commands_used_by_pre = self.preprocess_path / 'compile_commands_used_by_pre.json'
         self.preprocess_compile_database = self.preprocess_path / 'preprocess_compile_commands.json'
         self.preprocess_diff_files_path = self.preprocess_path / 'preprocess_diff_files.txt'
+        self.diff_files_path = self.preprocess_path / 'diff_files.txt'
         self.csa_path = self.workspace / 'csa-ctu-scan'
-        self.diff_path = self.workspace / 'diff'
-        self.diff_files_path = self.workspace / 'diff_files.txt'
+        self.csa_output_path = self.csa_path / 'csa-reports' / self.version_stamp
+        self.diff_path = self.workspace / 'diff' / self.version_stamp
     
-    def process_this_config(self, skip_configure: bool):
-        logger.TAG = f"{self.name}/{os.path.basename(str(self.build_path))}"
-        # 1. selfure & build
-        if not skip_configure:
+    def update_version(self, version_stamp):
+        self.version_stamp = version_stamp
+        if self.update_mode:
+            self.update_workspace_path()
+            for analyzer in self.analyzers:
+                if isinstance(analyzer, CSA):
+                    analyzer.analyzer_config.output_path = self.csa_output_path
+
+    def process_this_config(self, can_skip_configure: bool, has_init: bool):
+        logger.TAG = f"{self.name}/{self.version_stamp}"
+        # 1. configure & build
+        if self.build_type == BuildType.CMAKE or not (can_skip_configure and has_init):
             self.configure()
         self.build()
         self.prepare_file_list()
         # 2. preprocess and diff
         self.preprocess_repo()
         if self.env.inc_mode != IncrementalMode.NoInc:
-            self.diff_with_other(self.baseline)
+            self.diff_with_other(self.baseline, not has_init)
         # 3. extract inc info
         if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             self.extract_inc_info()
@@ -159,10 +172,11 @@ class Configuration:
         if not os.path.exists(self.compile_database):
             logger.error(f"[Prepare File List] Please make sure {self.compile_database} exists, may be you should `configure & build` first.")
             return
-        if not self.update_mode:
-            self.file_list_index = {}
-            self.file_list  = []
+        self.file_list = []
+        self.file_list_index = {}
+        self.diff_file_list = []
         self.abnormal_file_list = []
+        self.merged_files = 0
         with open(self.compile_database, 'r') as f:
             cdb = json.load(f)
             for (idx, ccdb) in enumerate(cdb):
@@ -171,8 +185,19 @@ class Configuration:
                 if file_in_cdb.status == FileStatus.UNKNOWN or file_in_cdb.status == FileStatus.UNEXIST:
                     self.abnormal_file_list.append(file_in_cdb)
                 else:
-                    self.file_list_index[compile_command.file] = len(self.file_list)
-                    self.file_list.append(file_in_cdb)
+                    same_file_idx = self.file_list_index.get(compile_command.file)
+                    if same_file_idx is not None:
+                        # There maybe same file(different output) in one compile_commands.json,
+                        # we only record latest compile command. 
+                        self.file_list[same_file_idx] = file_in_cdb
+                        self.merged_files += 1
+                    else:
+                        self.file_list_index[compile_command.file] = len(self.file_list)
+                        self.file_list.append(file_in_cdb)
+        for file_in_cdb in self.file_list:
+            # Update global_file_dict after file_list has been initialzed,
+            # make sure there is no duplicate file name.
+            self.global_file_dict[file_in_cdb.file_name] = file_in_cdb
 
     def get_file(self, file_path: str, report=True) -> FileInCDB:
         idx = self.file_list_index.get(file_path, None)
@@ -289,16 +314,18 @@ class Configuration:
         # We don't diff -r preprocess dir anymore, no need to remake dir.
         makedir(self.preprocess_path, "[Preprocess Files DIR exists]")
 
-        with open(self.compile_database, 'r') as f:
-            json_file = json.load(f)
-            for ccdb in json_file:
-                if ccdb.get("command"):
-                    ccdb["command"] += ' -D__clang_analyzer__ '
-                else:
-                    ccdb["arguments"].append('-D__clang_analyzer__')
-            pre_cdb = open(self.compile_commands_used_by_pre, 'w')
-            json.dump(json_file, pre_cdb, indent=4)
-            pre_cdb.close()
+        cdb = []
+        for file in self.file_list:
+            prep_arguments = file.compile_command.arguments + ['-D__clang_analyzer__']
+            cdb.append({
+                "directory": file.compile_command.directory,
+                "command": " ".join([file.compile_command.compiler] + prep_arguments),
+                "file": file.file_name
+            })
+        pre_cdb = open(self.compile_commands_used_by_pre, 'w')
+        json.dump(cdb, pre_cdb, indent=4)
+        pre_cdb.close()
+
         plugin_path = self.preprocess_path / 'compile_action.json'
         with open(plugin_path, 'w') as f:
             plugin = self.env.example_compiler_action_plugin.copy()
@@ -351,7 +378,11 @@ class Configuration:
             return
         start_time = time.time()
         makedir(self.preprocess_path, "[Inc Info Files DIR exists]")
-        process_file_list(FileInCDB.extract_inc_info, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
+        ret = process_file_list(FileInCDB.extract_inc_info, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
+        if ret:
+            logger.info(f"[Extract Inc Info Success]")
+        else:
+            logger.error(f"[Extract Inc Info Failed]")
         self.session_times['extract_inc_info'] = time.time() - start_time
 
     def generate_efm(self):
@@ -380,16 +411,16 @@ class Configuration:
     
     def merge_efm(self):
         start_time = time.time()
-        self.global_efm = {}
         if self.incrementable:
-            # Combine baseline efm and new efm, reserve `usr`s which not appear in new efm
-            # cover `usr`s updated in new efm
-            baseline_edm_file = self.baseline.csa_path / 'externalDefMap.txt'
-            if not baseline_edm_file.exists():
-                logger.error(f"[Generate EFM Files Failed] Please make sure baseline Configuration has generate_efm successfully,\
-                             can not find {baseline_edm_file}")
-                self.session_times['generate_efm'] = SessionStatus.Failed
-                return
+            if not self.update_mode:
+                # Combine baseline efm and new efm, reserve `usr`s which not appear in new efm
+                # cover `usr`s updated in new efm
+                baseline_edm_file = self.baseline.csa_path / 'externalDefMap.txt'
+                if not baseline_edm_file.exists():
+                    logger.error(f"[Generate EFM Files Failed] Please make sure baseline Configuration has generate_efm successfully,\
+                                can not find {baseline_edm_file}")
+                    self.session_times['generate_efm'] = SessionStatus.Failed
+                    return
             
             def GenerateFinalExternalFunctionMapIncrementally(opts, file_list: List[FileInCDB], origin_edm=None):
                 output = os.path.join(str(self.csa_path), 'externalDefMap.txt')
@@ -415,12 +446,18 @@ class Configuration:
                                     logger.error(f"[Generate Global EFM] Can't find {path} in compile database!")
                 with open(output, 'w') as fout:
                     for usr in self.global_efm:
-                        if self.global_efm[usr].is_changed():
+                        if self.update_mode:
                             fout.write('%s %s\n' % (usr, self.global_efm[usr].get_file_path(FileKind.AST)))
                         else:
-                            fout.write('%s %s\n' % (usr, self.global_efm[usr].get_baseline_file().get_file_path(FileKind.AST)))
-
-            GenerateFinalExternalFunctionMapIncrementally(self.env.analyze_opts, self.diff_file_list, str(baseline_edm_file))
+                            if self.global_efm[usr].is_changed():
+                                fout.write('%s %s\n' % (usr, self.global_efm[usr].get_file_path(FileKind.AST)))
+                            else:
+                                fout.write('%s %s\n' % (usr, self.global_efm[usr].get_baseline_file().get_file_path(FileKind.AST)))
+            
+            if self.update_mode:
+                GenerateFinalExternalFunctionMapIncrementally(self.env.analyze_opts, self.diff_file_list, None)
+            else:
+                GenerateFinalExternalFunctionMapIncrementally(self.env.analyze_opts, self.diff_file_list, str(baseline_edm_file))
         else:
             with open(self.csa_path / 'externalDefMap.txt', 'r') as f:
                 for line in f.readlines():
@@ -453,15 +490,19 @@ class Configuration:
         with mp.Pool(self.env.analyze_opts.jobs) as p:
             p.map(replace_loc_info, [((file.prep_file, file.diff_file) if file.prep_file else (None, file.file_name)) for file in self.file_list])
 
-    def diff_with_other(self, other):
+    def diff_with_other(self, other, skip_diff: bool = False):
         # Replace all preprocess location info to empty lines.
         self.prepare_diff_dir()
-        if self == other:
-            logger.info(f"[Skip Diff] Repo {str(self.build_path)} is the same as {str(other.build_path)}")
+        if skip_diff:
+            logger.info(f"[Skip Diff] Skip first diff.")
             self.session_times['diff_with_other'] = SessionStatus.Skipped
             return
+        if not self.update_mode:
+            if self == other:
+                logger.info(f"[Skip Diff] Repo {str(self.build_path)} is the same as {str(other.build_path)}")
+                self.session_times['diff_with_other'] = SessionStatus.Skipped
+                return
         start_time = time.time()
-        self.baseline = other
         if self.env.analyze_opts.udp:
             if not self.diff_path.exists():
                 logger.error(f"Preprocess files DIR {self.diff_path} not exists")
@@ -471,7 +512,7 @@ class Configuration:
                 return
         self.status = 'DIFF'
         # We just need to diff files in compile database.
-        process_file_list(FileInCDB.diff_with_baseline, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
+        process_file_list(FileInCDB.diff_with_baseline, self.file_list, self.env.analyze_opts.jobs)
         for file in self.file_list:
             if file.is_changed():
                 self.diff_file_list.append(file)
@@ -545,7 +586,7 @@ class Configuration:
         return ret
 
     def file_status(self):
-        headers = ['file', 'status', 'cg nodes', 'changed functions', 'reanalyze functions', 'function summaries']
+        headers = ['file', 'status', 'analyze time(s)', 'cg nodes', 'changed functions', 'reanalyze functions', 'function summaries']
         datas = []
         unexists_number, unknown_number = 0, 0
         for ab_file in self.abnormal_file_list:
@@ -556,17 +597,16 @@ class Configuration:
                 unknown_number += 1
         new_file_num, changed_file_num, unchanged_file_num = 0, 0, 0
         for file in self.file_list:
-            # file, status, cg nodes num, cf num, rf num, fs num
-            data = [file.file_name, str(file.status), 0, 0, 0, 0]
-            if not file.has_cg:
-                # Parse CG maybe skipped.
-                file.parse_cg_file()
-            data[2] = (file.cg_node_num)
-            data[3] = (file.cf_num)
-            data[4] = (file.rf_num)
-            if not file.has_fs:
-                file.parse_fs_file()
-            data[5] = (file.fs_num)
+            # file, status, analyze time, cg nodes num, cf num, rf num, baseline fs num
+            data = [file.file_name, str(file.status)]
+            if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value and file.is_changed():
+                # Parse CG maybe skipped if it's new file or no function changed.
+                # Or just because inc_mode < function level.
+                if not file.has_cg:
+                    file.parse_cg_file()
+            if self.env.inc_mode == IncrementalMode.InlineLevel and not file.baseline_has_fs:
+                file.parse_baseline_fs_file()
+            data.extend([file.analyze_time, file.cg_node_num, file.cf_num, file.rf_num, file.basline_fs_num])
             datas.append(data)
             if file.status == FileStatus.NEW:
                 new_file_num += 1
@@ -574,6 +614,6 @@ class Configuration:
                 changed_file_num += 1
             elif file.status == FileStatus.UNCHANGED:
                 unchanged_file_num += 1
-        datas.append([f"unexist files:{unexists_number}", f"unknown files:{unknown_number}", 
+        datas.append([f"unexist files:{unexists_number}", f"unknown files:{unknown_number}", f"merged files:{self.merged_files}",
                       f"new files:{new_file_num}", f"changed files:{changed_file_num}", f"unchanged files:{unchanged_file_num}"])
         return headers, datas

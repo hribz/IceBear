@@ -6,11 +6,12 @@ from pathlib import Path
 from IncAnalysis.environment import Environment, IncrementalMode
 
 class AnalyzerConfig(ABC):
-    def __init__(self, env: Environment, workspace: Path, config_file: str = None):
+    def __init__(self, env: Environment, workspace: Path, output_path: Path, config_file: str = None):
         super().__init__()
         self.json_config = {}
         self.env: Environment = env
         self.workspace: Path = workspace
+        self.output_path = output_path
         if config_file is not None:
             self.init_from_file(config_file)
     
@@ -26,36 +27,21 @@ csa_default_config = {
     "CSAOptions": [
         # "-analyzer-disable-all-checks",
         # "-analyzer-opt-analyze-headers",
-        "-analyzer-inline-max-stack-depth=5",
-        "-analyzer-inlining-mode=noredundancy"
+        # "-analyzer-inline-max-stack-depth=5",
+        # "-analyzer-inlining-mode=noredundancy",
+        "-analyzer-stats" # Output time cost.
     ],
     "CSAConfig": [
-        "crosscheck-with-z3=true",
-        "mode=deep",
-        "ipa=dynamic-bifurcate",
-        "crosscheck-with-z3=true",
-        "ctu-import-cpp-threshold=8",
-        "ctu-import-threshold=24",
-        "ipa-always-inline-size=3"
+        # "mode=deep",
+        # "ipa=dynamic-bifurcate",
+        # "crosscheck-with-z3=false",
+        # "ctu-import-cpp-threshold=8",
+        # "ctu-import-threshold=24",
+        # "ipa-always-inline-size=3"
     ]
 }
 
 cppcheck_default_config = {
-    "CSAOptions": [
-        # "-analyzer-disable-all-checks",
-        # "-analyzer-opt-analyze-headers",
-        "-analyzer-inline-max-stack-depth=5",
-        "-analyzer-inlining-mode=noredundancy"
-    ],
-    "CSAConfig": [
-        "crosscheck-with-z3=true",
-        "mode=deep",
-        "ipa=dynamic-bifurcate",
-        "crosscheck-with-z3=true",
-        "ctu-import-cpp-threshold=8",
-        "ctu-import-threshold=24",
-        "ipa-always-inline-size=3"
-    ]
 }
 
 class IPAKind(Enum):
@@ -72,8 +58,8 @@ class IPAKind(Enum):
     IPAK_DynamicDispatchBifurcate = auto()
 
 class CSAConfig(AnalyzerConfig):
-    def __init__(self, env: Environment, csa_path: Path, config_file: str=None):
-        super().__init__(env, csa_path, config_file)
+    def __init__(self, env: Environment, csa_workspace: Path, csa_output_path: Path, config_file: str=None):
+        super().__init__(env, csa_workspace, csa_output_path, config_file)
         if not config_file:
             self.config_json = csa_default_config
         # Options may influence incremental analysis.
@@ -85,8 +71,8 @@ class CSAConfig(AnalyzerConfig):
         self.csa_options = self.config_json.get("CSAOptions")
         if self.csa_options:
             for cmd in self.csa_options:
-                cmd_pair = cmd.split("=")
-                if cmd_pair[0] == "-analyzer-opt-analyze-headers":
+                cmd = cmd.split()
+                if cmd == "-analyzer-opt-analyze-headers":
                     self.AnalyzeAll = True
         else:
             self.csa_options = []
@@ -120,10 +106,11 @@ class CSAConfig(AnalyzerConfig):
                 self.csa_config.append('display-ctu-progress=true')
 
     def analyze_args(self):
-        args = ['--analyze', '-o', str(self.workspace / 'csa-reports')]
+        args = ['--analyze', '-o', str(self.output_path)]
         for option in self.csa_options:
             args += ['-Xanalyzer', option]
-        args += ['-Xanalyzer', '-analyzer-config', '-Xanalyzer', ','.join(self.csa_config)]
+        if len(self.csa_config) > 0:
+            args += ['-Xanalyzer', '-analyzer-config', '-Xanalyzer', ','.join(self.csa_config)]
         return args
         
 class CppCheckConfig(AnalyzerConfig):

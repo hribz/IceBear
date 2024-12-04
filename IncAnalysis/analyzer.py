@@ -1,6 +1,7 @@
 from typing import List
 import multiprocessing as mp
-import subprocess as proc
+import subprocess
+from subprocess import run
 from abc import ABC, abstractmethod
 import os
 import concurrent.futures
@@ -46,6 +47,7 @@ class Analyzer(ABC):
 class CSA(Analyzer):
     def __init__(self, analyzer_config: CSAConfig, file_list: List[FileInCDB]):
         super().__init__(analyzer_config, file_list)
+        self.analyzer_config: CSAConfig
         env = self.analyzer_config.env
         self.compilers = {
             'c': env.MY_CLANG,
@@ -63,19 +65,28 @@ class CSA(Analyzer):
         commands.extend(self.analyzer_config.analyze_args())
         # Add file specific args.
         if self.analyzer_config.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+            if file.cf_num == 0 or file.rf_num == 0:
+                logger.info(f"[{self.get_analyzer_name()} No Functions] Don't need to analyze {file.file_name}")
+                return True
             if file.parent.incrementable and file.has_rf:
                 commands.extend(['-Xanalyzer', f'-analyze-function-file={file.get_file_path(FileKind.RF)}'])
             if self.analyzer_config.env.inc_mode == IncrementalMode.InlineLevel:
                 commands.extend(['-Xanalyzer', f'-analyzer-dump-fsum={file.get_file_path(FileKind.FS)}'])
-        with proc.Popen(commands, cwd=file.compile_command.directory) as p:
-            ret = p.wait()
-            if ret != 0:
-                stdout = p.stdout.read().decode('utf-8') if p.stdout else ""
-                stderr = p.stderr.read().decode('utf-8') if p.stderr else ""
-                logger.error(f"[{self.get_analyzer_name()} Analyze Failed] {commands}\nstdout:\n{stdout}\nstderr:\n{stderr}")
-            else:
-                logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
-        return ret == 0
+        csa_script = ' '.join(commands)
+        
+        process = run(csa_script, shell=True, capture_output=True, text=True, cwd=file.compile_command.directory)
+        logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {csa_script}")
+        if process.returncode == 0:
+            logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
+        else:
+            logger.error(f"[{self.get_analyzer_name()} Analyze Failed] {' '.join(commands)}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+        # Record time cost.
+        if process.stderr:
+            for line in process.stderr.splitlines():
+                if line.startswith("  Total Execution Time"):
+                    file.analyze_time = (line.split(' ')[5])
+                    break
+        return process.returncode == 0
     
 class CppCheck(Analyzer):
     def __init__(self, analyzer_config: CppCheckConfig, file_list: List[FileInCDB]):

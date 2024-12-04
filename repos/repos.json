@@ -1,0 +1,188 @@
+[
+    {
+        "project": "c-ares/c-ares",
+        "commits": [
+            {
+                "hash": "bfd59758545df82c2947cff429c6796dc3a15204",
+                "tag": "baseline"
+            },
+            {
+                "hash": "955df983d7f643d1b00aa433f31ca3ec7f86b4bd",
+                "tag": "baseline+3"
+            },
+            {
+                "hash": "e982924acee7f7313b4baa4ee5ec000c5e373c30",
+                "tag": "baseline+4"
+            },
+            {
+                "hash": "956b7ebf685c51442c9723767b7a85697ffbaf47",
+                "tag": "grpc No.2(ctu)"
+            },
+            {
+                "hash": "44c59a91c3f1c6a95592ce9ed92bb1bd3ac5838e",
+                "tag": "grpc No.3(ctu)"
+            }
+        ],
+        "build_type": "cmake",
+        "config_options": [],
+        "branch": "main"
+    },
+    {
+        "project": "madler/zlib",
+        "commits": [
+            {
+                "hash": "7d9c9d410a7f8c732fdb0cac2b268659d624a6b6",
+                "tag": "baseline"
+            },
+            {
+                "hash": "cbbd20302c6e3fb626bee5bd8b4932524049515c",
+                "tag": "baseline+1"
+            },
+            {
+                "hash": "cacf7f1d4e3d44d871b605da3b647f07d718623f",
+                "tag": "baseline+2"
+            },
+            {
+                "hash": "723e928b84b0adac84cc11ec5c075a45e1a79903",
+                "tag": "grpc No.8(ctu)"
+            }
+        ],
+        "build_type": "cmake",
+        "config_options": [],
+        "branch": "master"
+    },
+    {
+        "project": "grpc/grpc",
+        "commits": [
+            {
+                "hash": "v1.30.0",
+                "tag": "baseline"
+            },
+            {
+                "hash": "518ed1303c295f9c27e13dd8778ecabdaf9131e5",
+                "tag": "grpc No.132"
+            },
+            {
+                "hash": "2582018b2d4198c781fe55d98eae136622a55989",
+                "tag": "grpc No.172"
+            },
+            {
+                "hash": "5a9845607fe8244ed4f879c45b71f4bc1295a5d4",
+                "tag": "grpc No.172"
+            },
+            {
+                "hash": "f27a41db432de3126417bc4bdd9700acbf78ec41",
+                "tag": "grpc No.174"
+            }
+        ],
+        "build_type": "cmake",
+        "config_options": [],
+        "branch": "master"
+    },
+    {
+        "project": "xbmc/xbmcc",
+        "commits": [
+            {
+                "hash": "18.8-Leia",
+                "tag": "baseline"
+            },
+            {
+                "hash": "daefea21d9d1869b6298100244300e370712d552",
+                "tag": "xbmc No.5"
+            },
+            {
+                "hash": "88193f72d05f1a4104ea334ac953f7ed242a8a93",
+                "tag": "xbmc No.14"
+            },
+            {
+                "hash": "eb704d21c520fef13682823c5287b8635b0e6d83",
+                "tag": "xbmc No.113"
+            }
+        ],
+        "build_type": "cmake",
+        "config_options": [],
+        "branch": "master"
+    },
+    {
+        "project": "FFmpeg/FFmpeg",
+        "commits": [
+            {
+                "hash": "69cbda5770d2fb0d7f11de3a7ba0fea16c6b65b4",
+                "tag": "baseline"
+            },
+            {
+                "hash": "aad40fed3376f52006eb519833650a80ab115198",
+                "tag": "ffmpeg"
+            },
+            {
+                "hash": "ac3f69a4b91700075cc3b3379b428e62fbb68606",
+                "tag": "ffmpeg"
+            }
+        ],
+        "build_type": "configure",
+        "config_options": [
+            "--disable-x86asm"
+        ],
+        "branch": "master"
+    },
+    {
+        "project": "mirror/x264",
+        "commits": [
+            {
+                "hash": "982d32400f24e40573ac92d274d7d46eafdb9836",
+                "tag": "baseline"
+            },
+            {
+                "hash": "7ed753b10a61d0be95f683289dfb925b800b0676",
+                "tag": "x264"
+            },
+            {
+                "hash": "4613ac3c15fd75cebc4b9f65b7fb95e70a3acce1",
+                "tag": "x264"
+            }
+        ],
+        "build_type": "configure",
+        "config_options": [
+            "--disable-asm"
+        ],
+        "branch": "master"
+    },
+    {
+        "project": "mirror/busybox",
+        "commits": [
+            {
+                "hash": "08fb86726b508eb99502a6681da94395c4e4580c",
+                "tag": "baseline"
+            },
+            {
+                "hash": "b20b3790b428aab75449995d0866bad15879bc00",
+                "tag": "busybox"
+            },
+            {
+                "hash": "371fe9f71d445d18be28c82a2a6d82115c8af19d",
+                "tag": "busybox"
+            }
+        ],
+        "build_type": "kbuild",
+        "config_options": [
+            "defconfig"
+        ],
+        "branch": "master"
+    },
+    {
+        "project": "hribz/ica-demo",
+        "commits": [
+            {
+                "hash": "519595339a2698f708c0f95261194e2eba6d6215",
+                "tag": "baseline"
+            },
+            {
+                "hash": "e061e2e504ed0bb5441dbbe53eb548b6295f1e8e",
+                "tag": "ica-demo"
+            }
+        ],
+        "build_type": "cmake",
+        "config_options": [],
+        "branch": "master"
+    }
+]

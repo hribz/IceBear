@@ -18,17 +18,18 @@ class FileKind(Enum):
     CF = auto()
     RF = auto()
     FS = auto()
+    TM = auto()
 
 class FileStatus(Enum):
     # Abnormal status
     UNKNOWN = auto()     # File's extname is unknown.
     UNEXIST = auto()     # File does not exist.
     # Normal status
+    DELETED = auto()
     UNCHANGED = auto()
     CHANGED = auto()
     NEW = auto()
     DIFF_FAILED = auto() # Fail to get diff info, just consider it as new.     
-    DELETED = auto()
 
 class DiffResult:
     def __init__(self, file, baseline_file):
@@ -131,16 +132,17 @@ class FileInCDB:
         self.file_name: str = compile_command.file
         self.status = FileStatus.NEW
         self.csa_file: str = str(self.parent.csa_path) + self.file_name
-        self.cf_num: int = 0
+        self.cf_num = 'Unknown'
         self.has_cf = False # File has .cf.
         # self.call_graph: CallGraph = None
         self.cg_node_num = 'Skip'
         self.has_cg = False # File has .cg.
         self.rf_num = 'All'
         self.has_rf = False # Propogate reanalyze attribute(if needed) successfully.
-        self.fs_num = 'Skip'
-        self.has_fs = False # Analysis finished successfully.
+        self.basline_fs_num = 'Skip'
+        self.baseline_has_fs = False # Analysis finished successfully.
         self.efm: Dict[str, str] = {}
+        self.analyze_time = "Unknown"
         self.compile_command: CompileCommand = compile_command
         extname = ''
         if self.compile_command.language == 'c++':
@@ -164,13 +166,24 @@ class FileInCDB:
             self.status = FileStatus.UNEXIST
             return
         self.baseline_file: FileInCDB = None
-        if self.parent.baseline != self.parent:
-            # Find baseline file.
-            self.baseline_file = self.parent.baseline.get_file(self.file_name, False)
-            if self.baseline_file:
+        if self.parent.update_mode:
+            old_file = self.parent.global_file_dict.get(self.file_name)
+            if old_file is not None:
                 self.status = FileStatus.UNCHANGED
+                self.baseline_file = old_file
+                # We don't need old version file before baseline_file,
+                # so just deref its baseline_file and let GC collect file version older than it.
+                old_file.baseline_file = None
             else:
                 logger.debug(f"[FileInCDB Init] Find new file {self.file_name}")
+        else:
+            if self.parent.baseline != self.parent:
+                # Find baseline file.
+                self.baseline_file = self.parent.baseline.get_file(self.file_name, False)
+                if self.baseline_file:
+                    self.status = FileStatus.UNCHANGED
+                else:
+                    logger.debug(f"[FileInCDB Init] Find new file {self.file_name}")
     
     def is_new(self):
         return self.status == FileStatus.NEW or self.status == FileStatus.DIFF_FAILED
@@ -203,11 +216,13 @@ class FileInCDB:
             return (self.csa_file) + '.rf'
         elif kind == FileKind.FS:
             return (self.csa_file) + '.fs'
+        elif kind == FileKind.TM:
+            return (self.csa_file) + '.time'
         else:
             logger.error(f"[Get File Path] Unknown file kind {kind}")
 
     def diff_with_baseline(self) -> bool:
-        if not self.baseline_file:
+        if self.baseline_file is None:
             # This is a new file.
             with open(self.diff_info_file, 'w') as f:
                 f.write("new")
@@ -242,15 +257,16 @@ class FileInCDB:
         if self.parent.incrementable:
             commands.extend(['-diff', self.diff_info_file])
         if self.parent.env.ctu:
-            commands += '-ctu'
+            commands += ['-ctu']
         commands += ['--', '-w'] + self.compile_command.arguments + ['-D__clang_analyzer__']
         ii_script = ' '.join(commands)
         try:
             process = run(ii_script, shell=True, capture_output=True, text=True, check=True)
-            if self.parent.env.analyze_opts.verbose:
-                logger.info(f"[File Inc Info Success] {ii_script}\n {process.stdout} {process.stderr}")
+            logger.info(f"[File Inc Info Success] {ii_script}")
+            return True
         except subprocess.CalledProcessError as e:
             logger.error(f"[File Inc Info Failed] {ii_script}\n stdout: {e.stdout}\n stderr: {e.stderr}")
+            return False
 
     def parse_cg_file(self) -> CallGraph:
         # .cg file format: 
@@ -299,15 +315,16 @@ class FileInCDB:
         self.cf_num = len(functions_changed)
         return functions_changed
     
-    def parse_fs_file(self) -> Dict[str, FunctionSummary]:
+    def parse_baseline_fs_file(self) -> Dict[str, FunctionSummary]:
         # .fs file format
         # func_name
         # TotalBasicBlocks,InlineChecked,MayInline,TimesInlined
-        fs_file = self.get_file_path(FileKind.FS)
+        if self.baseline_file is None:
+            return None
+        fs_file = self.baseline_file.get_file_path(FileKind.FS)
         if not os.path.exists(fs_file):
             logger.error(f"[Parse FS File] Function Summary file {fs_file} doesn't exist.")
             return None
-        self.has_fs = True
         function_summaries: Dict = {}
         with open(fs_file, 'r') as f:
             is_func = True
@@ -323,7 +340,8 @@ class FileInCDB:
                     fs = [int(i) for i in fs]
                     function_summaries[func_name] = FunctionSummary(fs)
                 is_func = (not is_func)
-        self.fs_num = len(function_summaries)
+        self.baseline_has_fs = True
+        self.basline_fs_num = len(function_summaries)
         return function_summaries
     
     def output_reanalyzed_functions(self, functions_need_reanalyzed):
@@ -362,7 +380,11 @@ class FileInCDB:
         # Step 1:Parse changed functions file.
         functions_changed = self.parse_cf_file()
 
-        if not functions_changed:
+        if functions_changed is None:
+            return
+
+        if len(functions_changed) == 0:
+            self.output_reanalyzed_functions([])
             return
         
         # Step 2:Parse call graph file.
@@ -375,7 +397,7 @@ class FileInCDB:
             return
         
         # Step 3:Parse function summaries.
-        baseline_fs: Dict[FunctionSummary] = self.baseline_file.parse_fs_file()
+        baseline_fs: Dict[FunctionSummary] = self.parse_baseline_fs_file()
         if baseline_fs is None:
             return
 
@@ -413,7 +435,7 @@ class FileInCDB:
                     continue
                 call_graph.mark_as_reanalye(node)
                 fs_in_baseline: FunctionSummary = baseline_fs.get(node.fname)
-                if fs_in_baseline:
+                if fs_in_baseline is not None:
                     if not fs_in_baseline.ok_to_ignore():
                         worklist.extend(node.callers)
                 else:

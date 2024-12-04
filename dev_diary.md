@@ -319,11 +319,12 @@ int main () {
 
 # 2024/11/26
 ## 问题
-- 当某些方法未被使用，并且发生了修改的情况下，会出现`CallGraph`无法找到changed function的情况。
+- 当某些方法未被使用，不在`TopLevelDecls`之中，并且发生了修改的情况下，会出现`CallGraph`无法找到changed function的情况。
 ## 解决方案
 - 这种情况应当在`CollectIncInfo`时进行处理，因为生成的`CallGraph`可能并不完整，需要找到那些被忽略的`CallExpr`，包括生命周期上的隐式析构，虚函数，函数指针等不确定的情况，CSA是具备处理这三种情况的能力的，所以必须处理这几种情况：
   - 对于虚函数和函数指针：一种最保守的做法是将出现了这类`CallExpr`的函数都标记为changed。
   - 对于隐式析构函数调用，他们仅出现在CFG上，需要考虑是否值得为此生成CFG，或者仅仅去记录使用了对应class的函数，认为它们都可能调用析构函数，不过这样的开销过大。
+- 如果像上面这样处理，那么在`CollectIncInfo`就只需考虑`CallGraph`中的`Decl`，因为`CG`之外的`Decl`即使被标记为`changed`，也无法通过在`CG`上传播找到需要重分析的父节点。并且上方的保守策略可以保证不会漏掉需要重分析的函数。
 ## 发现
 - `FFmpeg`项目出现了不`configure & build`的情况下，`preprocess`得到的文件不同的情况，例如`version.c.i`中`avutil_configuration`返回的字符串记录了`configure`时的配置项，该配置项保存在宏`FFMPEG_CONFIGURATION`内，并且该项目不能做到完全`out of tree`的构建，所以后续每次`preprocess`时，读取的都是最后一次`configure`生成的`config.h`中的宏。因此第一次构建每个commit版本的项目时，出现了一些diff file，这些diff file都是因为`configure`的差异引起的，并不是commit本身修改的代码，后续跳过`configure & build`的情况下，显示这几个版本的预处理后文件没有差别。
 - 这就引申出一个新的问题，为什么checkout不同的commit之后，预处理后的文件没有区别？以`FFmpeg aad40fed3376f52006eb519833650a80ab115198`为例，修改了`libavutil/vulkan.c`文件，但是该文件并没有在`compile_commands.json`中出现，换言之当前配置下没有被编译，这也是为什么需要在多配置下进行代码检测。
@@ -336,6 +337,54 @@ int main () {
 - 尝试实现`update_mode`的`Configuration`，有如下步骤要实现：
   - 首先，维护一个增量变化的`Configuration`
   - 对于每次更新，可选择`configure & build` 或者仅执行 `build`
-  - 读取`compile_commmands.json`，更新`file_list`
+  - 读取`compile_commmands.json`，更新`file_list`，并维护一个`global_file_dict`，其中记录了每个文件名对应的最新版本的`FileInCDB`
   - 根据`file_list`执行`preprocess & diff`任务
   - 根据`diff_file_list`执行后续准备工作以及执行分析任务
+
+# 2024/12/02
+## 问题
+- 在CTU分析时，出现了`error: PCH file uses an older PCH format that is no longer supported`。经过分析发现，原因是`CSA`分析使用的clang版本和生成ast的clang版本不同，需要在`environment`初始化`PANDA_COMMAND`时调整clang版本。
+- 将`configuration.analyzers=[CSA(CSAConfig(...))]`放在`update_workspace_path()`函数当中，发现CSAConfig的`parse_config_file()`似乎被重复执行，导致CSA指令中存在重复的编译参数。
+- 进行CTU分析时输出`warning`：AST file shape change.
+
+# 2024/12/03
+## 问题
+- `compile_commands.json`中，同一个文件可能对应有多个`compile command`，因此使用`global_file_dict`时，使用`file name`作为索引可能不太准确，因为多个`compile command`会重复更新同一个`global_file_dict`。(昨天的AST shape问题也是因此)
+- `panda`在生成预处理文件时并不会考虑重复文件名的情况，只会用后出现的文件覆盖之前的文件。
+
+
+## 解决方案
+- 预处理`compile_commands.json`，每个文件保留一个`compile command`，但是该方法实际上改变了编译过程
+- 不只用文件名作为索引，而是`file + output`作为索引，但是`panda`生成预处理文件没有考虑这种情况。因此还是采用第1种方案。
+
+## collectIncInfo时间开销分析
+- 经过测试，22w行的预处理后文件`.../home/xiaoyu/cmake-analyzer/IncAnalyzer/repos/grpc/grpc/src/core/resolver/xds/xds_resolver.cc.ii`:
+  - 使用`collectIncInfo`进行处理时，只输出`CallGraph`需要`9.880s`,`CallGraph`的规模为10w行；
+  - 将所有行标记为change，输出cf文件需要`10.034s`(包括生成CG)，因此主要的时间开销在于**生成CG**，CF文件的规模为3.6w行。
+- 思考：实际上CSA分析过程种也需要生成CG，也就是说，整个执行流程生成了两次CG，并且生成CG的开销不小。能否将这两次生成CG的过程合并？
+
+## CSA时间开销分析
+- `grpc_inline_20241203_111640_specific`的`grpc 2024-10-30_265c7b`增量花费的时间异常地长，其中7个diff文件，6个无`changed functions`，最终仅确认8个函数需要重新分析。但是最终的分析时长却比`grpc_file_20241202_231314_specific`的分析时间还长，分别为`inline 51.117 s, file 38.710 s`。
+- 原因很可能是那次测试出现了问题1，目前修复了问题1，待检测结果是否正常。
+  - file时间比inline少确实是问题1的影响，但还不能确定与更改的`clang`是否也有关系（即使不指定rf的情况下，更改的`clang`可能仍会多花一些判断的时间，以及输出fs的时间）（后续测试发现，输出fs的时间非常短，基本可以忽略不计，rf的判断时间也应该非常短，因此更改的`clang`在没有大量rf的情况下，只会带来轻微的时间开销）
+  - 修复后的时间为`inline 51.981 s, file 51.382 s`，已无明显区别，但是inline的时间理应远少于file，因为cf为0。原因在于当changed functions数量为0时，直接跳过了后续解析cg, fs, 生成rf的过程。而在analyzer分析被设置为：rf不存在的情况下需要做全文件的分析。最终表现的效果是inline的时间与file相同，处理方式为当不存在changed functions时，生成一个空的rf文件
+- 将`collectIncInfo时间开销分析`部分得到的`3.6w`行的cf文件直接复制为对应的rf文件，用更改后的`clang`进行分析：
+  - `无rf，不输出fs`：Analyzer Time: 36.7218s, real time: 48.975s
+  - `无rf，但输出fs`：Analyzer Time: 36.5081s, real time: 48.702s
+  - `有rf，不输出fs`：Analyzer Time: 35.6839s, real time: 47.864s
+  - `有rf，并输出fs`：Analyzer Time: 37.3759s, real time: 50.030s
+  - 上面4种情况并无明显区别，可见`3.6w`行量级的rf带来的函数名判断开销其实很小。
+- 关闭CTU分析，并关闭更改的clang的rf和fs功能，尝试对比更改的`clang`和`clang-19`用时是否有差别：
+  - `更改的 clang`:  Analyzer Time: 36.8609s, real time: 47.459s
+  - `clang-19`：     Analyzer Time: 27.4325s, real time: 35.070s
+  - 时间差异过于明显，难道真的是因为`getModeForDecl`多加了一行判断？
+  - `把判断注释掉`：  Analyzer Time: 36.5321s, real time: 47.146s
+  - 注释与否的差别并不大，推测与`clang-19`时间差异大的原因是，`clang-19`是通过包管理安装在`/usr/bin`的，打包时的配置针对平台进行了定制，该`clang`本身就是比自行编译的clang更快。因此后续对比实验不使用`clang-19`进行对比，而是都使用自行编译的`clang`。
+
+# 2024/12/24
+## 问题
+- 昨天的测试看出，`collectIncInfo`最大的时间开销在于生成`CallGraph`，并且每次CSA分析需要重复一遍该过程。`grpc_inline_20241203_233452_specific`的`2024-10-23_d56c93`CSA的分析时间相对于`file`级别确实从`190s`降低到了`78s`，但是`inline`在`extract inc info`和`propagate reanalyze`分别花费了`76s`和`43s`，导致实际的时间开销并没有变少。
+- 并且，从inline得到的`file status`看来，292个文件有2个rf，1个文件有476个rf，并且所有文件的`Analyze time`都非常短(几乎为0s)，但是CSA的总时间却达到了`78s`。这并不是记录错误，而是`Analyze time`没有算上生成`CallGraph`的时间。这也是为什么`CSA`和`extract inc info`的耗时如此相似，因为时间都耗费在了`CallGraph`建立上。
+
+## 解决方案
+- 既然CSA分析时本身就需要生成`CallGraph`，能否把`extract inc info`和`propagate reanalyze`的步骤直接集成到`CSA`，令其解析完`CallGraph`后先进行`extract inc info`和`propagate reanalyze`的步骤。

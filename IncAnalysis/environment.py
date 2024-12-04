@@ -36,8 +36,8 @@ class Environment:
         # CSA revised version
         self.MY_CLANG = 'clang'
         self.MY_CLANG_PLUS_PLUS = 'clang++'
-        self.CLANG = 'clang-19'
-        self.CLANG_PLUS_PLUS = 'clang++-19'
+        self.CLANG = 'clang'
+        self.CLANG_PLUS_PLUS = 'clang++'
         self.example_compiler_action_plugin = {
             "comment": "Example plugin for Panda driver.",
             "type": "CompilerAction",
@@ -101,12 +101,17 @@ class Environment:
             if not self.MY_CLANG_PLUS_PLUS:
                 print('please ensure there is clang++ in your environment')
                 exit(1)
+        
         self.DEFAULT_PANDA_COMMANDS = [
             self.PANDA, 
             '-j', str(self.analyze_opts.jobs), '--print-execution-time',
-            '--cc', self.CLANG, 
-            '--cxx', self.CLANG_PLUS_PLUS
+            '--cc', self.MY_CLANG, 
+            '--cxx', self.MY_CLANG_PLUS_PLUS
         ]
+
+        if self.inc_mode.value <= IncrementalMode.FileLevel.value:
+            self.DEFAULT_PANDA_COMMANDS[5] = self.CLANG
+            self.DEFAULT_PANDA_COMMANDS[7] = self.CLANG_PLUS_PLUS
 
 
 class ArgumentParser:
