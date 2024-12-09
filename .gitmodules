@@ -1,0 +1,3 @@
+[submodule "llvm-project-ica"]
+	path = llvm-project-ica
+	url = https://github.com/hribz/llvm-project-ica.git
