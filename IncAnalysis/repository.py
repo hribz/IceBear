@@ -144,7 +144,7 @@ class MultiConfigRepository(Repository):
                 if isinstance(exe_time, SessionStatus):
                     config_data.append(str(exe_time._name_))
                 else:
-                    config_data.append("%.3lf s" % exe_time)
+                    config_data.append("%.3lf" % exe_time)
                 # if str(session) == 'diff_with_other' and idx == 0:
                 #     config_data.append('Skipped')
                 #     config_data.append('Skipped')
@@ -184,11 +184,11 @@ class MultiConfigRepository(Repository):
                         build_time = exe_time
                     elif session == "CSA":
                         exe_csa_time = exe_time
-            config_data.append("%.3lf s" % config_time)
-            config_data.append("%.3lf s" % build_time)
-            config_data.append("%.3lf s" % inc_time)
-            config_data.append("%.3lf s" % prepare_time)
-            config_data.append("%.3lf s" % exe_csa_time)
+            config_data.append("%.3lf" % config_time)
+            config_data.append("%.3lf" % build_time)
+            config_data.append("%.3lf" % inc_time)
+            config_data.append("%.3lf" % prepare_time)
+            config_data.append("%.3lf" % exe_csa_time)
             data.append(config_data)
 
         return headers, data
@@ -200,10 +200,11 @@ class MultiConfigRepository(Repository):
 
 class UpdateConfigRepository(Repository):
     def __init__(self, name, src_path, env: Environment, default_options: List[str] = [], workspace=None,
-                 build_root = None, version_stamp=None, default_build_type: str="cmake", can_skip_configure: bool = True):
+                 build_root = None, version_stamp=None, default_build_type: str="cmake", can_skip_configure: bool = True,
+                 out_of_tree=True):
         super().__init__(name, src_path, env, build_root, default_build_type)
         self.default_config = Configuration(self.name, self.src_path, self.env, default_options, 
-                                            build_path=self.build_root, # Only build in one dir.
+                                            build_path=self.build_root if out_of_tree else self.src_path, # Only build in one dir.
                                             workspace_path=workspace,
                                             version_stamp=version_stamp,
                                             build_type=self.default_build_type)
@@ -216,6 +217,8 @@ class UpdateConfigRepository(Repository):
         self.default_config.update_version(version_stamp)
 
     def process_one_config(self):
+        if not self.has_init:
+            self.default_config.clean_build()
         self.default_config.process_this_config(self.can_skip_configure, self.has_init)
         self.append_session_summary()
         self.summary_to_csv()
@@ -243,7 +246,7 @@ class UpdateConfigRepository(Repository):
             if isinstance(exe_time, SessionStatus):
                 config_data.append(str(exe_time._name_))
             else:
-                config_data.append("%.3lf s" % exe_time)
+                config_data.append("%.3lf" % exe_time)
             # if str(session) == 'diff_with_other' and idx == 0:
             #     config_data.append('Skipped')
             #     config_data.append('Skipped')
@@ -282,11 +285,11 @@ class UpdateConfigRepository(Repository):
                     build_time = exe_time
                 elif session == "CSA":
                     exe_csa_time = exe_time
-        config_data.append("%.3lf s" % config_time)
-        config_data.append("%.3lf s" % build_time)
-        config_data.append("%.3lf s" % inc_time)
-        config_data.append("%.3lf s" % prepare_time)
-        config_data.append("%.3lf s" % exe_csa_time)
+        config_data.append("%.3lf" % config_time)
+        config_data.append("%.3lf" % build_time)
+        config_data.append("%.3lf" % inc_time)
+        config_data.append("%.3lf" % prepare_time)
+        config_data.append("%.3lf" % exe_csa_time)
         data.append(config_data)
         add_to_csv(headers, data, str(config.workspace / f'{os.path.basename(self.name)}_{self.env.analyze_opts.inc}_{self.env.timestamp}.csv'), not self.has_init)
     

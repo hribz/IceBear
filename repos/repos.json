@@ -1,5 +1,23 @@
 [
     {
+        "project": "bitcoin/bitcoin",
+        "commits": [
+        ],
+        "build_type": "cmake",
+        "config_options": [
+        ],
+        "branch": "master"
+    },
+    {
+        "project": "vim/vim",
+        "commits": [
+        ],
+        "build_type": "make",
+        "config_options": [],
+        "branch": "master",
+        "out_of_tree": false
+    },
+    {
         "project": "c-ares/c-ares",
         "commits": [
             {
@@ -80,7 +98,7 @@
         "branch": "master"
     },
     {
-        "project": "xbmc/xbmcc",
+        "project": "xbmc/xbmc",
         "commits": [
             {
                 "hash": "18.8-Leia",
@@ -145,7 +163,8 @@
         "config_options": [
             "--disable-asm"
         ],
-        "branch": "master"
+        "branch": "master",
+        "out_of_tree": false
     },
     {
         "project": "mirror/busybox",
@@ -167,7 +186,8 @@
         "config_options": [
             "defconfig"
         ],
-        "branch": "master"
+        "branch": "master",
+        "out_of_tree": false
     },
     {
         "project": "hribz/ica-demo",

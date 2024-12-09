@@ -114,53 +114,15 @@ class CSAConfig(AnalyzerConfig):
         return args
         
 class CppCheckConfig(AnalyzerConfig):
-    def __init__(self, env: Environment, cppcheck_path: Path, config_file: str=None):
-        super().__init__(env, cppcheck_path, config_file)
+    def __init__(self, env: Environment, cppcheck_workspace: Path, cppcheck_output_path: Path, config_file: str=None):
+        super().__init__(env, cppcheck_workspace, cppcheck_output_path, config_file)
         if not config_file:
             self.config_json = cppcheck_default_config
         self.parse_config_json()
 
     def parse_config_json(self):
-        self.csa_options = self.config_json.get("CSAOptions")
-        if self.csa_options:
-            for cmd in self.csa_options:
-                cmd_pair = cmd.split("=")
-                if cmd_pair[0] == "-analyzer-opt-analyze-headers":
-                    self.AnalyzeAll = True
-        else:
-            self.csa_options = []
-        self.csa_config = self.config_json.get("CSAConfig")
-        if self.csa_config:
-            for cmd in self.csa_config:
-                cmd_pair = cmd.split("=")
-                if cmd_pair[0] == "ipa":
-                    if cmd_pair[1] == "none":
-                        self.IPAMode = IPAKind.IPAK_None 
-                    elif cmd_pair[1] == "basic-inlining":
-                        self.IPAMode = IPAKind.IPAK_BasicInlining
-                    elif cmd_pair[1] == "inlining":
-                        self.IPAMode = IPAKind.IPAK_Inlining
-                    elif cmd_pair[1] == "dynamic":
-                        self.IPAMode = IPAKind.IPAK_DynamicDispatch
-                    elif cmd_pair[1] == "dynamic-bifurcate":
-                        self.IPAMode = IPAKind.IPAK_DynamicDispatchBifurcate
-        else:
-            self.csa_config = []
-        
-        self.csa_options.extend(['-analyzer-output=html', '-analyzer-disable-checker=deadcode'])
-        if self.env.ctu:
-            self.csa_config.extend([
-                'experimental-enable-naive-ctu-analysis=true',
-                'ctu-dir=' + str(self.workspace),
-                'ctu-index-name=' + str(self.workspace / 'externalDefMap.txt'),
-                'ctu-invocation-list=' + str(self.workspace / 'invocations.yaml')
-            ])
-            if self.env.analyze_opts.verbose:
-                self.csa_config.append('display-ctu-progress=true')
+        pass
 
     def analyze_args(self):
-        args = ['--analyze', '-o', str(self.workspace / 'csa-reports')]
-        for option in self.csa_options:
-            args += ['-Xanalyzer', option]
-        args += ['-Xanalyzer', '-analyzer-config', '-Xanalyzer', ','.join(self.csa_config)]
+        args = []
         return args

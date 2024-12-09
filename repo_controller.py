@@ -83,6 +83,12 @@ def get_recent_n_daily_commits(repo_dir: str, n: int, branch):
     later_commit = None
     later_commit_date = None
     daily_commits = []
+    if not checkout_target_commit(repo_dir, branch):
+        print(f"Checkout {branch} failed.")
+        exit(1)
+    else:
+        print(f"Checkout {branch} success.")
+
     for commit in repo.iter_commits(branch):
         commit_date = datetime.fromtimestamp(commit.committed_date).date()
         if later_commit is None:
@@ -95,10 +101,11 @@ def get_recent_n_daily_commits(repo_dir: str, n: int, branch):
                 daily_commits.append(commit.hexsha)
                 later_commit_file = f"{commits_dir}/{repo_name}_{later_commit_date}_{later_commit.hexsha[:6]}.diff"
                 if not os.path.exists(later_commit_file):
-                    with open(later_commit_file, 'w') as f:
+                    with open(later_commit_file, 'w', encoding='utf-8') as f:
                         f.write(f"Old Date: {commit.committed_datetime}\nOld Commit: {commit.hexsha}\nNew Date: {later_commit.committed_datetime}\n"+\
                                 f"New Commit: {later_commit.hexsha}\nAuthor: {later_commit.author}\nMessage:\n{later_commit.message}\n")
                         diff = repo.git.diff(commit.hexsha, later_commit.hexsha)
+                        diff = diff.encode('utf-8', 'replace').decode('utf-8')
                         f.write(diff)
                 later_commit = commit
                 later_commit_date = commit_date
@@ -122,6 +129,7 @@ def main(args):
     FFmpeg = 'repos/test_ffmpeg.json'
     grpc = 'repos/test_grpc.json'
     ica_demo = 'repos/test_ica_demo.json'
+    ignore_repos = {'xbmc/xbmc', 'grpc/grpc', 'mirror/busybox'}
 
     repo_list = repos
 
@@ -147,9 +155,12 @@ def main(args):
         repo_dir = Path(env.PWD / f"repos/{repo_name}")
         if opts.repo and opts.repo != repo_name and opts.repo != os.path.basename(repo_dir):
             continue
+        if repo_name in ignore_repos:
+            continue
         build_type = repo["build_type"]
         default_options = repo["config_options"] if repo.get("config_options") else []
         branch = repo["branch"]
+        out_of_tree = True if repo.get("out_of_tree") is None else repo.get("out_of_tree")
         os.chdir(env.PWD)
         abs_repo_path = str(repo_dir.absolute())
         workspace = f"{abs_repo_path}_workspace/{env.timestamp}_{env.analyze_opts.inc}"
@@ -171,7 +182,7 @@ def main(args):
                 if Repo is None:
                     # Analysis first commit as baseline.
                     Repo = UpdateConfigRepository(repo_name, abs_repo_path, env, build_root=f"{abs_repo_path}_build", default_options=default_options,
-                                    version_stamp=version_stamp, default_build_type=build_type, can_skip_configure=False, workspace=workspace)
+                                    version_stamp=version_stamp, default_build_type=build_type, can_skip_configure=False, workspace=workspace, out_of_tree=out_of_tree)
                 else:
                     Repo.update_version(version_stamp)
                 Repo.process_one_config()

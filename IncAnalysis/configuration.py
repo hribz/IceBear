@@ -40,6 +40,7 @@ class Option:
         return f"{self.name}={self.value}" if self.value is not None else f"{self.name}"
 
 class BuildType(Enum):
+    MAKE = auto()
     CMAKE = auto()
     CONFIGURE = auto()
     KBUILD = auto()
@@ -52,6 +53,8 @@ class BuildType(Enum):
             return BuildType.CONFIGURE
         elif build_type == 'kbuild':
             return BuildType.KBUILD
+        elif build_type == 'make':
+            return BuildType.MAKE
 
 class Configuration:
     env: Environment
@@ -220,7 +223,18 @@ class Configuration:
             with open(self.query_path / query, 'w') as f:
                 f.write('')
     
+    def clean_build(self):
+        clean_script = f"make -C {self.build_path} clean"
+        os.chdir(self.build_path)
+        try:
+            process = run(clean_script, shell=True, capture_output=True, text=True, check=True)
+            logger.info(f"[Clean Build Success] {process.stdout}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"[Clean Build Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
+        os.chdir(self.env.PWD)
+
     def create_configure_script(self):
+        commands = []
         if self.build_type == BuildType.CMAKE:
             cmakeFile = self.src_path / 'CMakeLists.txt'
             if not cmakeFile.exists():
@@ -236,13 +250,15 @@ class Configuration:
             for option in self.options:
                 commands.append(f"-D{option.name}={option.value}")
         elif self.build_type == BuildType.CONFIGURE:
-            commands = [f'{self.src_path}/configure']
+            commands = [f'CC={self.env.CLANG}', f'CXX={self.env.CLANG_PLUS_PLUS}', f'{self.src_path}/configure']
             commands.append(f"--prefix={self.build_path}")
             for option in self.options:
                 commands.append(option.origin_cmd())
         elif self.build_type == BuildType.KBUILD:
-            commands = ['make']
-            commands.extend([f'KBUILD_SRC={self.src_path}', '-f', f'{self.src_path}/Makefile'])
+            # NEVER set `O=SRC_PATH` or `KBUILD_SRC=SRC_PATH` when build in tree.
+            # This will make build process infinitely recurse.
+            commands = [f'CC={self.env.CLANG}', f'CXX={self.env.CLANG_PLUS_PLUS}']
+            commands.extend(['make', 'allyesconfig'])
             commands.extend(['-C', f'{self.build_path}'])
             for option in self.options:
                 commands.append(option.origin_cmd())
@@ -252,7 +268,7 @@ class Configuration:
 
     def create_build_script(self):
         # Use bear to intercept build process and record compile commands.
-        commands = ['bear', '-o', f'{self.compile_database}']
+        commands = [f'CC={self.env.CLANG}', f'CXX={self.env.CLANG_PLUS_PLUS}','bear', '-o', f'{self.compile_database}']
         if self.build_type == BuildType.CMAKE:
             commands.extend([self.env.CMAKE_PATH, "--build", f"{self.build_path}"])
             commands.extend([f"-j{self.env.analyze_opts.jobs}"])
@@ -263,6 +279,9 @@ class Configuration:
         elif self.build_type == BuildType.KBUILD:
             commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
             # Some KBuild project(like busybox) support out of tree build.
+            commands.extend(['-C', f'{self.build_path}'])
+        elif self.build_type == BuildType.MAKE:
+            commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
             commands.extend(['-C', f'{self.build_path}'])
         self.build_script = ' '.join(commands)
 
@@ -281,7 +300,7 @@ class Configuration:
             self.session_times['configure'] = time.time() - start_time
             logger.info(f"[Repo Config Success] {process.stdout}")
             
-            with open(self.build_path / 'options.json', 'w') as f:
+            with open(self.workspace / 'options.json', 'w') as f:
                 tmp_json_data = {"options": []}
                 for option in self.options:
                     tmp_json_data['options'].append(option.obj_to_json())
@@ -378,11 +397,8 @@ class Configuration:
             return
         start_time = time.time()
         makedir(self.preprocess_path, "[Inc Info Files DIR exists]")
-        ret = process_file_list(FileInCDB.extract_inc_info, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
-        if ret:
-            logger.info(f"[Extract Inc Info Success]")
-        else:
-            logger.error(f"[Extract Inc Info Failed]")
+        process_file_list(FileInCDB.extract_inc_info, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
+        logger.info(f"[Extract Inc Info Finish]")
         self.session_times['extract_inc_info'] = time.time() - start_time
 
     def generate_efm(self):
@@ -475,10 +491,8 @@ class Configuration:
                 analyzer.file_list = self.diff_file_list
             else:
                 analyzer.file_list = self.file_list
-            if analyzer.analyze_all_files():
-                self.session_times[analyzer.get_analyzer_name()] = time.time() - analyzer_time
-            else:
-                self.session_times[analyzer.get_analyzer_name()] = SessionStatus.Failed
+            analyzer.analyze_all_files()
+            self.session_times[analyzer.get_analyzer_name()] = time.time() - analyzer_time
         self.session_times['analyze'] = time.time() - start_time
 
     def prepare_diff_dir(self):

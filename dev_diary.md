@@ -352,7 +352,6 @@ int main () {
 - `compile_commands.json`中，同一个文件可能对应有多个`compile command`，因此使用`global_file_dict`时，使用`file name`作为索引可能不太准确，因为多个`compile command`会重复更新同一个`global_file_dict`。(昨天的AST shape问题也是因此)
 - `panda`在生成预处理文件时并不会考虑重复文件名的情况，只会用后出现的文件覆盖之前的文件。
 
-
 ## 解决方案
 - 预处理`compile_commands.json`，每个文件保留一个`compile command`，但是该方法实际上改变了编译过程
 - 不只用文件名作为索引，而是`file + output`作为索引，但是`panda`生成预处理文件没有考虑这种情况。因此还是采用第1种方案。
@@ -381,10 +380,16 @@ int main () {
   - `把判断注释掉`：  Analyzer Time: 36.5321s, real time: 47.146s
   - 注释与否的差别并不大，推测与`clang-19`时间差异大的原因是，`clang-19`是通过包管理安装在`/usr/bin`的，打包时的配置针对平台进行了定制，该`clang`本身就是比自行编译的clang更快。因此后续对比实验不使用`clang-19`进行对比，而是都使用自行编译的`clang`。
 
-# 2024/12/24
+# 2024/12/04
 ## 问题
 - 昨天的测试看出，`collectIncInfo`最大的时间开销在于生成`CallGraph`，并且每次CSA分析需要重复一遍该过程。`grpc_inline_20241203_233452_specific`的`2024-10-23_d56c93`CSA的分析时间相对于`file`级别确实从`190s`降低到了`78s`，但是`inline`在`extract inc info`和`propagate reanalyze`分别花费了`76s`和`43s`，导致实际的时间开销并没有变少。
 - 并且，从inline得到的`file status`看来，292个文件有2个rf，1个文件有476个rf，并且所有文件的`Analyze time`都非常短(几乎为0s)，但是CSA的总时间却达到了`78s`。这并不是记录错误，而是`Analyze time`没有算上生成`CallGraph`的时间。这也是为什么`CSA`和`extract inc info`的耗时如此相似，因为时间都耗费在了`CallGraph`建立上。
 
 ## 解决方案
 - 既然CSA分析时本身就需要生成`CallGraph`，能否把`extract inc info`和`propagate reanalyze`的步骤直接集成到`CSA`，令其解析完`CallGraph`后先进行`extract inc info`和`propagate reanalyze`的步骤。
+
+## 一种增量CTU分析的可能实现方法
+- EFM文件记录了当前文件的所有可能被其它编译单元调用的函数（称之为public函数）USR名称，然后将整个项目的EFM文件合并得到一个总的EFM文件。
+- 对于单个TU可以确定哪些public函数是rf，它会影响的是所有可能调用它的其它TU。想要精确地确认所有受影响的TU，需要建立一个全局的`CallGraph`，在其上进行rf的传播分析。想要做一个`complete`的增量，有如下问题：
+  - 开销问题：需要知道所有文件可能调用的public函数，如果遇到无法确定的调用函数，是不是只能假设这可能将会调用其它TU的public函数，然后将其标记为reanalyze？
+  - 可行问题：`CallGraph`本身就是不完整的
