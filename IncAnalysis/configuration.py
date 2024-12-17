@@ -79,6 +79,7 @@ class Configuration:
         self.src_path = src_path
         self.env = env
         self.version_stamp = version_stamp
+        logger.TAG = f"{self.name}/{self.version_stamp}"
         # Record all files' latest version in repo history.
         self.global_file_dict: Dict[str, FileInCDB] = {}
         # We traverse file_list most of the time, so we don't use Dict[str, FileInCDB].
@@ -130,6 +131,7 @@ class Configuration:
         self.reply_path = self.cmake_api_path / 'reply'
         self.compile_database = self.build_path / 'compile_commands.json'
         self.preprocess_path = self.workspace / 'preprocess' / self.version_stamp
+        self.codechecker_path = self.workspace / self.version_stamp
         self.compile_commands_used_by_pre = self.preprocess_path / 'compile_commands_used_by_pre.json'
         self.preprocess_compile_database = self.preprocess_path / 'preprocess_compile_commands.json'
         self.preprocess_diff_files_path = self.preprocess_path / 'preprocess_diff_files.txt'
@@ -140,17 +142,22 @@ class Configuration:
     
     def update_version(self, version_stamp):
         self.version_stamp = version_stamp
+        logger.TAG = f"{self.name}/{self.version_stamp}"
         if self.update_mode:
             self.update_workspace_path()
             for analyzer in self.analyzers:
                 if isinstance(analyzer, CSA):
-                    analyzer.analyzer_config.output_path = self.csa_output_path
+                    analyzer.update_output_path(self.csa_output_path)
 
-    def process_this_config(self, can_skip_configure: bool, has_init: bool):
-        logger.TAG = f"{self.name}/{self.version_stamp}"
-        # 1. configure & build
+    def clean_and_configure(self, can_skip_configure: bool, has_init: bool):
+        if not has_init:
+            self.clean_build()
         if self.build_type == BuildType.CMAKE or not (can_skip_configure and has_init):
             self.configure()
+
+    def process_this_config(self, can_skip_configure: bool, has_init: bool):
+        # 1. configure & build
+        self.clean_and_configure(can_skip_configure, has_init)
         self.build()
         self.prepare_file_list()
         # 2. preprocess and diff
@@ -224,11 +231,12 @@ class Configuration:
                 f.write('')
     
     def clean_build(self):
+        makedir(self.build_path)
         clean_script = f"make -C {self.build_path} clean"
         os.chdir(self.build_path)
         try:
             process = run(clean_script, shell=True, capture_output=True, text=True, check=True)
-            logger.info(f"[Clean Build Success] {process.stdout}")
+            logger.info(f"[Clean Build Success]")
         except subprocess.CalledProcessError as e:
             logger.error(f"[Clean Build Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
         os.chdir(self.env.PWD)
@@ -268,21 +276,26 @@ class Configuration:
 
     def create_build_script(self):
         # Use bear to intercept build process and record compile commands.
-        commands = [f'CC={self.env.CLANG}', f'CXX={self.env.CLANG_PLUS_PLUS}','bear', '-o', f'{self.compile_database}']
+        commands = []
         if self.build_type == BuildType.CMAKE:
             commands.extend([self.env.CMAKE_PATH, "--build", f"{self.build_path}"])
             commands.extend([f"-j{self.env.analyze_opts.jobs}"])
+            # Don't stop make although error happen.
+            commands.extend(["--", "-i"])
         elif self.build_type == BuildType.CONFIGURE:
             commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
             # TODO: Change to directory contain Makefile.
-            commands.extend(['-C', f'{self.src_path}'])
+            commands.extend(['-C', f'{self.build_path}'])
+            commands.extend(["-i"])
         elif self.build_type == BuildType.KBUILD:
             commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
             # Some KBuild project(like busybox) support out of tree build.
             commands.extend(['-C', f'{self.build_path}'])
+            commands.extend(["-i"])
         elif self.build_type == BuildType.MAKE:
             commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
             commands.extend(['-C', f'{self.build_path}'])
+            commands.extend(["-i"])
         self.build_script = ' '.join(commands)
 
     def configure(self):
@@ -316,9 +329,10 @@ class Configuration:
         makedir(self.build_path, "[Config Build DIR exists]")
         # Some projects need to `configure & build` in source tree. 
         # CMake will not be influenced by path.
-        os.chdir(self.src_path)
+        os.chdir(self.build_path)
         try:
-            process = run(self.build_script, shell=True, capture_output=True, text=True, check=True)
+            commands = ['bear', '-o', f'{self.compile_database}', self.build_script]
+            process = run(' '.join(commands), shell=True, capture_output=True, text=True, check=True)
             self.session_times['build'] = time.time() - start_time
             logger.info(f"[Repo Build Success] {self.build_script}")
         except subprocess.CalledProcessError as e:
@@ -559,24 +573,39 @@ class Configuration:
         self.session_times['propagate_reanalyze_attr'] = time.time() - start_time
 
     def get_changed_function_num(self):
-        changed_function_num = 0
+        self.changed_function_num = 0
         self.diff_file_with_no_cf = 0
         for file in self.diff_file_list:
             if file.cf_num and isinstance(file.cf_num, int):
-                changed_function_num += (file.cf_num)
+                self.changed_function_num += (file.cf_num)
             else:
                 self.diff_file_with_no_cf += 1
-        return changed_function_num
+        return self.changed_function_num
     
     def get_reanalyze_function_num(self):
-        reanalyze_function_num = 0
-        self.diff_file_with_no_cg = 0
+        self.reanalyze_function_num = 0
         for file in self.diff_file_list:
             if file.rf_num and isinstance(file.rf_num, int):
-                reanalyze_function_num += file.rf_num
-            else:
-                self.diff_file_with_no_cg += 1
-        return reanalyze_function_num
+                self.reanalyze_function_num += file.rf_num
+        return self.reanalyze_function_num
+
+    def get_total_cg_nodes_num(self):
+        self.total_cg_nodes = 0
+        for file in self.diff_file_list:
+            if file.cg_node_num and isinstance(file.cg_node_num, int):
+                self.total_cg_nodes += file.cg_node_num
+        return self.total_cg_nodes
+    
+    def get_total_analyze_time(self):
+        # CSA analyze time is different with real execution time, it only
+        # contains time used for Syntax Analysis, Path sensitive Analysis and 
+        # Reports post processing.
+        self.total_analyze_time = 0
+        file_list = self.diff_file_list if self.incrementable else self.file_list
+        for file in file_list:
+            if file.analyze_time != 'Unknown':
+                self.total_analyze_time += float(file.analyze_time)
+        return self.total_analyze_time
 
     def get_session_times(self):
         ret = "{\n"

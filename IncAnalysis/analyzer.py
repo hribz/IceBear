@@ -21,6 +21,9 @@ class Analyzer(ABC):
     def analyze_one_file(self, file: FileInCDB):
         pass
 
+    def update_output_path(self, output_path):
+        self.analyzer_config.update_output_path(output_path=output_path)
+
     def analyze_all_files(self):
         makedir(self.analyzer_config.workspace)
         for file in self.file_list:

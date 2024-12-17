@@ -12,9 +12,11 @@
 #include <iostream>
 #include <fstream>
 #include <iterator>
-#include <llvm-17/llvm/ADT/StringRef.h>
-#include <llvm-17/llvm/Support/Error.h>
-#include <llvm-17/llvm/Support/JSON.h>
+#include <llvm/ADT/StringRef.h>
+#include <llvm/Support/Casting.h>
+#include <llvm/Support/Error.h>
+#include <llvm/Support/JSON.h>
+#include <llvm/Support/Timer.h>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -79,7 +81,13 @@ static void DumpCallGraph(CallGraph &CG, llvm::StringRef MainFilePath) {
 
 class MyCallGraph : public CallGraph {
 public:
-    explicit MyCallGraph(ASTContext *Context) {}
+    void addToCallGraph(Decl *D) {
+        TraverseDecl(D);
+    }
+
+    bool TraverseFunctionDecl(FunctionDecl *FD) {
+        return true;
+    }
 
     bool VisitCallExpr(CallExpr *call) {
         if (const FunctionDecl *callee = call->getDirectCallee()) {
@@ -119,7 +127,7 @@ public:
             llvm::outs() << "}\n";
             return;
         }
-        std::string DotFileName = outputPath + FE->getName().str() + ".dot";
+        std::string DotFileName = outputPath + FE->tryGetRealPathName().str() + ".dot";
         std::filesystem::path DotFilePath(DotFileName);
         std::filesystem::create_directories(DotFilePath.parent_path());
         std::ofstream outFile(DotFileName);
@@ -150,7 +158,16 @@ public:
         const SourceManager &SM = Context->getSourceManager();
         FileID MainFileID = SM.getMainFileID();
         const FileEntry *FE = SM.getFileEntryForID(MainFileID);
-        MainFilePath = FE->getName();
+        MainFilePath = FE->tryGetRealPathName();
+        CallGraphTimers = std::make_unique<llvm::TimerGroup>(
+            "analyzer", "Analyzer timers");
+        SyntaxCheckTimer = std::make_unique<llvm::Timer>(
+            "syntaxchecks", "Syntax-based analysis time", *CallGraphTimers);
+        ExprEngineTimer = std::make_unique<llvm::Timer>(
+            "exprengine", "Path exploration time", *CallGraphTimers);
+        BugReporterTimer = std::make_unique<llvm::Timer>(
+            "bugreporter", "Path-sensitive report post-processing time",
+            *CallGraphTimers);
     }
 
     bool HandleTopLevelDecl(DeclGroupRef DG) override {
@@ -172,13 +189,47 @@ public:
         }
     }
 
+    void DisplayTime(llvm::TimeRecord &Time) {
+        llvm::errs() << " : " << llvm::format("%1.1f", Time.getWallTime() * 1000)
+                    << " ms\n";
+    }
+
     void HandleTranslationUnit(clang::ASTContext &Context) override {
-        CG.addToCallGraph(Context.getTranslationUnitDecl());
+        // CG.addToCallGraph(Context.getTranslationUnitDecl());
+        llvm::TimeRecord TUStartTime;
+        TUStartTime = ExprEngineTimer->getTotalTime();
+        ExprEngineTimer->startTimer();
+
+        for (auto *D: LocalTUDecls) {
+            llvm::TimeRecord CheckerStartTime;
+            CheckerStartTime = SyntaxCheckTimer->getTotalTime();
+            SyntaxCheckTimer->startTimer();
+
+            CG.addToCallGraph(D);
+
+            SyntaxCheckTimer->stopTimer();
+            llvm::TimeRecord CheckerEndTime = SyntaxCheckTimer->getTotalTime();
+            CheckerEndTime -= CheckerStartTime;
+            if (auto *FD = llvm::dyn_cast<FunctionDecl>(D)) {
+                llvm::errs() << FD->getNameAsString() << " ";
+            }
+            DisplayTime(CheckerEndTime);
+        }
         DumpCallGraph(CG, MainFilePath);
+
+        ExprEngineTimer->stopTimer();
+        llvm::TimeRecord TUEndTime = ExprEngineTimer->getTotalTime();
+        TUEndTime -= TUStartTime;
+        DisplayTime(TUEndTime);
     }
 
 private:
-    CallGraph CG;
+    MyCallGraph CG;
+    /// Time the analyzes time of each translation unit.
+    std::unique_ptr<llvm::TimerGroup> CallGraphTimers;
+    std::unique_ptr<llvm::Timer> SyntaxCheckTimer;
+    std::unique_ptr<llvm::Timer> ExprEngineTimer;
+    std::unique_ptr<llvm::Timer> BugReporterTimer;
     std::deque<Decl *> LocalTUDecls;
     llvm::StringRef MainFilePath;
 };

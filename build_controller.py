@@ -67,7 +67,7 @@ def main(args):
         repo_db = MultiConfigRepository(repo['name'], repo['src_path'], env, options_list=repo['options_list'])
         repo_list.append(repo_db)
         logger.info('-------------BEGIN SUMMARY-------------\n')
-        # repo_db.build_every_config()
+        repo_db.build_every_config()
         repo_db.prepare_file_list_every_config()
         repo_db.preprocess_every_config()
         repo_db.diff_every_config()

@@ -11,6 +11,8 @@
 #include <iostream>
 #include <fstream>
 #include <iterator>
+#include <llvm/Support/Timer.h>
+#include <llvm/Support/raw_ostream.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/JSON.h>
@@ -42,11 +44,21 @@
 using namespace clang;
 using namespace clang::tooling;
 
+void DisplayTime(llvm::TimeRecord &Time) {
+    llvm::errs() << " : " << llvm::format("%1.1f", Time.getWallTime() * 1000)
+                << " ms\n";
+}
+
 class IncInfoCollectConsumer : public clang::ASTConsumer {
 public:
-    explicit IncInfoCollectConsumer(CompilerInstance &CI, const std::string &outputPath, std::string &diffPath, const IncOptions &incOpt)
-    : CG(), OutputPath(outputPath), IncOpt(incOpt), DLM(CI.getASTContext().getSourceManager()), PP(CI.getPreprocessor()),
+    explicit IncInfoCollectConsumer(CompilerInstance &CI, std::string &diffPath, const IncOptions &incOpt)
+    : CG(), IncOpt(incOpt), DLM(CI.getASTContext().getSourceManager()), PP(CI.getPreprocessor()),
       IncVisitor(&CI.getASTContext(), DLM, CG, FunctionsNeedReanalyze, IncOpt) {
+        std::unique_ptr<llvm::Timer> consumerTimer = std::make_unique<llvm::Timer>(
+            "Consumer Timer", "Consumer Constructor Time");
+        consumerTimer->startTimer();
+        llvm::TimeRecord consumerStart = consumerTimer->getTotalTime();
+
         const SourceManager &SM = CI.getASTContext().getSourceManager();
         FileID MainFileID = SM.getMainFileID();
         const FileEntry *FE = SM.getFileEntryForID(MainFileID);
@@ -58,6 +70,12 @@ public:
         // PrintPolicy.TerseOutput = true;
         // PrintPolicy.PrintInjectedClassNameWithArguments = true;
         // Context->setPrintingPolicy(PrintPolicy);
+    
+        consumerTimer->stopTimer();
+        llvm::TimeRecord consumerStop = consumerTimer->getTotalTime();
+        consumerStop -= consumerStart;
+        llvm::errs() << "Consumer Time:";
+        DisplayTime(consumerStop);
     }
 
     bool HandleTopLevelDecl(DeclGroupRef DG) override {
@@ -80,6 +98,10 @@ public:
     }
 
     void HandleTranslationUnit(clang::ASTContext &Context) override {
+        std::unique_ptr<llvm::Timer> toolTimer = 
+            std::make_unique<llvm::Timer>("tu timer", "TU analysis time");
+        toolTimer->startTimer();
+        llvm::TimeRecord toolStart = toolTimer->getTotalTime();
         // Don't run the actions if an error has occurred with parsing the file.
         DiagnosticsEngine &Diags = PP.getDiagnostics();
         if (Diags.hasErrorOccurred() || Diags.hasFatalErrorOccurred())
@@ -100,6 +122,14 @@ public:
             CG.addToCallGraph(D);
         }
         DumpCallGraph();
+
+        toolTimer->stopTimer();
+        llvm::errs() << "Prepare CG ";
+        llvm::TimeRecord toolPrepare = toolTimer->getTotalTime();
+        toolPrepare -= toolStart;
+        DisplayTime(toolPrepare);
+        toolTimer->startTimer();
+
         if (DLM.isNewFile()) {
             // If this is a new file, we just output its callgraph.
             llvm::errs() << DLM.MainFilePath << " is new, do not analyze changed functions.\n";
@@ -125,6 +155,12 @@ public:
         IncVisitor.DumpGlobalConstantSet();
         IncVisitor.DumpTaintDecls();
         DumpFunctionsNeedReanalyze();
+        
+        toolTimer->stopTimer();
+        llvm::TimeRecord toolEnd = toolTimer->getTotalTime();
+        toolEnd -= toolPrepare;
+        llvm::errs() << "Analysis CF ";
+        DisplayTime(toolEnd);
     }
 
     static void getUSRName(const Decl *D, std::string &Str) {
@@ -247,7 +283,6 @@ private:
     DiffLineManager DLM;
     CallGraph CG;
     IncInfoCollectASTVisitor IncVisitor;
-    std::string OutputPath;
     std::deque<Decl *> LocalTUDecls;
     std::unordered_set<const Decl *> FunctionsNeedReanalyze;
     Preprocessor &PP;
@@ -255,39 +290,39 @@ private:
 
 class IncInfoCollectAction : public clang::ASTFrontendAction {
 public:
-    IncInfoCollectAction(std::string &outputPath, std::string &diffPath, const IncOptions &incOpt) :
-    OutputPath(outputPath), DiffPath(diffPath), IncOpt(incOpt) {}
+    IncInfoCollectAction(std::string &diffPath, std::string &fsPath, const IncOptions &incOpt) :
+    DiffPath(diffPath), FSPath(fsPath), IncOpt(incOpt) {}
 
     std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance &CI, llvm::StringRef file) override {
-        return std::make_unique<IncInfoCollectConsumer>(CI, OutputPath, DiffPath, IncOpt);
+        return std::make_unique<IncInfoCollectConsumer>(CI, DiffPath, IncOpt);
     }
 
 private:
-    std::string &OutputPath;
     std::string &DiffPath;
+    std::string &FSPath;
     const IncOptions &IncOpt;
 };
 
 class IncInfoCollectActionFactory : public FrontendActionFactory {
 public:
-    IncInfoCollectActionFactory(std::string &outputPath, std::string &diffPath, const IncOptions &incOpt):
-     OutputPath(outputPath), DiffPath(diffPath), IncOpt(incOpt) {}
+    IncInfoCollectActionFactory(std::string &diffPath, std::string &fsPath, const IncOptions &incOpt):
+     DiffPath(diffPath), FSPath(fsPath), IncOpt(incOpt) {}
 
     std::unique_ptr<FrontendAction> create() override {
-        return std::make_unique<IncInfoCollectAction>(OutputPath, DiffPath, IncOpt);
+        return std::make_unique<IncInfoCollectAction>(DiffPath, FSPath, IncOpt);
     }
 
 private:
-    std::string &OutputPath;
     std::string &DiffPath;
+    std::string &FSPath;
     const IncOptions & IncOpt;
 };
 
 static llvm::cl::OptionCategory ToolCategory("Collect Inc Info Options");
-static llvm::cl::opt<std::string> OutputPath("o", llvm::cl::desc("Specify output path for dot file"), 
-    llvm::cl::value_desc("call graph dir"), llvm::cl::init(""));
 static llvm::cl::opt<std::string> DiffPath("diff", llvm::cl::desc("Specify diff info files"),
     llvm::cl::value_desc("diff info files"), llvm::cl::init(""));
+static llvm::cl::opt<std::string> FSPath("fs-file", llvm::cl::desc("Function summary files, use under inline mode"),
+    llvm::cl::value_desc("function summary files"), llvm::cl::init(""));
 static llvm::cl::opt<bool> PrintLoc("loc", llvm::cl::desc("Print location information in FunctionName or not"),
     llvm::cl::value_desc("AnonymousTagLocations"), llvm::cl::init(false));
 static llvm::cl::opt<bool> ClassLevel("class", llvm::cl::desc("Propogate type change by class level"),
@@ -302,6 +337,11 @@ static llvm::cl::opt<bool> CTU("ctu", llvm::cl::desc("Consider CTU analysis"),
     llvm::cl::value_desc("consider CTU analysis"), llvm::cl::init(false));
 
 int main(int argc, const char **argv) {
+    std::unique_ptr<llvm::Timer> toolTimer = 
+        std::make_unique<llvm::Timer>("tool timer", "tool analysis time");
+    toolTimer->startTimer();
+    llvm::TimeRecord toolStart = toolTimer->getTotalTime();
+
     auto ExpectedParser = CommonOptionsParser::create(argc, argv, ToolCategory);
     if (!ExpectedParser) {
         // Fail gracefully for unsupported options.
@@ -313,6 +353,22 @@ int main(int argc, const char **argv) {
     ClangTool Tool(OptionsParser.getCompilations(), OptionsParser.getSourcePathList());
     IncOptions IncOpt{.PrintLoc=PrintLoc, .ClassLevelTypeChange=ClassLevel, .FieldLevelTypeChange=FieldLevel, 
                       .DumpToFile=DumpToFile, .DumpUSR=DumpUSR, .CTU=CTU};
-    IncInfoCollectActionFactory Factory(OutputPath, DiffPath, IncOpt);
-    return Tool.run(&Factory);
+    IncInfoCollectActionFactory Factory(DiffPath, FSPath, IncOpt);
+
+    toolTimer->stopTimer();
+    llvm::TimeRecord toolPrepare = toolTimer->getTotalTime();
+    toolPrepare -= toolStart;
+    llvm::errs() << "Tool Prepare ";
+    DisplayTime(toolPrepare);
+    toolTimer->startTimer();
+
+    auto ret = Tool.run(&Factory);
+
+    toolTimer->stopTimer();
+    llvm::TimeRecord toolStop = toolTimer->getTotalTime();
+    toolStop -= toolStart;
+    llvm::errs() << "Tool Stop ";
+    DisplayTime(toolStop);
+
+    return ret;
 }

@@ -27,6 +27,10 @@ class Environment:
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.prepare_env_path()
 
+        self.env = dict(os.environ)
+        self.env['CC'] = self.CLANG
+        self.env['CXX'] = self.CLANG_PLUS_PLUS
+
     def prepare_env_path(self):
         # Environment path
         self.PWD: Path = Path(".").absolute()

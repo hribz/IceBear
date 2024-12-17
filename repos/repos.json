@@ -190,6 +190,13 @@
         "out_of_tree": false
     },
     {
+        "project": "redis/redis",
+        "build_type": "make",
+        "config_options": [],
+        "branch": "unstable",
+        "out_of_tree": false
+    },
+    {
         "project": "hribz/ica-demo",
         "commits": [
             {

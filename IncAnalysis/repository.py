@@ -205,7 +205,7 @@ class UpdateConfigRepository(Repository):
         super().__init__(name, src_path, env, build_root, default_build_type)
         self.default_config = Configuration(self.name, self.src_path, self.env, default_options, 
                                             build_path=self.build_root if out_of_tree else self.src_path, # Only build in one dir.
-                                            workspace_path=workspace,
+                                            workspace_path=workspace, update_mode=True,
                                             version_stamp=version_stamp,
                                             build_type=self.default_build_type)
         self.default_config.update_mode = True
@@ -217,13 +217,15 @@ class UpdateConfigRepository(Repository):
         self.default_config.update_version(version_stamp)
 
     def process_one_config(self):
-        if not self.has_init:
-            self.default_config.clean_build()
         self.default_config.process_this_config(self.can_skip_configure, self.has_init)
         self.append_session_summary()
         self.summary_to_csv()
         self.summary_to_csv_specific()
         self.file_status_to_csv()
+        self.has_init = True
+    
+    def only_clean_and_configure(self):
+        self.default_config.clean_and_configure(self.can_skip_configure, self.has_init)
         self.has_init = True
 
     def append_session_summary(self):
@@ -231,13 +233,18 @@ class UpdateConfigRepository(Repository):
         ret += str(self.default_config)
         self.session_summaries += ret
     
+    def summary_csv_path(self, specific = False):
+        ret = str(self.default_config.workspace / f'{os.path.basename(self.name)}_{self.env.analyze_opts.inc}_{self.env.timestamp}')
+        ret += ("_specific.csv") if specific else (".csv")
+        return ret
+
     def summary_to_csv_specific(self):
         headers = ["project", "version"]
         for session in self.default_config.session_times.keys():
             headers.append(str(session))
             # if str(session) == 'diff_with_other':
             #     headers.extend(["diff_command_time", "diff_parse_time"])
-        headers.extend(["files", "diff files", "changed function", "reanalyze function", "diff but no cf", "diff but no cg"])
+        headers.extend(["files", "diff files", "changed function", "reanalyze function", "diff but no cf", "total cg nodes", "total analyze time"])
         data = []
         config = self.default_config
         config_data = [self.name, config.version_stamp]
@@ -255,9 +262,10 @@ class UpdateConfigRepository(Repository):
         config_data.append(config.get_changed_function_num())
         config_data.append(config.get_reanalyze_function_num())
         config_data.append(config.diff_file_with_no_cf)
-        config_data.append(config.diff_file_with_no_cg)
+        config_data.append(config.get_total_cg_nodes_num())
+        config_data.append(config.get_total_analyze_time())
         data.append(config_data)
-        add_to_csv(headers, data, str(config.workspace / f'{os.path.basename(self.name)}_{self.env.analyze_opts.inc}_{self.env.timestamp}_specific.csv'), not self.has_init)
+        add_to_csv(headers, data, self.summary_csv_path(specific=True), not self.has_init)
     
     def summary_to_csv(self):
         headers = ["project", "version", "configure", "build", "prepare for inc", "prepare for CSA", "execute CSA"]
@@ -291,7 +299,7 @@ class UpdateConfigRepository(Repository):
         config_data.append("%.3lf" % prepare_time)
         config_data.append("%.3lf" % exe_csa_time)
         data.append(config_data)
-        add_to_csv(headers, data, str(config.workspace / f'{os.path.basename(self.name)}_{self.env.analyze_opts.inc}_{self.env.timestamp}.csv'), not self.has_init)
+        add_to_csv(headers, data, self.summary_csv_path(specific=False), not self.has_init)
     
     def file_status_to_csv(self):
         config = self.default_config

@@ -83,7 +83,8 @@ def add_to_csv(headers, data, csv_file, write_headers: bool = True):
         writer = csv.writer(f)
         if write_headers:
             writer.writerow(headers)
-        writer.writerows(data)
+        if data is not None:
+            writer.writerows(data)
 
 def process_file_list(method, file_list, jobs):
         # Can't use mutilprocessing, because every process has its own memory space.
