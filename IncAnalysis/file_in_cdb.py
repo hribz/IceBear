@@ -3,11 +3,17 @@ from subprocess import CompletedProcess, run
 import subprocess
 from typing import List, Dict
 from enum import Enum, auto
+import hashlib
 
 from IncAnalysis.utils import makedir
 from IncAnalysis.analyzer_config import *
 from IncAnalysis.logger import logger
 from IncAnalysis.compile_command import CompileCommand
+
+def get_sha256_hash(data, encoding='utf-8'):
+    sha256 = hashlib.sha256()
+    sha256.update(data.encode(encoding))
+    return sha256.hexdigest()
 
 class FileKind(Enum):
     Preprocessed = auto()
@@ -19,6 +25,9 @@ class FileKind(Enum):
     RF = auto()
     FS = auto()
     TM = auto()
+    FIX = auto() # clang-tidy fixit file.
+    CPPCHECK = auto()
+    INFER = auto()
 
 class FileStatus(Enum):
     # Abnormal status
@@ -130,8 +139,13 @@ class FileInCDB:
         from IncAnalysis.configuration import Configuration
         self.parent: Configuration = parent
         self.file_name: str = compile_command.file
+        self.sha256 = get_sha256_hash(self.file_name)
         self.status = FileStatus.NEW
         self.csa_file: str = str(self.parent.csa_path) + self.file_name
+        self.compile_command: CompileCommand = compile_command
+        self.efm: Dict[str, str] = {}
+
+        # Statistics field.
         self.cf_num = 'Unknown'
         self.has_cf = False # File has .cf.
         # self.call_graph: CallGraph = None
@@ -141,9 +155,7 @@ class FileInCDB:
         self.has_rf = False # Propogate reanalyze attribute(if needed) successfully.
         self.basline_fs_num = 'Skip'
         self.baseline_has_fs = False # Analysis finished successfully.
-        self.efm: Dict[str, str] = {}
-        self.analyze_time = "Unknown"
-        self.compile_command: CompileCommand = compile_command
+        self.csa_analyze_time = "Unknown"
         extname = ''
         if self.compile_command.language == 'c++':
             extname = '.ii'
@@ -218,6 +230,13 @@ class FileInCDB:
             return (self.csa_file) + '.fs'
         elif kind == FileKind.TM:
             return (self.csa_file) + '.time'
+        elif kind == FileKind.FIX:
+            return str((self.parent.clang_tidy_output_path)) + '/' + os.path.basename(self.file_name) + "_clang-tidy_" + self.sha256 + ".yaml"
+        elif kind == FileKind.CPPCHECK:
+            # Cppcheck cannot specify output plist file, but the output plist directory.
+            return str((self.parent.cppcheck_output_path)) + '/' + self.sha256
+        elif kind == FileKind.INFER:
+            return str((self.parent.infer_output_path)) + '/' + self.sha256
         else:
             logger.error(f"[Get File Path] Unknown file kind {kind}")
 

@@ -11,6 +11,11 @@ class CompileCommand:
         self.arguments = None
         self.language = None
         if ccmd:
+            if 'command' in ccmd:
+                self.origin_cmd = ccmd['command']
+            else:
+                from shlex import join
+                self.origin_cmd = join(ccmd['arguments'])
             self.parse(ccmd)
 
     def __str__(self):
@@ -87,7 +92,6 @@ class CompileCommand:
                 self.language = arguments[i][2:]
 
         return self
-
 
     @staticmethod
     def isValidCompileCommand(ccmd):

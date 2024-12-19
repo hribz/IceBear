@@ -1,7 +1,5 @@
 [
-    "--cppcheck-build-dir=<dir>",
-    "--file-list=<file>",
+    "--check-level=exhaustive",
     "--max-ctu-depth=2",
-    "--output-file=<file>",
-    "-j 16"
+    "--output-format=sarif"
 ]

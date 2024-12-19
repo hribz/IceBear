@@ -35,13 +35,26 @@ class Environment:
         # Environment path
         self.PWD: Path = Path(".").absolute()
         self.EXTRACT_II = str(self.PWD / 'build/clang_tool/collectIncInfo')
-        self.EXTRACT_CG = str(self.PWD / 'build/clang_tool/extractCG')
         self.PANDA = str(self.PWD / 'panda/panda')
         # CSA revised version
-        self.MY_CLANG = 'clang'
-        self.MY_CLANG_PLUS_PLUS = 'clang++'
-        self.CLANG = 'clang'
-        self.CLANG_PLUS_PLUS = 'clang++'
+        self.MY_CLANG = shutil.which('clang')
+        self.MY_CLANG_PLUS_PLUS = shutil.which('clang++')
+        self.CLANG = shutil.which('clang')
+        self.CLANG_PLUS_PLUS = shutil.which('clang++')
+        clang_bin = os.path.dirname(self.CLANG)
+        self.clang_tidy = os.path.join(clang_bin, 'clang-tidy')
+        self.diagtool = os.path.join(clang_bin, 'diagtool')
+        self.cppcheck = shutil.which('cppcheck')
+        self.infer = shutil.which('infer')
+
+        self.analyzers = ['clangsa']
+        if os.path.exists(self.clang_tidy):
+            self.analyzers.append('clang-tidy')
+        if os.path.exists(self.cppcheck):
+            self.analyzers.append('cppcheck')
+        if os.path.exists(self.infer):
+            self.analyzers.append('infer')
+
         self.example_compiler_action_plugin = {
             "comment": "Example plugin for Panda driver.",
             "type": "CompilerAction",
@@ -64,7 +77,6 @@ class Environment:
             }
         }
 
-        self.LOG_TAG = ''
         # 查找cmake命令的位置
         self.CMAKE_PATH = shutil.which('cmake')
         if self.CMAKE_PATH:
@@ -87,9 +99,9 @@ class Environment:
             print('diff not found in the system path')
             exit(1)
         if self.EXTRACT_II:
-            print(f'cg extractor found at: {self.EXTRACT_II}')
+            print(f'inc info extractor found at: {self.EXTRACT_II}')
         else:
-            print('please build cg extractor firstly') 
+            print('please build inc info extractor firstly') 
             exit(1)
         if os.path.exists(self.MY_CLANG):
             print(f'use clang={self.MY_CLANG}')
@@ -128,7 +140,14 @@ class ArgumentParser:
                 help='Execute Clang Static Analyzer.')
         self.parser.add_argument('-j', '--jobs', type=int, dest='jobs', default=1, help='Number of jobs can be executed in parallel.')
         self.parser.add_argument('-d', '--udp', action='store_true', dest='udp', help='Use files in diff path to `diff`.')
-        self.parser.add_argument('--csa-config', type=str, dest='csa_config', default=None, help='Incremental analysis mode: file, func, inline')
+        supported_analyzers = ['clangsa', 'clang-tidy', 'cppcheck', 'infer']
+        self.parser.add_argument('--analyzers', nargs='+', dest='analyzers', metavar='ANALYZER', required=False, choices=supported_analyzers,
+                               default=None, help="Run analysis only with the analyzers specified. Currently supported analyzers "
+                                    "are: " + ', '.join(supported_analyzers) + ".")
+        self.parser.add_argument('--csa-config', type=str, dest='csa_config', default=None, help='CSA config file.')
+        self.parser.add_argument('--clang-tidy-config', type=str, dest='clang_tidy_config', default=None, help='Clang-tidy config file.')
+        self.parser.add_argument('--cppcheck-config', type=str, dest='cppcheck_config', default=None, help='Cppcheck config file.')
+        self.parser.add_argument('--infer-config', type=str, dest='infer_config', default=None, help='Infer config file.')
     
     def parse_args(self, args):
         return self.parser.parse_args(args)

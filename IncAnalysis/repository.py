@@ -244,7 +244,7 @@ class UpdateConfigRepository(Repository):
             headers.append(str(session))
             # if str(session) == 'diff_with_other':
             #     headers.extend(["diff_command_time", "diff_parse_time"])
-        headers.extend(["files", "diff files", "changed function", "reanalyze function", "diff but no cf", "total cg nodes", "total analyze time"])
+        headers.extend(["files", "diff files", "changed function", "reanalyze function", "diff but no cf", "total cg nodes", "total csa analyze time"])
         data = []
         config = self.default_config
         config_data = [self.name, config.version_stamp]
@@ -263,7 +263,7 @@ class UpdateConfigRepository(Repository):
         config_data.append(config.get_reanalyze_function_num())
         config_data.append(config.diff_file_with_no_cf)
         config_data.append(config.get_total_cg_nodes_num())
-        config_data.append(config.get_total_analyze_time())
+        config_data.append(config.get_total_csa_analyze_time())
         data.append(config_data)
         add_to_csv(headers, data, self.summary_csv_path(specific=True), not self.has_init)
     

@@ -121,33 +121,61 @@ class Configuration:
         # Update One Configuration.
         self.update_mode = update_mode
         self.global_efm: Dict[str, FileInCDB] = {}
-        self.analyzers: List[Analyzer] = [
-            CSA(CSAConfig(self.env, self.csa_path, self.csa_output_path, self.env.analyze_opts.csa_config), self.file_list)
-        ]
+
+        analyzers = self.env.analyzers
+        if self.env.analyze_opts.analyzers:
+            analyzers = self.env.analyze_opts.analyzers
+        self.analyzers = []
+        for analyzer_name in analyzers:
+            analyzer = None
+            if analyzer_name == 'clangsa':
+                analyzer = CSA(CSAConfig(self.env, self.csa_path, self.env.analyze_opts.csa_config), None)
+            elif analyzer_name == 'clang-tidy':
+                analyzer = ClangTidy(ClangTidyConfig(self.env, self.clang_tidy_path, self.env.analyze_opts.clang_tidy_config), None)
+            elif analyzer_name == 'cppcheck':
+                analyzer = CppCheck(CppCheckConfig(self.env, self.cppcheck_path, self.env.analyze_opts.cppcheck_config), None)
+            elif analyzer_name == 'infer':
+                analyzer = Infer(InferConfig(self.env, self.infer_path, self.env.analyze_opts.infer_config), None)
+            else:
+                logger.error(f"Don't support {analyzer_name}.")
+                continue
+            self.analyzers.append(analyzer)
 
     def update_workspace_path(self):
         self.cmake_api_path = self.build_path / '.cmake/api/v1'
         self.query_path = self.cmake_api_path / 'query'
         self.reply_path = self.cmake_api_path / 'reply'
+        # Compile database.
         self.compile_database = self.build_path / 'compile_commands.json'
+        # Preprocess & diff Path.
         self.preprocess_path = self.workspace / 'preprocess' / self.version_stamp
-        self.codechecker_path = self.workspace / self.version_stamp
         self.compile_commands_used_by_pre = self.preprocess_path / 'compile_commands_used_by_pre.json'
         self.preprocess_compile_database = self.preprocess_path / 'preprocess_compile_commands.json'
         self.preprocess_diff_files_path = self.preprocess_path / 'preprocess_diff_files.txt'
         self.diff_files_path = self.preprocess_path / 'diff_files.txt'
-        self.csa_path = self.workspace / 'csa-ctu-scan'
-        self.csa_output_path = self.csa_path / 'csa-reports' / self.version_stamp
         self.diff_path = self.workspace / 'diff' / self.version_stamp
+        # CSA Path.
+        self.csa_path = self.workspace / 'csa'
+        self.csa_output_path = self.csa_path / 'csa-reports' / self.version_stamp
+        # Clang-tidy Path.
+        self.clang_tidy_path = self.workspace / 'clang-tidy'
+        self.clang_tidy_output_path = self.clang_tidy_path / self.version_stamp
+        self.clang_tidy_fixit = self.clang_tidy_output_path / 'fixit'
+        # Cppcheck Path.
+        self.cppcheck_path = self.workspace / 'cppcheck'
+        self.cppcheck_build_path = self.cppcheck_path / 'build'
+        self.cppcheck_output_path = self.cppcheck_path / self.version_stamp
+        # Infer Path
+        self.infer_path = self.workspace / 'infer'
+        self.infer_output_path = self.infer_path / self.version_stamp
+        # CodeChecker workspace.
+        self.codechecker_path = self.workspace / self.version_stamp
     
     def update_version(self, version_stamp):
         self.version_stamp = version_stamp
         logger.TAG = f"{self.name}/{self.version_stamp}"
         if self.update_mode:
             self.update_workspace_path()
-            for analyzer in self.analyzers:
-                if isinstance(analyzer, CSA):
-                    analyzer.update_output_path(self.csa_output_path)
 
     def clean_and_configure(self, can_skip_configure: bool, has_init: bool):
         if not has_init:
@@ -161,8 +189,8 @@ class Configuration:
         self.build()
         self.prepare_file_list()
         # 2. preprocess and diff
-        self.preprocess_repo()
         if self.env.inc_mode != IncrementalMode.NoInc:
+            self.preprocess_repo()
             self.diff_with_other(self.baseline, not has_init)
         # 3. extract inc info
         if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
@@ -596,16 +624,16 @@ class Configuration:
                 self.total_cg_nodes += file.cg_node_num
         return self.total_cg_nodes
     
-    def get_total_analyze_time(self):
+    def get_total_csa_analyze_time(self):
         # CSA analyze time is different with real execution time, it only
         # contains time used for Syntax Analysis, Path sensitive Analysis and 
         # Reports post processing.
-        self.total_analyze_time = 0
+        self.total_csa_analyze_time = 0
         file_list = self.diff_file_list if self.incrementable else self.file_list
         for file in file_list:
-            if file.analyze_time != 'Unknown':
-                self.total_analyze_time += float(file.analyze_time)
-        return self.total_analyze_time
+            if file.csa_analyze_time != 'Unknown':
+                self.total_csa_analyze_time += float(file.csa_analyze_time)
+        return self.total_csa_analyze_time
 
     def get_session_times(self):
         ret = "{\n"
@@ -629,7 +657,7 @@ class Configuration:
         return ret
 
     def file_status(self):
-        headers = ['file', 'status', 'analyze time(s)', 'cg nodes', 'changed functions', 'reanalyze functions', 'function summaries']
+        headers = ['file', 'status', 'csa analyze time(s)', 'cg nodes', 'changed functions', 'reanalyze functions', 'function summaries']
         datas = []
         unexists_number, unknown_number = 0, 0
         for ab_file in self.abnormal_file_list:
@@ -649,7 +677,7 @@ class Configuration:
                     file.parse_cg_file()
             if self.env.inc_mode == IncrementalMode.InlineLevel and not file.baseline_has_fs:
                 file.parse_baseline_fs_file()
-            data.extend([file.analyze_time, file.cg_node_num, file.cf_num, file.rf_num, file.basline_fs_num])
+            data.extend([file.csa_analyze_time, file.cg_node_num, file.cf_num, file.rf_num, file.basline_fs_num])
             datas.append(data)
             if file.status == FileStatus.NEW:
                 new_file_num += 1

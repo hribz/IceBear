@@ -55,7 +55,7 @@ def CodeCheckerAction(Repo: UpdateConfigRepository, version_stamp, repo_info: Re
         os.chdir(Repo.default_config.build_path)
         codechecker_cmd = ["CodeChecker", "check"]
         codechecker_cmd.extend(["-b", f"\"{Repo.default_config.build_script}\""])
-        codechecker_cmd.extend(["--analyzers", "clangsa"])
+        codechecker_cmd.extend(["--analyzers", "clang-tidy"])
         codechecker_cmd.extend([f"-j {env.analyze_opts.jobs}"])
         # Remove duplicate compile command to make sure each file is analyzed only once.
         codechecker_cmd.extend(["--compile-uniqueing", "symlink"])
@@ -86,12 +86,13 @@ def CodeCheckerAction(Repo: UpdateConfigRepository, version_stamp, repo_info: Re
     except subprocess.CalledProcessError as e:
         logger.debug(f"[CodeChecker Parse Error]\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}\n")
     # Capture Tools Time
-    tools_time_file_path = str(Repo.default_config.codechecker_path / 'tools_time.json')
+    tools_time_file_path = str(Repo.default_config.codechecker_path / 'metadata.json')
     tools_time = 0.0
     if os.path.exists(tools_time_file_path):
         with open(tools_time_file_path, 'r') as f:
             json_tools_time = json.load(f)
-            tools_time = json_tools_time["timestamps"]["end"] - json_tools_time["timestamps"]["begin"]
+            timestamp = json_tools_time["tools"][0]["timestamps"]
+            tools_time = timestamp["end"] - timestamp["begin"]
     # Parse Summary
     processed_files_number = 0
     reports_number = 0
@@ -119,7 +120,7 @@ def main(args):
     FFmpeg = 'repos/test_ffmpeg.json'
     grpc = 'repos/test_grpc.json'
     ica_demo = 'repos/test_ica_demo.json'
-    ignore_repos = {'xbmc/xbmc', 'mirror/busybox'}
+    ignore_repos = {'xbmc/xbmc', 'mirror/busybox', 'bitcoin/bitcoin'}
 
     repo_list = repos
 
