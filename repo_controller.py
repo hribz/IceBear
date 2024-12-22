@@ -1,3 +1,4 @@
+from shlex import join
 import sys
 import json
 import time
@@ -31,11 +32,12 @@ class RepoInfo:
         else:
             self.workspace = f"{self.abs_repo_path}_workspace/{env.timestamp}_{env.analyze_opts.inc}"
 
-def IncAnalyzerAction(Repo: UpdateConfigRepository, version_stamp, repo_info: RepoInfo, env: Environment) -> UpdateConfigRepository:
+def IncAnalyzerAction(Repo: UpdateConfigRepository, version_stamp, repo_info: RepoInfo, env: Environment, result_file, result_file_specific, init_csv) -> UpdateConfigRepository:
     if Repo is None:
         # Analysis first commit as baseline.
         Repo = UpdateConfigRepository(repo_info.repo_name, repo_info.abs_repo_path, env, build_root=f"{repo_info.abs_repo_path}_build", default_options=repo_info.default_options,
                         version_stamp=version_stamp, default_build_type=repo_info.build_type, can_skip_configure=False, workspace=repo_info.workspace, out_of_tree=repo_info.out_of_tree)
+        
     else:
         Repo.update_version(version_stamp)
     Repo.process_one_config()
@@ -77,7 +79,7 @@ def CodeCheckerAction(Repo: UpdateConfigRepository, version_stamp, repo_info: Re
         parse_cmd = ["CodeChecker", "parse"]
         parse_cmd.extend(['-e', 'html'])
         parse_cmd.extend([f"{Repo.default_config.codechecker_path}", '-o', f"{Repo.default_config.codechecker_path / 'html'}"])
-        parse_script = ' '.join(parse_cmd)
+        parse_script = commands_to_shell_script(parse_cmd)
         logger.debug(f"[CodeChecker Parse Script] {parse_script}")
         p = subprocess.run(parse_script, shell=True, check=True, text=True, capture_output=True)
         logger.debug(f"[CodeChecker Parse Success]\nstdout:\n{p.stdout}")
@@ -120,12 +122,11 @@ def main(args):
     FFmpeg = 'repos/test_ffmpeg.json'
     grpc = 'repos/test_grpc.json'
     ica_demo = 'repos/test_ica_demo.json'
-    ignore_repos = {'xbmc/xbmc', 'mirror/busybox', 'bitcoin/bitcoin'}
 
     repo_list = repos
 
-    result_file = f'repos/result/{opts.inc}_{env.timestamp}_result.csv'
-    result_file_specific = f'repos/result/{opts.inc}_{env.timestamp}_result_specific.csv'
+    result_file = f'repos/result/{env.timestamp}_{env.analyze_opts.inc}_result.csv'
+    result_file_specific = f'repos/result/{env.timestamp}_{env.analyze_opts.inc}_result_specific.csv'
     # result_file = 'repos/result/result_all.csv'
     # result_file_specific = 'repos/result/result_all_specific.csv'
     
@@ -167,12 +168,17 @@ def main(args):
                 if opts.codechecker:
                     Repo = CodeCheckerAction(Repo, version_stamp, repo_info, env)
                 else:
-                    Repo = IncAnalyzerAction(Repo, version_stamp, repo_info, env)
+                    Repo = IncAnalyzerAction(Repo, version_stamp, repo_info, env, result_file, result_file_specific, init_csv)
+                    init_csv = False
             else:
                 status = STATUS.CHECK_FAILED
                 logger.error(f"[Checkout Commit] {repo_info.repo_name} checkout to {commit_sha} failed!")
         if Repo:
             logger.info('---------------END SUMMARY-------------\n'+Repo.session_summaries)
+            headers, datas = read_csv(Repo.summary_csv_path(specific=False))
+            add_to_csv(headers, datas, result_file, init_csv)
+            headers, datas = read_csv(Repo.summary_csv_path(specific=True))
+            add_to_csv(headers, datas, result_file_specific, init_csv)
             Repo = None
 
 if __name__ == "__main__":

@@ -93,6 +93,10 @@ bool IncInfoCollectASTVisitor::TraverseDecl(Decl *D) {
     }
     bool isFunctionDecl = isa<FunctionDecl>(D);
     if (isFunctionDecl) {
+        if (!CG.getNode(D)) {
+            // Don't care functions not exist in CallGraph.
+            return true;
+        }
         auto FD = dyn_cast<FunctionDecl>(D);
         if (!FD->isThisDeclarationADefinition()) {
             // Just handle function definition, functions don't have definition

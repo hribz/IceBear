@@ -78,6 +78,13 @@ def parse_efm(efmline: str):
         logger.error(f"[Parse EFM] efmline {efmline} format error.")
         return None, None
 
+def read_csv(csv_file):
+    with open(csv_file, mode='r', newline='', encoding='utf-8') as file:
+        reader = csv.reader(file)
+        header = next(reader, None)
+        data = list(reader)
+        return header, data
+
 def add_to_csv(headers, data, csv_file, write_headers: bool = True):
     with open(csv_file, 'w' if write_headers else 'a', newline='') as f:
         writer = csv.writer(f)
@@ -107,3 +114,8 @@ def process_file_list(method, file_list, jobs):
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()  # 获取任务结果，如果有的话
                 ret = ret and result
+
+def commands_to_shell_script(commands):
+    assert(commands is not None)
+    from shlex import join
+    return join(commands)

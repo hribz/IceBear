@@ -5,7 +5,7 @@ from typing import List, Dict
 from enum import Enum, auto
 import hashlib
 
-from IncAnalysis.utils import makedir
+from IncAnalysis.utils import makedir, commands_to_shell_script
 from IncAnalysis.analyzer_config import *
 from IncAnalysis.logger import logger
 from IncAnalysis.compile_command import CompileCommand
@@ -252,6 +252,7 @@ class FileInCDB:
         else:
             commands.extend([str(self.baseline_file.prep_file), str(self.prep_file)])
         diff_script = ' '.join(commands)
+        # logger.debug("[Diff Files Script] " + diff_script)
         process = run(diff_script, shell=True, capture_output=True, text=True)
         if process.returncode == 0 or process.returncode == 1:
             if process.returncode == 0:
@@ -265,7 +266,6 @@ class FileInCDB:
             # logger.debug(f"[Diff Files Output] \n{process.stdout}")
         else:
             self.status = FileStatus.DIFF_FAILED
-            logger.debug("[Diff Files Script] " + diff_script)
             logger.error(f"[Diff Files Failed] stdout: {process.stdout}\n stderr: {process.stderr}")
             return False
         return True
@@ -278,7 +278,7 @@ class FileInCDB:
         if self.parent.env.ctu:
             commands += ['-ctu']
         commands += ['--', '-w'] + self.compile_command.arguments + ['-D__clang_analyzer__']
-        ii_script = ' '.join(commands)
+        ii_script = commands_to_shell_script(commands)
         try:
             process = run(ii_script, shell=True, capture_output=True, text=True, check=True)
             logger.info(f"[File Inc Info Success] {ii_script}")

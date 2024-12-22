@@ -28,20 +28,25 @@ class Environment:
         self.prepare_env_path()
 
         self.env = dict(os.environ)
-        self.env['CC'] = self.CLANG
-        self.env['CXX'] = self.CLANG_PLUS_PLUS
+        self.env['CC'] = self.CC
+        self.env['CXX'] = self.CXX
 
     def prepare_env_path(self):
         # Environment path
         self.PWD: Path = Path(".").absolute()
         self.EXTRACT_II = str(self.PWD / 'build/clang_tool/collectIncInfo')
         self.PANDA = str(self.PWD / 'panda/panda')
-        # CSA revised version
-        self.MY_CLANG = shutil.which('clang')
-        self.MY_CLANG_PLUS_PLUS = shutil.which('clang++')
-        self.CLANG = shutil.which('clang')
-        self.CLANG_PLUS_PLUS = shutil.which('clang++')
+        # Environment CC/CXX Compiler
+
+        self.CC = shutil.which(self.analyze_opts.cc)
+        self.CXX = shutil.which(self.analyze_opts.cxx)
+        # Customized clang path.
+        if self.analyze_opts.clang:
+            self.CLANG = shutil.which(self.analyze_opts.clang)
+        else:
+            self.CLANG = shutil.which('clang')
         clang_bin = os.path.dirname(self.CLANG)
+        self.CLANG_PLUS_PLUS = os.path.join(clang_bin, 'clang++')
         self.clang_tidy = os.path.join(clang_bin, 'clang-tidy')
         self.diagtool = os.path.join(clang_bin, 'diagtool')
         self.cppcheck = shutil.which('cppcheck')
@@ -99,36 +104,27 @@ class Environment:
             print('diff not found in the system path')
             exit(1)
         if self.EXTRACT_II:
-            print(f'inc info extractor found at: {self.EXTRACT_II}')
+            print(f'Inc info extractor found at: {self.EXTRACT_II}')
         else:
-            print('please build inc info extractor firstly') 
+            print('Please build inc info extractor firstly') 
             exit(1)
-        if os.path.exists(self.MY_CLANG):
-            print(f'use clang={self.MY_CLANG}')
+        if os.path.exists(self.CLANG):
+            print(f'Use clang={self.CLANG}')
         else:
-            self.MY_CLANG = shutil.which('clang')
-            if not self.MY_CLANG:
-                print('please ensure there is clang in your environment')
-                exit(1)
-        if os.path.exists(self.MY_CLANG_PLUS_PLUS):
-            print(f'use clang++={self.MY_CLANG_PLUS_PLUS}')
+            print(f'Please ensure that {self.CLANG} exists in your environment')
+            exit(1)
+        if os.path.exists(self.CLANG_PLUS_PLUS):
+            print(f'Use clang++={self.CLANG_PLUS_PLUS}')
         else:
-            self.MY_CLANG_PLUS_PLUS = shutil.which('clang++')
-            if not self.MY_CLANG_PLUS_PLUS:
-                print('please ensure there is clang++ in your environment')
-                exit(1)
+            print(f'Please ensure that {self.CLANG_PLUS_PLUS} exists in your environment')
+            exit(1)
         
         self.DEFAULT_PANDA_COMMANDS = [
             self.PANDA, 
             '-j', str(self.analyze_opts.jobs), '--print-execution-time',
-            '--cc', self.MY_CLANG, 
-            '--cxx', self.MY_CLANG_PLUS_PLUS
+            '--cc', self.CLANG, 
+            '--cxx', self.CLANG_PLUS_PLUS
         ]
-
-        if self.inc_mode.value <= IncrementalMode.FileLevel.value:
-            self.DEFAULT_PANDA_COMMANDS[5] = self.CLANG
-            self.DEFAULT_PANDA_COMMANDS[7] = self.CLANG_PLUS_PLUS
-
 
 class ArgumentParser:
     def __init__(self):
@@ -137,7 +133,11 @@ class ArgumentParser:
                                  help='Incremental analysis mode: file, func, inline')
         self.parser.add_argument('--verbose', action='store_true', dest='verbose', help='Record debug information.')
         self.parser.add_argument('--analyze', type=str, dest='analyze', choices=['ctu', 'no-ctu'],
-                help='Execute Clang Static Analyzer.')
+                                 help='Execute Clang Static Analyzer.')
+        self.parser.add_argument('--clang', type=str, dest='clang', default=None, 
+                                 help='Customize the Clang compiler for CSA file/inline level incremental analysis.(Clang++ will be specified automatically)')
+        self.parser.add_argument('--cc', type=str, dest='cc', default='clang', help='Customize the C compiler for configure & build.')
+        self.parser.add_argument('--cxx', type=str, dest='cxx', default='clang++', help='Customize the C++ compiler for configure & build.')
         self.parser.add_argument('-j', '--jobs', type=int, dest='jobs', default=1, help='Number of jobs can be executed in parallel.')
         self.parser.add_argument('-d', '--udp', action='store_true', dest='udp', help='Use files in diff path to `diff`.')
         supported_analyzers = ['clangsa', 'clang-tidy', 'cppcheck', 'infer']

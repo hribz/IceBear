@@ -9,7 +9,7 @@ import concurrent.futures
 
 from IncAnalysis.analyzer_config import *
 from IncAnalysis.file_in_cdb import FileInCDB, FileKind
-from IncAnalysis.utils import makedir, process_file_list
+from IncAnalysis.utils import makedir, process_file_list, commands_to_shell_script
 from IncAnalysis.logger import logger
 
 class Analyzer(ABC):
@@ -63,12 +63,12 @@ class CSA(Analyzer):
                 commands.extend(['-Xanalyzer', f'-analyze-function-file={file.get_file_path(FileKind.RF)}'])
             if self.analyzer_config.inc_mode == IncrementalMode.InlineLevel:
                 commands.extend(['-Xanalyzer', f'-analyzer-dump-fsum={file.get_file_path(FileKind.FS)}'])
-        csa_script = ' '.join([shlex.quote(x) for x in commands])
+        csa_script = commands_to_shell_script(commands)
         
-        logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {csa_script}")
         process = run(csa_script, shell=True, capture_output=True, text=True, cwd=file.compile_command.directory)
+        logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {csa_script}")
         if process.returncode == 0:
-            logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}\n{process.stdout}{process.stderr}")
+            logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
         else:
             logger.error(f"[{self.get_analyzer_name()} Analyze Failed] {csa_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         # Record time cost.
@@ -97,10 +97,10 @@ class ClangTidy(Analyzer):
         analyzer_cmd.extend(file.compile_command.arguments)
         analyzer_cmd.extend(self.analyzer_config.compiler_warnings)
 
-        clang_tidy_script = ' '.join([shlex.quote(x) for x in analyzer_cmd])
+        clang_tidy_script = commands_to_shell_script(analyzer_cmd)
 
-        # logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {clang_tidy_script}")
         process = run(clang_tidy_script, shell=True, capture_output=True, text=True, cwd=file.compile_command.directory)
+        # logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {clang_tidy_script}")
         if process.returncode == 0:
             logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
         else:
@@ -113,6 +113,7 @@ class CppCheck(Analyzer):
         self.cppcheck = 'cppcheck'
 
     def analyze_all_files(self):
+        # return super().analyze_all_files()
         # Just use `cppcheck --project=compile_commands.json --cppcheck-build-dir=cppcheck/build`
         # to analyze all files in compile_commands.json.
         if len(self.file_list) == 0:
@@ -128,7 +129,7 @@ class CppCheck(Analyzer):
         analyzer_cmd.append(f"--output-file={config.cppcheck_output_path}/result{result_extname}")
         analyzer_cmd.extend(self.analyzer_config.analyze_args())
 
-        cppcheck_script = ' '.join([shlex.quote(x) for x in analyzer_cmd])
+        cppcheck_script = commands_to_shell_script(analyzer_cmd)
         logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {cppcheck_script}")
         process = run(cppcheck_script, shell=True, capture_output=True, text=True, cwd=config.cppcheck_output_path)
         if process.returncode == 0:
@@ -150,12 +151,12 @@ class CppCheck(Analyzer):
         analyzer_cmd.append('--plist-output=' + output_path)
         analyzer_cmd.append(file.file_name)
 
-        cppcheck_script = ' '.join([shlex.quote(x) for x in analyzer_cmd])
+        cppcheck_script = commands_to_shell_script(analyzer_cmd)
 
         process = run(cppcheck_script, shell=True, capture_output=True, text=True, cwd=file.compile_command.directory)
-        logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {cppcheck_script}")
+        # logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {cppcheck_script}")
         if process.returncode == 0:
-            logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}\nstdout:\n{process.stdout}")
+            logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
         else:
             logger.error(f"[{self.get_analyzer_name()} Analyze Failed] {cppcheck_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         return process.returncode == 0
@@ -166,6 +167,7 @@ class Infer(Analyzer):
         self.infer = 'infer'
 
     def analyze_all_files(self):
+        # return super().analyze_all_files()
         # Just use `infer --compilation-database` to analyze all files in compile_commands.json.
         if len(self.file_list) == 0:
             logger.debug(f"[{self.get_analyzer_name()}] No file need to analyze.")
@@ -174,7 +176,7 @@ class Infer(Analyzer):
         makedir(config.infer_output_path)
         analyzer_cmd = [self.analyzer_config.infer, "--compilation-database", f"{config.compile_database}", "-o", f"{config.infer_output_path}"]
 
-        infer_script = ' '.join([shlex.quote(x) for x in analyzer_cmd])
+        infer_script = commands_to_shell_script(analyzer_cmd)
         logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {infer_script}")
         process = run(infer_script, shell=True, capture_output=True, text=True, cwd=config.infer_output_path)
         if process.returncode == 0:
@@ -210,12 +212,12 @@ class Infer(Analyzer):
         else:
             logger.debug(f"[Skip Infer Analyze] {file.file_name} doesn't have compile commands.")
             return False
-        infer_script = ' '.join([shlex.quote(x) for x in analyzer_cmd])
+        infer_script = commands_to_shell_script(analyzer_cmd)
 
-        logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {infer_script}")
         process = run(infer_script, shell=True, capture_output=True, text=True, cwd=file.compile_command.directory)
+        # logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {infer_script}")
         if process.returncode == 0:
-            logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+            logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
         else:
             logger.error(f"[{self.get_analyzer_name()} Analyze Failed] {infer_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         return process.returncode == 0

@@ -108,7 +108,7 @@ class Configuration:
         self.options = [Option(i) for i in options]
         self.build_type = build_type
         self.create_configure_script()
-        self.create_build_script()
+        self.create_build_commands()
         self.reply_database = []
         self.diff_file_list = []
         self.status = 'WAIT'
@@ -278,31 +278,31 @@ class Configuration:
                 exit(1)
             self.options.append(Option('CMAKE_EXPORT_COMPILE_COMMANDS=1'))
             self.options.append(Option('CMAKE_BUILD_TYPE=Release'))
-            self.options.append(Option(f'CMAKE_C_COMPILER={self.env.CLANG}'))
-            self.options.append(Option(f'CMAKE_CXX_COMPILER={self.env.CLANG_PLUS_PLUS}'))
+            self.options.append(Option(f'CMAKE_C_COMPILER={self.env.CC}'))
+            self.options.append(Option(f'CMAKE_CXX_COMPILER={self.env.CXX}'))
             commands = [self.env.CMAKE_PATH]
             commands.append(f"-S {str(self.src_path)}")
             commands.append(f"-B {str(self.build_path)}")
             for option in self.options:
                 commands.append(f"-D{option.name}={option.value}")
         elif self.build_type == BuildType.CONFIGURE:
-            commands = [f'CC={self.env.CLANG}', f'CXX={self.env.CLANG_PLUS_PLUS}', f'{self.src_path}/configure']
+            commands = [f'CC={self.env.CC}', f'CXX={self.env.CXX}', f'{self.src_path}/configure']
             commands.append(f"--prefix={self.build_path}")
             for option in self.options:
                 commands.append(option.origin_cmd())
         elif self.build_type == BuildType.KBUILD:
             # NEVER set `O=SRC_PATH` or `KBUILD_SRC=SRC_PATH` when build in tree.
             # This will make build process infinitely recurse.
-            commands = [f'CC={self.env.CLANG}', f'CXX={self.env.CLANG_PLUS_PLUS}']
+            commands = [f'CC={self.env.CC}', f'CXX={self.env.CXX}']
             commands.extend(['make', 'allyesconfig'])
             commands.extend(['-C', f'{self.build_path}'])
             for option in self.options:
                 commands.append(option.origin_cmd())
         if self.args:
             commands.extend(self.args)
-        self.configure_script = ' '.join(commands)
+        self.configure_script = commands_to_shell_script(commands)
 
-    def create_build_script(self):
+    def create_build_commands(self):
         # Use bear to intercept build process and record compile commands.
         commands = []
         if self.build_type == BuildType.CMAKE:
@@ -324,7 +324,7 @@ class Configuration:
             commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
             commands.extend(['-C', f'{self.build_path}'])
             commands.extend(["-i"])
-        self.build_script = ' '.join(commands)
+        self.build_commands = commands
 
     def configure(self):
         start_time = time.time()
@@ -359,10 +359,15 @@ class Configuration:
         # CMake will not be influenced by path.
         os.chdir(self.build_path)
         try:
-            commands = ['bear', '-o', f'{self.compile_database}', self.build_script]
-            process = run(' '.join(commands), shell=True, capture_output=True, text=True, check=True)
+            commands = ['bear', '-o', f'{self.compile_database}']
+            commands.extend(['--use-cc', f'{self.env.CC}'])
+            commands.extend(['--use-c++', f'{self.env.CXX}'])
+            commands.extend(self.build_commands)
+            build_script = commands_to_shell_script(commands)
+            logger.info(f"[Repo Build Script] {build_script}")
+            process = run(build_script, shell=True, capture_output=True, text=True, check=True)
             self.session_times['build'] = time.time() - start_time
-            logger.info(f"[Repo Build Success] {self.build_script}")
+            logger.info(f"[Repo Build Success]")
         except subprocess.CalledProcessError as e:
             self.session_times['build'] = SessionStatus.Failed
             logger.error(f"[Repo Build Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
@@ -403,7 +408,7 @@ class Configuration:
         commands.extend(['-o', str(self.preprocess_path)])
         if self.env.analyze_opts.verbose:
             commands.extend(['--verbose'])
-        preprocess_script = ' '.join(commands)
+        preprocess_script = commands_to_shell_script(commands)
         logger.debug("[Preprocess Files Script] " + preprocess_script)
         try:
             process = run(preprocess_script, shell=True, capture_output=True, text=True, check=True)
@@ -455,7 +460,7 @@ class Configuration:
             commands.extend(['--file-list', f"{self.diff_files_path}"])
         if self.env.analyze_opts.verbose:
             commands.extend(['--verbose'])
-        edm_script = ' '.join(commands)
+        edm_script = commands_to_shell_script(commands)
         logger.debug("[Generating EFM Files Script] " + edm_script)
         try:
             process = run(edm_script, shell=True, capture_output=True, text=True, check=True)

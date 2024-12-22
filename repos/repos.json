@@ -141,7 +141,8 @@
         "config_options": [
             "--disable-x86asm"
         ],
-        "branch": "master"
+        "branch": "master",
+        "out_of_tree": false
     },
     {
         "project": "mirror/x264",

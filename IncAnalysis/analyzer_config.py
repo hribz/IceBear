@@ -6,7 +6,6 @@ from pathlib import Path
 
 from IncAnalysis.environment import Environment, IncrementalMode
 from IncAnalysis.analyzer_utils import *
-from IncAnalysis.utils import makedir
 
 class AnalyzerConfig(ABC):
     def __init__(self, env: Environment, workspace: Path, checker_file: str = None, config_file: str = None):
@@ -20,7 +19,6 @@ class AnalyzerConfig(ABC):
         self.verbose = env.analyze_opts.verbose
 
         self.workspace: Path = workspace
-        makedir(workspace)
         self.args = None
         if config_file is not None:
             self.init_from_file(config_file)
@@ -43,7 +41,7 @@ class AnalyzerConfig(ABC):
 csa_default_config = {
     "CSAOptions": [
         # "-analyzer-disable-all-checks",
-        "-analyzer-opt-analyze-headers",
+        # "-analyzer-opt-analyze-headers",
         # "-analyzer-inline-max-stack-depth=5",
         # "-analyzer-inlining-mode=noredundancy",
         "-analyzer-stats", # Output time cost.
@@ -99,7 +97,7 @@ class CSAConfig(AnalyzerConfig):
         self.inc_level_check()
 
         if not config_file:
-            self.json_config = csa_default_config
+            self.json_config = csa_default_config.copy()
         # Options may influence incremental analysis.
         self.AnalyzeAll = False
         self.IPAMode = IPAKind.IPAK_DynamicDispatchBifurcate
@@ -124,12 +122,12 @@ class CSAConfig(AnalyzerConfig):
                     inline_level_enable = True
             
             if self.inc_mode == IncrementalMode.FuncitonLevel and not func_level_enable:
-                logger.error(f"[Inc Level Check] Make sure to use the custom Clang with the \
-                             `--analyze-function-file` parameter, which is compiled from llvm-project-ica.")
+                logger.error(f"[Inc Level Check] Please use customized clang build from llvm-project-ica,"
+                             " and make sure there is `-analyze-function-file` in `clang -cc1 -help`'s output.")
                 exit(1)
             if self.inc_mode == IncrementalMode.InlineLevel and not inline_level_enable:
-                logger.error(f"[Inc Level Check] Make sure to use the custom Clang with the `-analyze-function-file` \
-                              and `-analyzer-dump-fsum` parameter, which is compiled from llvm-project-ica.")
+                logger.error(f"[Inc Level Check] Please use customized clang build from llvm-project-ica,"
+                             " and make sure there are `-analyze-function-file` and `-analyzer-dump-fsum` in `clang -cc1 -help`'s output.")
                 exit(1)
 
     def parse_json_config(self):
@@ -202,7 +200,7 @@ class ClangTidyConfig(AnalyzerConfig):
             exit(1)
 
         if not config_file:
-            self.json_config = clang_tidy_default_config
+            self.json_config = clang_tidy_default_config.copy()
         self.checkers = []
         self.compiler_warnings = []
         self.parse_json_config()
@@ -231,7 +229,7 @@ class CppCheckConfig(AnalyzerConfig):
             exit(1)
 
         if not config_file:
-            self.json_config = cppcheck_default_config
+            self.json_config = cppcheck_default_config.copy()
         self.disable_checkers = []
         self.MaxCTUDepth = 2
         self.Sarif = True # Generate sarif format result file defaultly.
@@ -284,7 +282,7 @@ class InferConfig(AnalyzerConfig):
             exit(1)
 
         if not config_file:
-            self.json_config = infer_default_config
+            self.json_config = infer_default_config.copy()
         self.parse_json_config()
 
     def parse_json_config(self):

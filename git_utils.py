@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from IncAnalysis.logger import logger
 from IncAnalysis.utils import makedir
 
+ignore_repos = {'xbmc/xbmc', 'mirror/busybox', 'bitcoin/bitcoin'}
+
 def get_repo_csv(csv_path: str) -> pd.DataFrame:
     commit_df = pd.read_csv(csv_path)
     return commit_df

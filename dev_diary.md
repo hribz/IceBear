@@ -319,9 +319,11 @@ int main () {
 
 # 2024/11/26
 ## 问题
-- 当某些方法未被使用，不在`TopLevelDecls`之中，并且发生了修改的情况下，会出现`CallGraph`无法找到changed function的情况。
+- 某些未被使用的重载操作符，某些模板函数的原函数不会出现在`CallGraph`中，当它们发生了修改的情况下，会出现`CallGraph`无法找到changed function的情况。
+- 某些虚函数，函数指针，隐式调用的析构函数的调用边不会出现在`CallGraph`上，对这些调用边需要特殊处理。
 ## 解决方案
-- 这种情况应当在`CollectIncInfo`时进行处理，因为生成的`CallGraph`可能并不完整，需要找到那些被忽略的`CallExpr`，包括生命周期上的隐式析构，虚函数，函数指针等不确定的情况，CSA是具备处理这三种情况的能力的，所以必须处理这几种情况：
+- 只分析出现在`CallGraph`上的函数，并对某些`CallExpr`做保守处理。
+- 调用边缺失情况应当在`CollectIncInfo`时进行处理，因为生成的`CallGraph`可能并不完整，需要找到那些被忽略的`CallExpr`，包括生命周期上的隐式析构，虚函数，函数指针等不确定的情况，CSA是具备处理这三种情况的能力的，所以必须处理这几种情况：
   - 对于虚函数和函数指针：一种最保守的做法是将出现了这类`CallExpr`的函数都标记为changed。
   - 对于隐式析构函数调用，他们仅出现在CFG上，需要考虑是否值得为此生成CFG，或者仅仅去记录使用了对应class的函数，认为它们都可能调用析构函数，不过这样的开销过大。
 - 如果像上面这样处理，那么在`CollectIncInfo`就只需考虑`CallGraph`中的`Decl`，因为`CG`之外的`Decl`即使被标记为`changed`，也无法通过在`CG`上传播找到需要重分析的父节点。并且上方的保守策略可以保证不会漏掉需要重分析的函数。
@@ -344,7 +346,7 @@ int main () {
 # 2024/12/02
 ## 问题
 - 在CTU分析时，出现了`error: PCH file uses an older PCH format that is no longer supported`。经过分析发现，原因是`CSA`分析使用的clang版本和生成ast的clang版本不同，需要在`environment`初始化`PANDA_COMMAND`时调整clang版本。
-- 将`configuration.analyzers=[CSA(CSAConfig(...))]`放在`update_workspace_path()`函数当中，发现CSAConfig的`parse_config_file()`似乎被重复执行，导致CSA指令中存在重复的编译参数。
+- 将`configuration.analyzers=[CSA(CSAConfig(...))]`放在`update_workspace_path()`函数当中，发现CSAConfig的`parse_config_file()`似乎被重复执行，导致CSA指令中存在重复的编译参数。（2024/12/19发现问题出在`self.json_config = default_csa_config`时进行的是浅拷贝，导致后续`self.json_config.append(...)往default_csa_config`里加东西了）
 - 进行CTU分析时输出`warning`：AST file shape change.
 
 # 2024/12/03
@@ -418,3 +420,9 @@ int main () {
 ## 除CSA外的analyzer
 - 虽然它们只能做`file-level`的增量，但是可以用diff信息来对报告进行过滤，如`clang-tidy`的`--line-filter`可以指定需要报告的行号，`cppcheck`的`--suppress=[error id]:[filename]:[line]`可以指定需要过滤的报告种类和文件名，文件行号。因此，可以加上一个报告过滤模块，过滤掉无关的reports。
 - CTU部分可以说考虑到CTU分析的开销很大，因此加入分析配置参数来辅助确定CTU增量分析可能跨多少层文件进行分析。
+
+# 2024/12/19
+## 细粒度的diff
+- 目前对预处理后的文件进行diff，当头文件发生较大变化时，导致大量文件产生大量的变化，从而导致标记大量的`changed functions`。
+- 将这些头文件作为入口函数，进行跨过程的路径敏感分析大多数情况下是没有必要的。CSA默认的策略是系统头文件的函数不作为入口，用户自定义头文件的函数只进行语法检查。但是`analyzer-opt-analyze-headers`可以强迫CSA考虑将所有函数作为入口进行跨过程的路径敏感分析，并且`CodeChecker`是默认打开这个配置选项的，导致分析时间大大增加，且可以想象存在大量重复分析的函数。
+- 在传播`cf`得到`rf`的过程中，可以只考虑主文件的函数节点，以及这些节点连接的库函数。
