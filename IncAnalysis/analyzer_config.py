@@ -256,7 +256,6 @@ class CppCheckConfig(AnalyzerConfig):
     def analyze_args(self):
         if self.args is not None:
             return self.args
-        print("json config" + str(self.json_config))
         self.args = list(self.json_config)
         self.args.append('--enable=all')
         

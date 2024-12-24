@@ -7,6 +7,7 @@ from IncAnalysis.logger import logger
 from IncAnalysis.utils import * 
 from IncAnalysis.environment import *
 from IncAnalysis.configuration import Configuration, Option, BuildType
+from IncAnalysis.analyzer import Analyzer
 
 class Repository(ABC):
     name: str
@@ -27,6 +28,75 @@ class Repository(ABC):
     @abstractmethod
     def process_one_config(self, config: Configuration=None):
         pass
+    
+
+    def summary_one_config(self, config: Configuration):
+        headers = ["project", "version", "configure", "build", "prepare for inc", "prepare for CSA"]
+        analyzers = [Analyzer.__str_to_analyzer_class__(i).__name__ for i in self.env.analyzers]
+        headers.extend(analyzers)
+        headers.append("analyze")
+
+        prepare_for_inc = {"preprocess_repo", "diff_with_other", "extract_inc_info", "parse_call_graph", 
+                           "parse_functions_changed", "propagate_reanalyze_attr", "parse_function_summaries"}
+        prepare_for_csa = {"generate_efm", "merge_efm"}
+
+        config_data = [self.name, config.version_stamp]
+        config_time = 0.0
+        build_time = 0.0
+        inc_time = 0.0
+        prepare_time = 0.0
+        analyze_time = 0.0
+        analyzers_time = []
+
+        for session in config.session_times.keys():
+            exe_time = config.session_times[session]
+            if not isinstance(exe_time, SessionStatus):
+                if session in prepare_for_inc:
+                    inc_time += exe_time
+                elif session in prepare_for_csa:
+                    prepare_time += exe_time
+                elif session == "configure":
+                    config_time = exe_time
+                elif session == "build":
+                    build_time = exe_time
+                elif session == "analyze":
+                    analyze_time = exe_time
+                elif session in analyzers:
+                    analyzers_time.append(exe_time)
+        config_data.append("%.3lf" % config_time)
+        config_data.append("%.3lf" % build_time)
+        config_data.append("%.3lf" % inc_time)
+        config_data.append("%.3lf" % prepare_time)
+        config_data.extend(["%.6lf" % i for i in analyzers_time])
+        config_data.append("%.6lf" % analyze_time)
+        return headers, config_data
+    
+    def summary_one_config_specific(self, config: Configuration):
+        headers = ["project", "version"]
+        for session in self.default_config.session_times.keys():
+            headers.append(str(session))
+            # if str(session) == 'diff_with_other':
+            #     headers.extend(["diff_command_time", "diff_parse_time"])
+        headers.extend(["files", "diff files", "changed function", "reanalyze function", "diff but no cf", "total cg nodes", "total csa analyze time"])
+        config = self.default_config
+        config_data = [self.name, config.version_stamp]
+        for session in config.session_times.keys():
+            exe_time = config.session_times[session]
+            if isinstance(exe_time, SessionStatus):
+                config_data.append(str(exe_time._name_))
+            else:
+                config_data.append("%.3lf" % exe_time)
+            # if str(session) == 'diff_with_other' and idx == 0:
+            #     config_data.append('Skipped')
+            #     config_data.append('Skipped')
+        config_data.append(len(config.file_list))
+        config_data.append(len(config.diff_file_list))
+        config_data.append(config.get_changed_function_num())
+        config_data.append(config.get_reanalyze_function_num())
+        config_data.append(config.diff_file_with_no_cf)
+        config_data.append(config.get_total_cg_nodes_num())
+        config_data.append("%.6lf" % config.get_total_csa_analyze_time())
+        return headers, config_data
     
     @abstractmethod
     def summary_to_csv_specific(self):
@@ -130,65 +200,19 @@ class MultiConfigRepository(Repository):
         return ret
     
     def summary_to_csv_specific(self):
-        headers = ["project", "version"]
-        for session in self.default_config.session_times.keys():
-            headers.append(str(session))
-            # if str(session) == 'diff_with_other':
-            #     headers.extend(["diff_command_time", "diff_parse_time"])
-        headers.extend(["files", "diff files", "changed function", "reanalyze function", "diff but no cf", "diff but no cg"])
+        headers = None
         data = []
         for (idx, config) in enumerate(self.configurations):
-            config_data = [self.name, os.path.basename(config.build_path)]
-            for session in config.session_times.keys():
-                exe_time = config.session_times[session]
-                if isinstance(exe_time, SessionStatus):
-                    config_data.append(str(exe_time._name_))
-                else:
-                    config_data.append("%.3lf" % exe_time)
-                # if str(session) == 'diff_with_other' and idx == 0:
-                #     config_data.append('Skipped')
-                #     config_data.append('Skipped')
-            config_data.append(len(config.file_list))
-            config_data.append(len(config.diff_file_list))
-            config_data.append(config.get_changed_function_num())
-            config_data.append(config.get_reanalyze_function_num())
-            config_data.append(config.diff_file_with_no_cf)
-            config_data.append(config.diff_file_with_no_cg)
+            headers, config_data = self.summary_one_config_specific(config)
             data.append(config_data)
 
         return headers, data
     
     def summary_to_csv(self):
-        headers = ["project", "version", "configure", "build", "prepare for inc", "prepare for CSA", "execute CSA"]
-        prepare_for_inc = {"preprocess_repo", "diff_with_other", "extract_inc_info", "parse_call_graph", 
-                           "parse_functions_changed", "propagate_reanalyze_attr", "parse_function_summaries"}
-        prepare_for_csa = {"generate_efm", "merge_efm"}
+        headers = None
         data = []
         for (idx, config) in enumerate(self.configurations):
-            config_data = [self.name, os.path.basename(config.build_path)]
-            config_time = 0.0
-            build_time = 0.0
-            inc_time = 0.0
-            prepare_time = 0.0
-            exe_csa_time = 0.0
-            for session in config.session_times.keys():
-                exe_time = config.session_times[session]
-                if not isinstance(exe_time, SessionStatus):
-                    if session in prepare_for_inc:
-                        inc_time += exe_time
-                    elif session in prepare_for_csa:
-                        prepare_time += exe_time
-                    elif session == "configure":
-                        config_time = exe_time
-                    elif session == "build":
-                        build_time = exe_time
-                    elif session == "CSA":
-                        exe_csa_time = exe_time
-            config_data.append("%.3lf" % config_time)
-            config_data.append("%.3lf" % build_time)
-            config_data.append("%.3lf" % inc_time)
-            config_data.append("%.3lf" % prepare_time)
-            config_data.append("%.3lf" % exe_csa_time)
+            headers, config_data = self.summary_one_config(config)
             data.append(config_data)
 
         return headers, data
@@ -239,65 +263,14 @@ class UpdateConfigRepository(Repository):
         return ret
 
     def summary_to_csv_specific(self):
-        headers = ["project", "version"]
-        for session in self.default_config.session_times.keys():
-            headers.append(str(session))
-            # if str(session) == 'diff_with_other':
-            #     headers.extend(["diff_command_time", "diff_parse_time"])
-        headers.extend(["files", "diff files", "changed function", "reanalyze function", "diff but no cf", "total cg nodes", "total csa analyze time"])
+        headers, config_data = self.summary_one_config_specific(self.default_config)
         data = []
-        config = self.default_config
-        config_data = [self.name, config.version_stamp]
-        for session in config.session_times.keys():
-            exe_time = config.session_times[session]
-            if isinstance(exe_time, SessionStatus):
-                config_data.append(str(exe_time._name_))
-            else:
-                config_data.append("%.3lf" % exe_time)
-            # if str(session) == 'diff_with_other' and idx == 0:
-            #     config_data.append('Skipped')
-            #     config_data.append('Skipped')
-        config_data.append(len(config.file_list))
-        config_data.append(len(config.diff_file_list))
-        config_data.append(config.get_changed_function_num())
-        config_data.append(config.get_reanalyze_function_num())
-        config_data.append(config.diff_file_with_no_cf)
-        config_data.append(config.get_total_cg_nodes_num())
-        config_data.append(config.get_total_csa_analyze_time())
         data.append(config_data)
         add_to_csv(headers, data, self.summary_csv_path(specific=True), not self.has_init)
     
     def summary_to_csv(self):
-        headers = ["project", "version", "configure", "build", "prepare for inc", "prepare for CSA", "execute CSA"]
-        prepare_for_inc = {"preprocess_repo", "diff_with_other", "extract_inc_info", "parse_call_graph", 
-                           "parse_functions_changed", "propagate_reanalyze_attr", "parse_function_summaries"}
-        prepare_for_csa = {"generate_efm", "merge_efm"}
+        headers, config_data = self.summary_one_config(self.default_config)
         data = []
-        config = self.default_config
-        config_data = [self.name, config.version_stamp]
-        config_time = 0.0
-        build_time = 0.0
-        inc_time = 0.0
-        prepare_time = 0.0
-        exe_csa_time = 0.0
-        for session in config.session_times.keys():
-            exe_time = config.session_times[session]
-            if not isinstance(exe_time, SessionStatus):
-                if session in prepare_for_inc:
-                    inc_time += exe_time
-                elif session in prepare_for_csa:
-                    prepare_time += exe_time
-                elif session == "configure":
-                    config_time = exe_time
-                elif session == "build":
-                    build_time = exe_time
-                elif session == "CSA":
-                    exe_csa_time = exe_time
-        config_data.append("%.3lf" % config_time)
-        config_data.append("%.3lf" % build_time)
-        config_data.append("%.3lf" % inc_time)
-        config_data.append("%.3lf" % prepare_time)
-        config_data.append("%.3lf" % exe_csa_time)
         data.append(config_data)
         add_to_csv(headers, data, self.summary_csv_path(specific=False), not self.has_init)
     

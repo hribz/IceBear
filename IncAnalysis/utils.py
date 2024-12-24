@@ -86,6 +86,7 @@ def read_csv(csv_file):
         return header, data
 
 def add_to_csv(headers, data, csv_file, write_headers: bool = True):
+    makedir(os.path.dirname(csv_file))
     with open(csv_file, 'w' if write_headers else 'a', newline='') as f:
         writer = csv.writer(f)
         if write_headers:

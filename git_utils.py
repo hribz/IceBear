@@ -7,25 +7,25 @@ from datetime import datetime, timedelta
 from IncAnalysis.logger import logger
 from IncAnalysis.utils import makedir
 
-ignore_repos = {'xbmc/xbmc', 'mirror/busybox', 'bitcoin/bitcoin'}
+ignore_repos = {'xbmc/xbmc', 'mirror/busybox'}
 
 def get_repo_csv(csv_path: str) -> pd.DataFrame:
     commit_df = pd.read_csv(csv_path)
     return commit_df
 
-def clone_project(repo_name: str) -> None:
+def clone_project(repo_name: str) -> bool:
     try:
         repo_dir = f"repos/{repo_name}"
         # repo_dir exist and not empty.
         if os.path.exists(repo_dir) and os.listdir(repo_dir):
-            logger.info(f"[Clone Project] repository {repo_dir} has exists.")
+            logger.info(f"[Clone Project] repository {repo_dir} already exists.")
             return True
         makedir(repo_dir)
-        Repo.clone_from("https://github.com/"+repo_name+".git", repo_dir, multi_options=['--recurse-submodules'])
+        Repo.clone_from(f"git@github.com:{repo_name}.git", repo_dir, multi_options=['--recurse-submodules'])
         return True
     except Exception as e:
         # clone error, repository no longer exists
-        logger.error(f"[Clone Project] repository {repo_dir} cannot clone.\n{e}")
+        logger.error(f"[Clone Project] repository {repo_dir} cannot be cloned.\n{e}")
         return False
 
 def checkout_target_commit(repo_dir: str, commit: str) -> bool:
@@ -37,7 +37,7 @@ def checkout_target_commit(repo_dir: str, commit: str) -> bool:
         return True
 
     except Exception as e:
-        print(f"error while checking out commit.\n{e}")
+        logger.error(f"error while checking out commit.\n{e}")
         return False
 
 def reset_repository(repo_dir: str):
@@ -52,7 +52,7 @@ def update_submodules(repo_dir: str):
         subprocess.run("git submodule update", check=True, shell=True, cwd=repo_dir)
         return True
     except Exception as e:
-        print(f"error while updating submodules.\n{e}")
+        logger.error(f"error while updating submodules.\n{e}")
         return False
 
 def get_head_commit_date(repo_dir: str):
@@ -81,10 +81,10 @@ def get_recent_n_daily_commits(repo_dir: str, n: int, branch):
     later_commit_date = None
     daily_commits = []
     if not checkout_target_commit(repo_dir, branch):
-        print(f"Checkout {branch} failed.")
+        logger.error(f"Checkout {branch} failed.")
         exit(1)
     else:
-        print(f"Checkout {branch} success.")
+        logger.info(f"Checkout {branch} success.")
 
     for commit in repo.iter_commits(branch):
         commit_date = datetime.fromtimestamp(commit.committed_date).date()

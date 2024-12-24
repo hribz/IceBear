@@ -169,16 +169,16 @@ def main(args):
                     Repo = CodeCheckerAction(Repo, version_stamp, repo_info, env)
                 else:
                     Repo = IncAnalyzerAction(Repo, version_stamp, repo_info, env, result_file, result_file_specific, init_csv)
-                    init_csv = False
             else:
                 status = STATUS.CHECK_FAILED
                 logger.error(f"[Checkout Commit] {repo_info.repo_name} checkout to {commit_sha} failed!")
-        if Repo:
+        if Repo and not opts.codechecker:
             logger.info('---------------END SUMMARY-------------\n'+Repo.session_summaries)
             headers, datas = read_csv(Repo.summary_csv_path(specific=False))
             add_to_csv(headers, datas, result_file, init_csv)
             headers, datas = read_csv(Repo.summary_csv_path(specific=True))
             add_to_csv(headers, datas, result_file_specific, init_csv)
+            init_csv = False
             Repo = None
 
 if __name__ == "__main__":

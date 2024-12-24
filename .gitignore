@@ -15,5 +15,5 @@ test*.py
 *.sum
 repos/*
 !repos.json
-*.txt
 *.log
+myenv*

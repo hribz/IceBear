@@ -39,9 +39,19 @@ class Analyzer(ABC):
                 result = future.result()  # 获取任务结果，如果有的话
                 ret = ret and result
         return ret
-    
-    def get_analyzer_name(self):
-        return self.__class__.__name__
+
+    @staticmethod
+    def __str_to_analyzer_class__(analyzer_name: str):
+        if analyzer_name == "clangsa":
+            return CSA
+        elif analyzer_name == "clang-tidy":
+            return ClangTidy
+        elif analyzer_name == "cppcheck":
+            return CppCheck
+        elif analyzer_name == "infer":
+            return Infer
+        else:
+            return None
 
 class CSA(Analyzer):
     def __init__(self, analyzer_config: CSAConfig, file_list: List[FileInCDB]):
@@ -57,7 +67,7 @@ class CSA(Analyzer):
         # Add file specific args.
         if self.analyzer_config.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             if file.cf_num == 0 or file.rf_num == 0:
-                logger.info(f"[{self.get_analyzer_name()} No Functions] Don't need to analyze {file.file_name}")
+                logger.info(f"[{__class__.__name__} No Functions] Don't need to analyze {file.file_name}")
                 return True
             if file.parent.incrementable and file.has_rf:
                 commands.extend(['-Xanalyzer', f'-analyze-function-file={file.get_file_path(FileKind.RF)}'])
@@ -66,11 +76,11 @@ class CSA(Analyzer):
         csa_script = commands_to_shell_script(commands)
         
         process = run(csa_script, shell=True, capture_output=True, text=True, cwd=file.compile_command.directory)
-        logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {csa_script}")
+        logger.debug(f"[{__class__.__name__} Analyze Script] {csa_script}")
         if process.returncode == 0:
-            logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
+            logger.info(f"[{__class__.__name__} Analyze Success] {file.file_name}")
         else:
-            logger.error(f"[{self.get_analyzer_name()} Analyze Failed] {csa_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+            logger.error(f"[{__class__.__name__} Analyze Failed] {csa_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         # Record time cost.
         if process.stderr:
             for line in process.stderr.splitlines():
@@ -100,11 +110,11 @@ class ClangTidy(Analyzer):
         clang_tidy_script = commands_to_shell_script(analyzer_cmd)
 
         process = run(clang_tidy_script, shell=True, capture_output=True, text=True, cwd=file.compile_command.directory)
-        # logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {clang_tidy_script}")
+        # logger.debug(f"[{__class__.__name__} Analyze Script] {clang_tidy_script}")
         if process.returncode == 0:
-            logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
+            logger.info(f"[{__class__.__name__} Analyze Success] {file.file_name}")
         else:
-            logger.error(f"[{self.get_analyzer_name()} Analyze Failed] {clang_tidy_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+            logger.error(f"[{__class__.__name__} Analyze Failed] {clang_tidy_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         return process.returncode == 0
 
 class CppCheck(Analyzer):
@@ -117,7 +127,7 @@ class CppCheck(Analyzer):
         # Just use `cppcheck --project=compile_commands.json --cppcheck-build-dir=cppcheck/build`
         # to analyze all files in compile_commands.json.
         if len(self.file_list) == 0:
-            logger.debug(f"[{self.get_analyzer_name()}] No file need to analyze.")
+            logger.debug(f"[{__class__.__name__}] No file need to analyze.")
             return True
         config = self.file_list[0].parent
         makedir(config.cppcheck_build_path)
@@ -130,12 +140,12 @@ class CppCheck(Analyzer):
         analyzer_cmd.extend(self.analyzer_config.analyze_args())
 
         cppcheck_script = commands_to_shell_script(analyzer_cmd)
-        logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {cppcheck_script}")
+        logger.debug(f"[{__class__.__name__} Analyze Script] {cppcheck_script}")
         process = run(cppcheck_script, shell=True, capture_output=True, text=True, cwd=config.cppcheck_output_path)
         if process.returncode == 0:
-            logger.info(f"[{self.get_analyzer_name()} Analyze Success]")
+            logger.info(f"[{__class__.__name__} Analyze Success]")
         else:
-            logger.error(f"[{self.get_analyzer_name()} Analyze Failed] {cppcheck_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+            logger.error(f"[{__class__.__name__} Analyze Failed] {cppcheck_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         return process.returncode == 0
 
     def analyze_one_file(self, file: FileInCDB):
@@ -154,11 +164,11 @@ class CppCheck(Analyzer):
         cppcheck_script = commands_to_shell_script(analyzer_cmd)
 
         process = run(cppcheck_script, shell=True, capture_output=True, text=True, cwd=file.compile_command.directory)
-        # logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {cppcheck_script}")
+        # logger.debug(f"[{__class__.__name__} Analyze Script] {cppcheck_script}")
         if process.returncode == 0:
-            logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
+            logger.info(f"[{__class__.__name__} Analyze Success] {file.file_name}")
         else:
-            logger.error(f"[{self.get_analyzer_name()} Analyze Failed] {cppcheck_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+            logger.error(f"[{__class__.__name__} Analyze Failed] {cppcheck_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         return process.returncode == 0
 
 class Infer(Analyzer):
@@ -170,19 +180,19 @@ class Infer(Analyzer):
         # return super().analyze_all_files()
         # Just use `infer --compilation-database` to analyze all files in compile_commands.json.
         if len(self.file_list) == 0:
-            logger.debug(f"[{self.get_analyzer_name()}] No file need to analyze.")
+            logger.debug(f"[{__class__.__name__}] No file need to analyze.")
             return True
         config = self.file_list[0].parent
         makedir(config.infer_output_path)
         analyzer_cmd = [self.analyzer_config.infer, "--compilation-database", f"{config.compile_database}", "-o", f"{config.infer_output_path}"]
 
         infer_script = commands_to_shell_script(analyzer_cmd)
-        logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {infer_script}")
+        logger.debug(f"[{__class__.__name__} Analyze Script] {infer_script}")
         process = run(infer_script, shell=True, capture_output=True, text=True, cwd=config.infer_output_path)
         if process.returncode == 0:
-            logger.info(f"[{self.get_analyzer_name()} Analyze Success]")
+            logger.info(f"[{__class__.__name__} Analyze Success]")
         else:
-            logger.error(f"[{self.get_analyzer_name()} Analyze Failed] {infer_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+            logger.error(f"[{__class__.__name__} Analyze Failed] {infer_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         return process.returncode == 0
 
     
@@ -215,9 +225,9 @@ class Infer(Analyzer):
         infer_script = commands_to_shell_script(analyzer_cmd)
 
         process = run(infer_script, shell=True, capture_output=True, text=True, cwd=file.compile_command.directory)
-        # logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {infer_script}")
+        # logger.debug(f"[{__class__.__name__} Analyze Script] {infer_script}")
         if process.returncode == 0:
-            logger.info(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
+            logger.info(f"[{__class__.__name__} Analyze Success] {file.file_name}")
         else:
-            logger.error(f"[{self.get_analyzer_name()} Analyze Failed] {infer_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+            logger.error(f"[{__class__.__name__} Analyze Failed] {infer_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         return process.returncode == 0

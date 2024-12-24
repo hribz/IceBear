@@ -74,7 +74,7 @@ class Configuration:
     session_times: Dict
 
     def __init__(self, name, src_path, env, options: List[str], version_stamp, args=None, build_path=None, workspace_path=None,
-                 baseline=None, update_mode:bool=False, build_type: BuildType=BuildType.CMAKE):
+                 baseline=None, update_mode:bool=False, build_type: BuildType=BuildType.CMAKE, build_scipt = None, configure_scipt = None):
         self.name = name
         self.src_path = src_path
         self.env = env
@@ -107,8 +107,15 @@ class Configuration:
             self.args = None
         self.options = [Option(i) for i in options]
         self.build_type = build_type
-        self.create_configure_script()
-        self.create_build_commands()
+        
+        self.configure_scipt = configure_scipt   
+        if not configure_scipt:
+            self.create_configure_commands()
+
+        self.build_scipt = build_scipt
+        if not build_scipt:
+            self.create_build_commands()
+
         self.reply_database = []
         self.diff_file_list = []
         self.status = 'WAIT'
@@ -125,7 +132,7 @@ class Configuration:
         analyzers = self.env.analyzers
         if self.env.analyze_opts.analyzers:
             analyzers = self.env.analyze_opts.analyzers
-        self.analyzers = []
+        self.analyzers: List[Analyzer] = []
         for analyzer_name in analyzers:
             analyzer = None
             if analyzer_name == 'clangsa':
@@ -187,7 +194,9 @@ class Configuration:
         # 1. configure & build
         self.clean_and_configure(can_skip_configure, has_init)
         self.build()
-        self.prepare_file_list()
+        if not self.prepare_file_list():
+            logger.info(f"[Process Config] {self.version_stamp} prepare file list failed.")
+            return False
         # 2. preprocess and diff
         if self.env.inc_mode != IncrementalMode.NoInc:
             self.preprocess_repo()
@@ -203,13 +212,14 @@ class Configuration:
         if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             self.propagate_reanalyze_attr()
         self.analyze()
+        return True
 
     def prepare_file_list(self):
         # Don't invoke this function after `configure & build` automatically,
         # but invoke and make sure be invoked mannually before any other sessions.
         if not os.path.exists(self.compile_database):
             logger.error(f"[Prepare File List] Please make sure {self.compile_database} exists, may be you should `configure & build` first.")
-            return
+            return False
         self.file_list = []
         self.file_list_index = {}
         self.diff_file_list = []
@@ -236,6 +246,7 @@ class Configuration:
             # Update global_file_dict after file_list has been initialzed,
             # make sure there is no duplicate file name.
             self.global_file_dict[file_in_cdb.file_name] = file_in_cdb
+        return True
 
     def get_file(self, file_path: str, report=True) -> FileInCDB:
         idx = self.file_list_index.get(file_path, None)
@@ -269,7 +280,7 @@ class Configuration:
             logger.error(f"[Clean Build Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
         os.chdir(self.env.PWD)
 
-    def create_configure_script(self):
+    def create_configure_commands(self):
         commands = []
         if self.build_type == BuildType.CMAKE:
             cmakeFile = self.src_path / 'CMakeLists.txt'
@@ -300,30 +311,34 @@ class Configuration:
                 commands.append(option.origin_cmd())
         if self.args:
             commands.extend(self.args)
-        self.configure_script = commands_to_shell_script(commands)
+        self.configure_commands = commands
 
     def create_build_commands(self):
         # Use bear to intercept build process and record compile commands.
         commands = []
         if self.build_type == BuildType.CMAKE:
+            # CMake will generate compile_commands.json in build directory.
+            # We want to reverse the compile_commands.json cmake generated.
+            self.compile_database = self.build_path / 'incremental_commands.json'
             commands.extend([self.env.CMAKE_PATH, "--build", f"{self.build_path}"])
             commands.extend([f"-j{self.env.analyze_opts.jobs}"])
             # Don't stop make although error happen.
-            commands.extend(["--", "-i"])
+            # '-i' is not safe, sometimes it cause `make` never stop.
+            # commands.extend(["--", "-i"])
         elif self.build_type == BuildType.CONFIGURE:
             commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
             # TODO: Change to directory contain Makefile.
             commands.extend(['-C', f'{self.build_path}'])
-            commands.extend(["-i"])
+            # commands.extend(["-i"])
         elif self.build_type == BuildType.KBUILD:
             commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
             # Some KBuild project(like busybox) support out of tree build.
             commands.extend(['-C', f'{self.build_path}'])
-            commands.extend(["-i"])
+            # commands.extend(["-i"])
         elif self.build_type == BuildType.MAKE:
             commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
             commands.extend(['-C', f'{self.build_path}'])
-            commands.extend(["-i"])
+            # commands.extend(["-i"])
         self.build_commands = commands
 
     def configure(self):
@@ -332,12 +347,16 @@ class Configuration:
         makedir(self.build_path, "[Config Build DIR exists]")
         if self.build_type == BuildType.CMAKE:
             self.create_cmake_api_file()
-        logger.debug("[Repo Config Script] " + self.configure_script)
+        if self.configure_scipt:
+            configure_script = self.configure_scipt
+        else:
+            configure_script = commands_to_shell_script(self.configure_commands)
+        logger.debug("[Repo Config Script] " + configure_script)
         # Some projects need to `configure & build` in source tree. 
         # CMake will not be influenced by path.
         os.chdir(self.src_path)
         try:
-            process = run(self.configure_script, shell=True, capture_output=True, text=True, check=True)
+            process = run(configure_script, shell=True, capture_output=True, text=True, check=True)
             self.session_times['configure'] = time.time() - start_time
             logger.info(f"[Repo Config Success] {process.stdout}")
             
@@ -358,13 +377,18 @@ class Configuration:
         # Some projects need to `configure & build` in source tree. 
         # CMake will not be influenced by path.
         os.chdir(self.build_path)
-        try:
-            commands = ['bear', '-o', f'{self.compile_database}']
-            commands.extend(['--use-cc', f'{self.env.CC}'])
-            commands.extend(['--use-c++', f'{self.env.CXX}'])
+        commands = ['bear', '--output', f'{self.compile_database}']
+        # Update bear version, these parameters have been removed.
+        # commands.extend(['--use-cc', f'{self.env.CC}'])
+        # commands.extend(['--use-c++', f'{self.env.CXX}'])
+        commands.append('--')
+        if self.build_scipt:
+            commands.append(self.build_scipt)
+        else:
             commands.extend(self.build_commands)
-            build_script = commands_to_shell_script(commands)
-            logger.info(f"[Repo Build Script] {build_script}")
+        build_script = " ".join(commands)
+        logger.info(f"[Repo Build Script] {build_script}")
+        try:
             process = run(build_script, shell=True, capture_output=True, text=True, check=True)
             self.session_times['build'] = time.time() - start_time
             logger.info(f"[Repo Build Success]")
@@ -533,13 +557,13 @@ class Configuration:
         start_time = time.time()
         for analyzer in self.analyzers:
             analyzer_time = time.time()
-            self.session_times[analyzer.get_analyzer_name()] = SessionStatus.Skipped
+            self.session_times[analyzer.__class__.__name__] = SessionStatus.Skipped
             if self.incrementable:
                 analyzer.file_list = self.diff_file_list
             else:
                 analyzer.file_list = self.file_list
             analyzer.analyze_all_files()
-            self.session_times[analyzer.get_analyzer_name()] = time.time() - analyzer_time
+            self.session_times[analyzer.__class__.__name__] = time.time() - analyzer_time
         self.session_times['analyze'] = time.time() - start_time
 
     def prepare_diff_dir(self):
@@ -672,6 +696,7 @@ class Configuration:
             else:
                 unknown_number += 1
         new_file_num, changed_file_num, unchanged_file_num = 0, 0, 0
+        total_csa_time = 0.0
         for file in self.file_list:
             # file, status, analyze time, cg nodes num, cf num, rf num, baseline fs num
             data = [file.file_name, str(file.status)]
@@ -690,6 +715,9 @@ class Configuration:
                 changed_file_num += 1
             elif file.status == FileStatus.UNCHANGED:
                 unchanged_file_num += 1
+            if file.csa_analyze_time != "Unknown":
+                total_csa_time += float(file.csa_analyze_time)
         datas.append([f"unexist files:{unexists_number}", f"unknown files:{unknown_number}", f"merged files:{self.merged_files}",
-                      f"new files:{new_file_num}", f"changed files:{changed_file_num}", f"unchanged files:{unchanged_file_num}"])
+                      f"new files:{new_file_num}", f"changed files:{changed_file_num}", f"unchanged files:{unchanged_file_num}",
+                      f"total csa analyze time:{total_csa_time}"])
         return headers, datas

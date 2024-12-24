@@ -5,6 +5,8 @@ import argparse
 from enum import Enum, auto
 from datetime import datetime
 
+from IncAnalysis.logger import logger
+
 class IncrementalMode(Enum):
     NoInc = auto()
     FileLevel = auto()
@@ -85,13 +87,13 @@ class Environment:
         # 查找cmake命令的位置
         self.CMAKE_PATH = shutil.which('cmake')
         if self.CMAKE_PATH:
-            print(f'CMake found at: {self.CMAKE_PATH}')
+            logger.info(f'CMake found at: {self.CMAKE_PATH}')
         else:
-            print('CMake not found in the system path')
+            logger.error('CMake not found in the system path')
             exit(1)
         self.DIFF_PATH = shutil.which('diff')
         if self.DIFF_PATH:
-            print(f'diff found at: {self.CMAKE_PATH}')
+            logger.info(f'diff found at: {self.CMAKE_PATH}')
             # -b, -B: Try to ignore more space.
             # -d: Identify smaller changes.
             self.DIFF_COMMAND = [self.DIFF_PATH, '-b', '-B', '-d']
@@ -101,22 +103,22 @@ class Environment:
             self.DIFF_COMMAND.extend(["--old-group-format='%de,%dn %dE,%dN\n'", "--unchanged-group-format=''", 
                                       "--new-group-format='%de,%dn %dE,%dN\n'", "--changed-group-format='%de,%dn %dE,%dN\n'"])
         else:
-            print('diff not found in the system path')
+            logger.error('diff not found in the system path')
             exit(1)
         if self.EXTRACT_II:
-            print(f'Inc info extractor found at: {self.EXTRACT_II}')
+            logger.info(f'Inc info extractor found at: {self.EXTRACT_II}')
         else:
-            print('Please build inc info extractor firstly') 
+            logger.error('Please build inc info extractor firstly') 
             exit(1)
         if os.path.exists(self.CLANG):
-            print(f'Use clang={self.CLANG}')
+            logger.info(f'Use clang={self.CLANG}')
         else:
-            print(f'Please ensure that {self.CLANG} exists in your environment')
+            logger.error(f'Please ensure that {self.CLANG} exists in your environment')
             exit(1)
         if os.path.exists(self.CLANG_PLUS_PLUS):
-            print(f'Use clang++={self.CLANG_PLUS_PLUS}')
+            logger.info(f'Use clang++={self.CLANG_PLUS_PLUS}')
         else:
-            print(f'Please ensure that {self.CLANG_PLUS_PLUS} exists in your environment')
+            logger.error(f'Please ensure that {self.CLANG_PLUS_PLUS} exists in your environment')
             exit(1)
         
         self.DEFAULT_PANDA_COMMANDS = [
