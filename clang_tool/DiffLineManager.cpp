@@ -1,6 +1,5 @@
 #include "DiffLineManager.h"
 #include <utility>
-#include <vector>
 
 void DiffLineManager::Initialize(std::string &DiffPath, std::string mainFilePath) {
     MainFilePath = mainFilePath;

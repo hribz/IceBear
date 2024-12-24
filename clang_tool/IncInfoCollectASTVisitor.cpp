@@ -1,8 +1,9 @@
-#include "IncInfoCollectASTVisitor.h"
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
-#include <llvm-19/llvm/Support/raw_ostream.h>
+#include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Casting.h>
+
+#include "IncInfoCollectASTVisitor.h"
 
 bool IncInfoCollectASTVisitor::isGlobalConstant(const Decl *D) {
     D = D->getCanonicalDecl();

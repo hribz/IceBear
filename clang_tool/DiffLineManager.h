@@ -1,3 +1,6 @@
+#ifndef DIFF_LINE_MANAGER_H
+#define DIFF_LINE_MANAGER_H
+
 #include <clang/AST/DeclBase.h>
 #include <clang/AST/Decl.h>
 #include <clang/Basic/SourceManager.h>
@@ -39,3 +42,5 @@ private:
     std::optional<std::vector<std::pair<int, int>>> DiffLines; 
     const clang::SourceManager &SM;
 };
+
+#endif // DIFF_LINE_MANAGER_H

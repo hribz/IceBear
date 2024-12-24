@@ -10,7 +10,6 @@
 #include <clang/Basic/LLVM.h>
 #include <iostream>
 #include <fstream>
-#include <iterator>
 #include <llvm/Support/Timer.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/ADT/StringRef.h>
@@ -18,26 +17,19 @@
 #include <llvm/Support/JSON.h>
 #include <llvm/Support/raw_ostream.h>
 #include <memory>
-#include <optional>
 #include <ostream>
-#include <streambuf>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
-#include <utility>
-#include <vector>
 
-#include "clang/AST/RecursiveASTVisitor.h"
-#include "clang/Tooling/CommonOptionsParser.h"
-#include "clang/Tooling/Tooling.h"
-#include "clang/Frontend/CompilerInstance.h"
-#include "clang/Frontend/FrontendAction.h"
-#include "clang/Index/USRGeneration.h"
-#include "clang/Analysis/AnalysisDeclContext.h"
-#include "clang/Analysis/CallGraph.h"
-#include "llvm/ADT/PostOrderIterator.h"
-#include "llvm/Support/JSON.h"
-#include "llvm/Support/raw_ostream.h"
+#include <clang/Tooling/CommonOptionsParser.h>
+#include <clang/Tooling/Tooling.h>
+#include <clang/Frontend/CompilerInstance.h>
+#include <clang/Frontend/FrontendAction.h>
+#include <clang/Index/USRGeneration.h>
+#include <clang/Analysis/AnalysisDeclContext.h>
+#include <clang/Analysis/CallGraph.h>
+#include <llvm/ADT/PostOrderIterator.h>
+#include <llvm/Support/raw_ostream.h>
+#include "llvm/Support/CommandLine.h"
 
 #include "IncInfoCollectASTVisitor.h"
 
@@ -141,13 +133,9 @@ public:
         for (CallGraphNode *N : RPOT) {
             if (N == CG.getRoot()) continue;
             Decl *D = N->getDecl();
-            auto loc = DLM.StartAndEndLineOfDecl(D);
-            if (!loc) continue;
-            auto StartLoc = loc->first;
-            auto EndLoc = loc->second;
             // CG only record canonical decls, so it's neccessary to
             // judge if there are changes in Function Definition scope. 
-            if (DLM.isChangedLine(StartLoc, EndLoc)) {
+            if (DLM.isChangedDecl(D)) {
                 FunctionsNeedReanalyze.insert(D);
             }
         }

@@ -1,3 +1,6 @@
+#ifndef PROPOGATE_ON_CG_H
+#define PROPOGATE_ON_CG_H
+
 #include <unordered_set>
 #include <string>
 
@@ -15,3 +18,5 @@ private:
     CallGraph &CG;
     std::unordered_set<const Decl *> &FunctionsNeedReanalyze;
 };
+
+#endif // PROPOGATE_ON_CG_H

@@ -1,3 +1,6 @@
+#ifndef INC_INFO_COLLECT_AST_VISITOR_H
+#define INC_INFO_COLLECT_AST_VISITOR_H
+
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/ComputeDependence.h>
 #include <clang/AST/Decl.h>
@@ -8,32 +11,18 @@
 #include <clang/AST/ExprCXX.h>
 #include <clang/AST/Stmt.h>
 #include <clang/Basic/LLVM.h>
-#include <cstddef>
-#include <iostream>
-#include <fstream>
-#include <iterator>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/JSON.h>
 #include <llvm/Support/raw_ostream.h>
-#include <optional>
-#include <string>
-#include <unordered_map>
 #include <unordered_set>
-#include <utility>
 #include <vector>
 
 #include "clang/AST/RecursiveASTVisitor.h"
-#include "clang/Tooling/CommonOptionsParser.h"
-#include "clang/Tooling/Tooling.h"
 #include "clang/Frontend/CompilerInstance.h"
-#include "clang/Frontend/FrontendAction.h"
 #include "clang/Index/USRGeneration.h"
 #include "clang/Analysis/AnalysisDeclContext.h"
 #include "clang/Analysis/CallGraph.h"
-#include "llvm/ADT/PostOrderIterator.h"
-#include "llvm/Support/JSON.h"
-#include "llvm/Support/raw_ostream.h"
 
 #include "DiffLineManager.h"
 
@@ -127,3 +116,5 @@ private:
     std::vector<const Decl *> inFunctionOrMethodStack;
     const IncOptions &IncOpt;
 };
+
+#endif // INC_INFO_COLLECT_AST_VISITOR_H
