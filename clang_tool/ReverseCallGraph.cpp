@@ -1,4 +1,4 @@
-//===- CallGraph.cpp - AST-based Call graph -------------------------------===//
+//===- ReverseCallGraph.cpp - AST-based Call graph -------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,11 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 //
-//  This file defines the AST-based CallGraph.
+//  This file defines the AST-based ReverseCallGraph.
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/Analysis/CallGraph.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/DeclObjC.h"
@@ -32,9 +31,11 @@
 #include <memory>
 #include <string>
 
+#include "ReverseCallGraph.h"
+
 using namespace clang;
 
-#define DEBUG_TYPE "CallGraph"
+#define DEBUG_TYPE "ReverseCallGraph"
 
 STATISTIC(NumObjCCallEdges, "Number of Objective-C method call edges");
 STATISTIC(NumBlockCallEdges, "Number of block call edges");
@@ -44,11 +45,11 @@ namespace {
 /// A helper class, which walks the AST and locates all the call sites in the
 /// given function body.
 class CGBuilder : public StmtVisitor<CGBuilder> {
-  CallGraph *G;
-  CallGraphNode *CallerNode;
+  ReverseCallGraph *G;
+  ReverseCallGraphNode *CallerNode;
 
 public:
-  CGBuilder(CallGraph *g, CallGraphNode *N) : G(g), CallerNode(N) {}
+  CGBuilder(ReverseCallGraph *g, ReverseCallGraphNode *N) : G(g), CallerNode(N) {}
 
   void VisitStmt(Stmt *S) { VisitChildren(S); }
 
@@ -68,8 +69,8 @@ public:
 
   void addCalledDecl(Decl *D, Expr *CallExpr) {
     if (G->includeCalleeInGraph(D)) {
-      CallGraphNode *CalleeNode = G->getOrInsertNode(D);
-      CallerNode->addCallee({CalleeNode, CallExpr});
+      ReverseCallGraphNode *CalleeNode = G->getOrInsertNode(D);
+      CalleeNode->addCaller({CallerNode, CallExpr});
     }
   }
 
@@ -137,7 +138,7 @@ public:
 
 } // namespace
 
-void CallGraph::addNodesForBlocks(DeclContext *D) {
+void ReverseCallGraph::addNodesForBlocks(DeclContext *D) {
   if (BlockDecl *BD = dyn_cast<BlockDecl>(D))
     addNodeForDecl(BD, true);
 
@@ -146,13 +147,13 @@ void CallGraph::addNodesForBlocks(DeclContext *D) {
       addNodesForBlocks(DC);
 }
 
-CallGraph::CallGraph() {
+ReverseCallGraph::ReverseCallGraph() {
   Root = getOrInsertNode(nullptr);
 }
 
-CallGraph::~CallGraph() = default;
+ReverseCallGraph::~ReverseCallGraph() = default;
 
-bool CallGraph::includeInGraph(const Decl *D) {
+bool ReverseCallGraph::includeInGraph(const Decl *D) {
   assert(D);
   if (!D->hasBody())
     return false;
@@ -160,7 +161,7 @@ bool CallGraph::includeInGraph(const Decl *D) {
   return includeCalleeInGraph(D);
 }
 
-bool CallGraph::includeCalleeInGraph(const Decl *D) {
+bool ReverseCallGraph::includeCalleeInGraph(const Decl *D) {
   if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
     // We skip function template definitions, as their semantics is
     // only determined when they are instantiated.
@@ -175,11 +176,11 @@ bool CallGraph::includeCalleeInGraph(const Decl *D) {
   return true;
 }
 
-void CallGraph::addNodeForDecl(Decl* D, bool IsGlobal) {
+void ReverseCallGraph::addNodeForDecl(Decl* D, bool IsGlobal) {
   assert(D);
 
   // Allocate a new node, mark it as root, and process its calls.
-  CallGraphNode *Node = getOrInsertNode(D);
+  ReverseCallGraphNode *Node = getOrInsertNode(D);
 
   // Process all the calls by this function as well.
   CGBuilder builder(this, Node);
@@ -194,36 +195,36 @@ void CallGraph::addNodeForDecl(Decl* D, bool IsGlobal) {
   }
 }
 
-CallGraphNode *CallGraph::getNode(const Decl *F) const {
+ReverseCallGraphNode *ReverseCallGraph::getNode(const Decl *F) const {
   FunctionMapTy::const_iterator I = FunctionMap.find(F);
   if (I == FunctionMap.end()) return nullptr;
   return I->second.get();
 }
 
-CallGraphNode *CallGraph::getOrInsertNode(Decl *F) {
+ReverseCallGraphNode *ReverseCallGraph::getOrInsertNode(Decl *F) {
   if (F && !isa<ObjCMethodDecl>(F))
     F = F->getCanonicalDecl();
 
-  std::unique_ptr<CallGraphNode> &Node = FunctionMap[F];
+  std::unique_ptr<ReverseCallGraphNode> &Node = FunctionMap[F];
   if (Node)
     return Node.get();
 
-  Node = std::make_unique<CallGraphNode>(F);
+  Node = std::make_unique<ReverseCallGraphNode>(F);
   // Make Root node a parent of all functions to make sure all are reachable.
   if (F)
-    Root->addCallee({Node.get(), /*Call=*/nullptr});
+    Root->addCaller({Node.get(), /*Call=*/nullptr});
   return Node.get();
 }
 
-void CallGraph::print(raw_ostream &OS) const {
+void ReverseCallGraph::print(raw_ostream &OS) const {
   OS << " --- Call graph Dump --- \n";
 
   // We are going to print the graph in reverse post order, partially, to make
   // sure the output is deterministic.
-  llvm::ReversePostOrderTraversal<const CallGraph *> RPOT(this);
-  for (llvm::ReversePostOrderTraversal<const CallGraph *>::rpo_iterator
+  llvm::ReversePostOrderTraversal<const ReverseCallGraph *> RPOT(this);
+  for (llvm::ReversePostOrderTraversal<const ReverseCallGraph *>::rpo_iterator
          I = RPOT.begin(), E = RPOT.end(); I != E; ++I) {
-    const CallGraphNode *N = *I;
+    const ReverseCallGraphNode *N = *I;
 
     OS << "  Function: ";
     if (N == Root)
@@ -232,10 +233,10 @@ void CallGraph::print(raw_ostream &OS) const {
       N->print(OS);
 
     OS << " calls: ";
-    for (CallGraphNode::const_iterator CI = N->begin(),
+    for (ReverseCallGraphNode::const_iterator CI = N->begin(),
                                        CE = N->end(); CI != CE; ++CI) {
-      assert(CI->Callee != Root && "No one can call the root node.");
-      CI->Callee->print(OS);
+      assert(CI->Caller != Root && "No one can call the root node.");
+      CI->Caller->print(OS);
       OS << " ";
     }
     OS << '\n';
@@ -243,32 +244,32 @@ void CallGraph::print(raw_ostream &OS) const {
   OS.flush();
 }
 
-LLVM_DUMP_METHOD void CallGraph::dump() const {
+LLVM_DUMP_METHOD void ReverseCallGraph::dump() const {
   print(llvm::errs());
 }
 
-void CallGraph::viewGraph() const {
-  llvm::ViewGraph(this, "CallGraph");
+void ReverseCallGraph::viewGraph() const {
+  llvm::ViewGraph(this, "ReverseCallGraph");
 }
 
-void CallGraphNode::print(raw_ostream &os) const {
+void ReverseCallGraphNode::print(raw_ostream &os) const {
   if (const NamedDecl *ND = dyn_cast_or_null<NamedDecl>(FD))
       return ND->printQualifiedName(os);
   os << "< >";
 }
 
-LLVM_DUMP_METHOD void CallGraphNode::dump() const {
+LLVM_DUMP_METHOD void ReverseCallGraphNode::dump() const {
   print(llvm::errs());
 }
 
 namespace llvm {
 
 template <>
-struct DOTGraphTraits<const CallGraph*> : public DefaultDOTGraphTraits {
+struct DOTGraphTraits<const ReverseCallGraph*> : public DefaultDOTGraphTraits {
   DOTGraphTraits (bool isSimple = false) : DefaultDOTGraphTraits(isSimple) {}
 
-  static std::string getNodeLabel(const CallGraphNode *Node,
-                                  const CallGraph *CG) {
+  static std::string getNodeLabel(const ReverseCallGraphNode *Node,
+                                  const ReverseCallGraph *CG) {
     if (CG->getRoot() == Node) {
       return "< root >";
     }

@@ -44,6 +44,7 @@ class BuildType(Enum):
     CMAKE = auto()
     CONFIGURE = auto()
     KBUILD = auto()
+    UNKNOWN = auto()
 
     @staticmethod
     def getType(build_type: str):
@@ -55,13 +56,106 @@ class BuildType(Enum):
             return BuildType.KBUILD
         elif build_type == 'make':
             return BuildType.MAKE
+        else:
+            return BuildType.UNKNOWN
+
+class BuildInfo:
+    def __init__(self, src_path, build_path, build_type: BuildType, options: List[str], env: Environment, build_script: str=None, 
+                 configure_scripts: List[str]=None, args: List[str] = None, cmakefile_path: str=None):
+        self.src_path = src_path
+        self.build_path = build_path
+        self.build_type = build_type
+
+        self.args = args
+        self.options = [Option(i) for i in options]
+        self.env = env
+
+        if self.build_type == BuildType.CMAKE:
+            if cmakefile_path is None:
+                self.cmakefile_path = self.src_path
+            else:
+                cmakefile_path = os.path.abspath(str(self.src_path) + '/' + cmakefile_path)
+                self.cmakefile_path = Path(cmakefile_path)
+        
+        self.configure_scripts = configure_scripts
+        if not self.configure_scripts:
+            self.create_configure_commands()
+        self.build_script = build_script
+        if not self.build_script:
+            self.create_build_commands()
+            
+    def create_configure_commands(self):
+        commands = []
+        if self.build_type == BuildType.CMAKE:
+            cmakeFile = self.cmakefile_path / 'CMakeLists.txt'
+            if not cmakeFile.exists():
+                print(f'Please make sure there is CMakeLists.txt in {self.cmakefile_path}')
+                exit(1)
+            self.options.append(Option('CMAKE_EXPORT_COMPILE_COMMANDS=1'))
+            self.options.append(Option('CMAKE_BUILD_TYPE=Release'))
+            self.options.append(Option(f'CMAKE_C_COMPILER={self.env.CC}'))
+            self.options.append(Option(f'CMAKE_CXX_COMPILER={self.env.CXX}'))
+            commands = [self.env.CMAKE_PATH]
+            commands.append(f"-S {str(self.cmakefile_path)}")
+            commands.append(f"-B {str(self.build_path)}")
+            for option in self.options:
+                commands.append(f"-D{option.name}={option.value}")
+        elif self.build_type == BuildType.CONFIGURE:
+            commands = [f'CC={self.env.CC}', f'CXX={self.env.CXX}', f'{self.src_path}/configure']
+            commands.append(f"--prefix={self.build_path}")
+            for option in self.options:
+                commands.append(option.origin_cmd())
+        elif self.build_type == BuildType.KBUILD:
+            # NEVER set `O=SRC_PATH` or `KBUILD_SRC=SRC_PATH` when build in tree.
+            # This will make build process infinitely recurse.
+            commands = [f'CC={self.env.CC}', f'CXX={self.env.CXX}']
+            commands.extend(['make', 'allyesconfig'])
+            commands.extend(['-C', f'{self.build_path}'])
+            for option in self.options:
+                commands.append(option.origin_cmd())
+        if self.args:
+            commands.extend(self.args)
+        self.configure_commands = commands
+
+    def create_build_commands(self):
+        # Use bear to intercept build process and record compile commands.
+        commands = []
+        if self.build_type == BuildType.CMAKE:
+            # CMake will generate compile_commands.json in build directory.
+            # We want to reverse the compile_commands.json cmake generated.
+            commands.extend([self.env.CMAKE_PATH, "--build", f"{self.build_path}"])
+            commands.extend([f"-j{self.env.analyze_opts.jobs}"])
+            # Don't stop make although error happen.
+            # '-i' is not safe, sometimes it cause `make` never stop.
+            # commands.extend(["--", "-i"])
+        elif self.build_type == BuildType.CONFIGURE:
+            commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
+            # TODO: Change to directory contain Makefile.
+            commands.extend(['-C', f'{self.build_path}'])
+            # commands.extend(["-i"])
+        elif self.build_type == BuildType.KBUILD:
+            commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
+            # Some KBuild project(like busybox) support out of tree build.
+            commands.extend(['-C', f'{self.build_path}'])
+            # commands.extend(["-i"])
+        elif self.build_type == BuildType.MAKE:
+            commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
+            commands.extend(['-C', f'{self.build_path}'])
+            # commands.extend(["-i"])
+        self.build_commands = commands
+
+    def obj_to_json(self):
+        return {"build_type": self.build_type.name, "build_script": self.build_script, "configure_scripts": self.configure_scripts}
+
+    @staticmethod
+    def json_to_obj(json_data):
+        return BuildInfo(json_data['build_type'], json_data['build_script'], json_data['configure_scripts'])
 
 class Configuration:
     env: Environment
     name: str
     options: List[Option]
     args: List[str]
-    configure_script: str
     src_path: Path
     build_path: Path
     reply_path: Path
@@ -74,7 +168,8 @@ class Configuration:
     session_times: Dict
 
     def __init__(self, name, src_path, env, options: List[str], version_stamp, args=None, build_path=None, workspace_path=None,
-                 baseline=None, update_mode:bool=False, build_type: BuildType=BuildType.CMAKE, build_scipt = None, configure_scipt = None):
+                 baseline=None, update_mode:bool=False, build_type: BuildType=BuildType.CMAKE, build_script = None, configure_scripts = None, 
+                 cmakefile_path = None):
         self.name = name
         self.src_path = src_path
         self.env = env
@@ -105,16 +200,11 @@ class Configuration:
             self.args = args
         else:
             self.args = None
-        self.options = [Option(i) for i in options]
-        self.build_type = build_type
         
-        self.configure_scipt = configure_scipt   
-        if not configure_scipt:
-            self.create_configure_commands()
-
-        self.build_scipt = build_scipt
-        if not build_scipt:
-            self.create_build_commands()
+        # configure may need multiple scripts.
+        self.build_type = build_type
+        self.build_info = BuildInfo(self.src_path, self.build_path, build_type, 
+                                    options, env, build_script, configure_scripts, self.args, cmakefile_path)
 
         self.reply_database = []
         self.diff_file_list = []
@@ -153,7 +243,10 @@ class Configuration:
         self.query_path = self.cmake_api_path / 'query'
         self.reply_path = self.cmake_api_path / 'reply'
         # Compile database.
-        self.compile_database = self.build_path / 'compile_commands.json'
+        if self.build_type == BuildType.CMAKE:
+            self.compile_database = self.build_path / 'incremental_commands.json'
+        else:
+            self.compile_database = self.build_path / 'compile_commands.json'
         # Preprocess & diff Path.
         self.preprocess_path = self.workspace / 'preprocess' / self.version_stamp
         self.compile_commands_used_by_pre = self.preprocess_path / 'compile_commands_used_by_pre.json'
@@ -197,6 +290,12 @@ class Configuration:
         if not self.prepare_file_list():
             logger.info(f"[Process Config] {self.version_stamp} prepare file list failed.")
             return False
+        
+        # Record real runtime and CPU time for tasks 
+        # related to incremental analysis preparation.
+        start_real_time = time.time()
+        start_cpu_time = os.times()
+
         # 2. preprocess and diff
         if self.env.inc_mode != IncrementalMode.NoInc:
             self.preprocess_repo()
@@ -204,14 +303,33 @@ class Configuration:
         # 3. extract inc info
         if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             self.extract_inc_info()
-        # 4. prepare for CSA
+        # 4. execute analyzers
+        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+            self.propagate_reanalyze_attr()
+
+        end_real_time = time.time()
+        end_cpu_time = os.times()
+        self.prepare_for_inc_info_real_time = end_real_time - start_real_time
+        self.prepare_for_inc_info_cpu_time_user = (end_cpu_time.user - start_cpu_time.user) 
+        self.prepare_for_inc_info_cpu_time_sys = (end_cpu_time.system - start_cpu_time.system)
+
+        # 5. prepare for CSA
         if self.env.ctu:
             self.generate_efm()
             self.merge_efm()
-        # 5. execute analyzers
-        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
-            self.propagate_reanalyze_attr()
+
+        # Record real runtime and CPU time for analyze tasks.
+        start_real_time = time.time()
+        start_cpu_time = os.times()
+
         self.analyze()
+
+        end_real_time = time.time()
+        end_cpu_time = os.times()
+        self.analyze_real_time = end_real_time - start_real_time
+        self.analyze_cpu_time_user = (end_cpu_time.user - start_cpu_time.user)
+        self.analyze_cpu_time_sys = (end_cpu_time.system - start_cpu_time.system)
+
         return True
 
     def prepare_file_list(self):
@@ -280,96 +398,37 @@ class Configuration:
             logger.error(f"[Clean Build Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
         os.chdir(self.env.PWD)
 
-    def create_configure_commands(self):
-        commands = []
-        if self.build_type == BuildType.CMAKE:
-            cmakeFile = self.src_path / 'CMakeLists.txt'
-            if not cmakeFile.exists():
-                print(f'Please make sure there is CMakeLists.txt in {self.src_path}')
-                exit(1)
-            self.options.append(Option('CMAKE_EXPORT_COMPILE_COMMANDS=1'))
-            self.options.append(Option('CMAKE_BUILD_TYPE=Release'))
-            self.options.append(Option(f'CMAKE_C_COMPILER={self.env.CC}'))
-            self.options.append(Option(f'CMAKE_CXX_COMPILER={self.env.CXX}'))
-            commands = [self.env.CMAKE_PATH]
-            commands.append(f"-S {str(self.src_path)}")
-            commands.append(f"-B {str(self.build_path)}")
-            for option in self.options:
-                commands.append(f"-D{option.name}={option.value}")
-        elif self.build_type == BuildType.CONFIGURE:
-            commands = [f'CC={self.env.CC}', f'CXX={self.env.CXX}', f'{self.src_path}/configure']
-            commands.append(f"--prefix={self.build_path}")
-            for option in self.options:
-                commands.append(option.origin_cmd())
-        elif self.build_type == BuildType.KBUILD:
-            # NEVER set `O=SRC_PATH` or `KBUILD_SRC=SRC_PATH` when build in tree.
-            # This will make build process infinitely recurse.
-            commands = [f'CC={self.env.CC}', f'CXX={self.env.CXX}']
-            commands.extend(['make', 'allyesconfig'])
-            commands.extend(['-C', f'{self.build_path}'])
-            for option in self.options:
-                commands.append(option.origin_cmd())
-        if self.args:
-            commands.extend(self.args)
-        self.configure_commands = commands
-
-    def create_build_commands(self):
-        # Use bear to intercept build process and record compile commands.
-        commands = []
-        if self.build_type == BuildType.CMAKE:
-            # CMake will generate compile_commands.json in build directory.
-            # We want to reverse the compile_commands.json cmake generated.
-            self.compile_database = self.build_path / 'incremental_commands.json'
-            commands.extend([self.env.CMAKE_PATH, "--build", f"{self.build_path}"])
-            commands.extend([f"-j{self.env.analyze_opts.jobs}"])
-            # Don't stop make although error happen.
-            # '-i' is not safe, sometimes it cause `make` never stop.
-            # commands.extend(["--", "-i"])
-        elif self.build_type == BuildType.CONFIGURE:
-            commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
-            # TODO: Change to directory contain Makefile.
-            commands.extend(['-C', f'{self.build_path}'])
-            # commands.extend(["-i"])
-        elif self.build_type == BuildType.KBUILD:
-            commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
-            # Some KBuild project(like busybox) support out of tree build.
-            commands.extend(['-C', f'{self.build_path}'])
-            # commands.extend(["-i"])
-        elif self.build_type == BuildType.MAKE:
-            commands.extend(['make', f'-j{self.env.analyze_opts.jobs}'])
-            commands.extend(['-C', f'{self.build_path}'])
-            # commands.extend(["-i"])
-        self.build_commands = commands
-
     def configure(self):
         start_time = time.time()
         # remake_dir(self.build_path, "[Config Build DIR exists]")
         makedir(self.build_path, "[Config Build DIR exists]")
         if self.build_type == BuildType.CMAKE:
             self.create_cmake_api_file()
-        if self.configure_scipt:
-            configure_script = self.configure_scipt
+        if self.build_info.configure_scripts:
+            configure_scripts = self.build_info.configure_scripts
         else:
-            configure_script = commands_to_shell_script(self.configure_commands)
-        logger.debug("[Repo Config Script] " + configure_script)
+            configure_scripts = [commands_to_shell_script(self.build_info.configure_commands)]
+
         # Some projects need to `configure & build` in source tree. 
         # CMake will not be influenced by path.
-        os.chdir(self.src_path)
-        try:
-            process = run(configure_script, shell=True, capture_output=True, text=True, check=True)
-            self.session_times['configure'] = time.time() - start_time
-            logger.info(f"[Repo Config Success] {process.stdout}")
-            
-            with open(self.workspace / 'options.json', 'w') as f:
-                tmp_json_data = {"options": []}
-                for option in self.options:
-                    tmp_json_data['options'].append(option.obj_to_json())
-                json.dump(tmp_json_data, f, indent=4)
-            # self.reply_database.append(Reply(self.reply_path, logger))
-        except subprocess.CalledProcessError as e:
-            self.session_times['configure'] = SessionStatus.Failed
-            logger.error(f"[Repo Config Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
+        os.chdir(self.build_path)
+        for configure_script in configure_scripts:
+            logger.debug("[Repo Config Script] " + configure_script)
+            try:
+                process = run(configure_script, shell=True, capture_output=True, text=True, check=True)
+                logger.info(f"[Repo Config Success] {process.stdout}")
+                # self.reply_database.append(Reply(self.reply_path, logger))
+            except subprocess.CalledProcessError as e:
+                self.session_times['configure'] = SessionStatus.Failed
+                logger.error(f"[Repo Config Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
+                break
+        self.session_times['configure'] = time.time() - start_time
         os.chdir(self.env.PWD)
+        with open(self.workspace / 'options.json', 'w') as f:
+            tmp_json_data = {"options": []}
+            for option in self.build_info.options:
+                tmp_json_data['options'].append(option.obj_to_json())
+            json.dump(tmp_json_data, f, indent=4)
     
     def build(self):
         start_time = time.time()
@@ -382,10 +441,10 @@ class Configuration:
         # commands.extend(['--use-cc', f'{self.env.CC}'])
         # commands.extend(['--use-c++', f'{self.env.CXX}'])
         commands.append('--')
-        if self.build_scipt:
-            commands.append(self.build_scipt)
+        if self.build_info.build_script:
+            commands.append(self.build_info.build_script)
         else:
-            commands.extend(self.build_commands)
+            commands.extend(self.build_info.build_commands)
         build_script = " ".join(commands)
         logger.info(f"[Repo Build Script] {build_script}")
         try:
@@ -680,7 +739,7 @@ class Configuration:
     def __repr__(self) -> str:
         ret = f"build path: {self.build_path}\n"
         ret += "OPTIONS:\n"
-        for option in self.options:
+        for option in self.build_info.options:
             ret += f"   {option.name:<40} | {option.value}\n"    
         ret += f"execution time: {self.get_session_times()}\n"
         return ret

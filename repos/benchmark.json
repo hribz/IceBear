@@ -1,0 +1,75 @@
+[
+    {
+        "project": "vim/vim",
+        "commits": [
+        ],
+        "build_type": "make",
+        "config_options": [],
+        "branch": "master",
+        "out_of_tree": false,
+        "language": "C"
+    },
+    {
+        "project": "redis/redis",
+        "build_type": "make",
+        "config_options": [],
+        "branch": "unstable",
+        "out_of_tree": false,
+        "language": "C"
+    },
+    {
+        "project": "openssl/openssl",
+        "build_type": "make",
+        "configure_scripts": [
+            "./Configure"
+        ],
+        "build_script": "make -j24",
+        "branch": "master",
+        "out_of_tree": false,
+        "language": "C"
+    },
+    {
+        "project": "FFmpeg/FFmpeg",
+        "build_type": "configure",
+        "config_options": [
+            "--disable-x86asm"
+        ],
+        "branch": "master",
+        "out_of_tree": false,
+        "language": "C"
+    },
+    {
+        "project": "bitcoin/bitcoin",
+        "build_type": "cmake",
+        "config_options": [
+        ],
+        "branch": "master",
+        "language": "C++"
+    },
+    {
+        "project": "grpc/grpc",
+        "build_type": "cmake",
+        "config_options": [],
+        "branch": "master",
+        "language": "C++"
+    },
+    {
+        "project": "opencv/opencv",
+        "build_type": "cmake",
+        "config_options": [],
+        "branch": "master",
+        "language": "C++"
+    },
+    {
+        "project": "llvm/llvm-project",
+        "build_type": "cmake",
+        "config_options": [
+            "LLVM_ENABLE_PROJECTS=clang;clang-tools-extra", "LLVM_ENABLE_Z3_SOLVER=ON",
+            "LLVM_USE_SPLIT_DWARF=ON", "LLVM_OPTIMIZED_TABLEGEN=ON",
+            "LLVM_ENABLE_BINDINGS=OFF", "CLANG_ENABLE_ARCMT=OFF", "LLVM_TARGETS_TO_BUILD=X86"
+        ],
+        "cmakefile_path": "llvm",
+        "branch": "main",
+        "language": "C++"
+    }
+]

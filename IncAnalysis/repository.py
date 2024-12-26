@@ -31,30 +31,28 @@ class Repository(ABC):
     
 
     def summary_one_config(self, config: Configuration):
-        headers = ["project", "version", "configure", "build", "prepare for inc", "prepare for CSA"]
-        analyzers = [Analyzer.__str_to_analyzer_class__(i).__name__ for i in self.env.analyzers]
+        headers = ["project", "version", "configure", "build", "prepare for inc",
+                #    "prepare for inc(real)", "prepare for inc(user)", "prepare for inc(sys)", 
+                   "prepare for CSA"]
+        analyzers = [i.__class__.__name__ for i in config.analyzers]
         headers.extend(analyzers)
-        headers.append("analyze")
+        headers.extend(["analyze"])
+        # headers.extend(["analyze(real)", "analyze(cpu)", "analyze(sys)"])
 
-        prepare_for_inc = {"preprocess_repo", "diff_with_other", "extract_inc_info", "parse_call_graph", 
-                           "parse_functions_changed", "propagate_reanalyze_attr", "parse_function_summaries"}
         prepare_for_csa = {"generate_efm", "merge_efm"}
 
         config_data = [self.name, config.version_stamp]
         config_time = 0.0
         build_time = 0.0
-        inc_time = 0.0
-        prepare_time = 0.0
+        prepare_csa_time = 0.0
         analyze_time = 0.0
         analyzers_time = []
 
         for session in config.session_times.keys():
             exe_time = config.session_times[session]
             if not isinstance(exe_time, SessionStatus):
-                if session in prepare_for_inc:
-                    inc_time += exe_time
-                elif session in prepare_for_csa:
-                    prepare_time += exe_time
+                if session in prepare_for_csa:
+                    prepare_csa_time += exe_time
                 elif session == "configure":
                     config_time = exe_time
                 elif session == "build":
@@ -65,10 +63,16 @@ class Repository(ABC):
                     analyzers_time.append(exe_time)
         config_data.append("%.3lf" % config_time)
         config_data.append("%.3lf" % build_time)
-        config_data.append("%.3lf" % inc_time)
-        config_data.append("%.3lf" % prepare_time)
+        config_data.extend(["%.3lf" % config.prepare_for_inc_info_real_time, 
+                            # "%.3lf" % config.prepare_for_inc_info_cpu_time_user,
+                            # "%.3lf" % config.prepare_for_inc_info_cpu_time_sys
+                            ])
+        config_data.append("%.3lf" % prepare_csa_time)
         config_data.extend(["%.6lf" % i for i in analyzers_time])
-        config_data.append("%.6lf" % analyze_time)
+        config_data.extend(["%.6lf" % analyze_time, 
+                            # "%.6lf" % config.analyze_cpu_time_user,
+                            # "%.6lf" % config.analyze_cpu_time_sys
+                            ])
         return headers, config_data
     
     def summary_one_config_specific(self, config: Configuration):
@@ -225,13 +229,16 @@ class MultiConfigRepository(Repository):
 class UpdateConfigRepository(Repository):
     def __init__(self, name, src_path, env: Environment, default_options: List[str] = [], workspace=None,
                  build_root = None, version_stamp=None, default_build_type: str="cmake", can_skip_configure: bool = True,
-                 out_of_tree=True):
+                 out_of_tree=True, configure_scripts=None, build_script=None, cmakefile_path=None):
         super().__init__(name, src_path, env, build_root, default_build_type)
         self.default_config = Configuration(self.name, self.src_path, self.env, default_options, 
                                             build_path=self.build_root if out_of_tree else self.src_path, # Only build in one dir.
                                             workspace_path=workspace, update_mode=True,
                                             version_stamp=version_stamp,
-                                            build_type=self.default_build_type)
+                                            build_type=self.default_build_type,
+                                            configure_scripts=configure_scripts,
+                                            build_script=build_script,
+                                            cmakefile_path=cmakefile_path)
         self.default_config.update_mode = True
         self.can_skip_configure = can_skip_configure
         self.has_init: bool = False # Baseline has been initialized.

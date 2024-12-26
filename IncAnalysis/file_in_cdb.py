@@ -152,7 +152,7 @@ class FileInCDB:
         self.cg_node_num = 'Skip'
         self.has_cg = False # File has .cg.
         self.rf_num = 'All'
-        self.has_rf = False # Propogate reanalyze attribute(if needed) successfully.
+        self.has_rf = False # Propagate reanalyze attribute(if needed) successfully.
         self.basline_fs_num = 'Skip'
         self.baseline_has_fs = False # Analysis finished successfully.
         self.csa_analyze_time = "Unknown"

@@ -26,12 +26,12 @@
 #include <clang/Frontend/FrontendAction.h>
 #include <clang/Index/USRGeneration.h>
 #include <clang/Analysis/AnalysisDeclContext.h>
-#include <clang/Analysis/CallGraph.h>
 #include <llvm/ADT/PostOrderIterator.h>
 #include <llvm/Support/raw_ostream.h>
 #include "llvm/Support/CommandLine.h"
 
 #include "IncInfoCollectASTVisitor.h"
+#include "ReverseCallGraph.h"
 
 using namespace clang;
 using namespace clang::tooling;
@@ -111,7 +111,7 @@ public:
         const unsigned LocalTUDeclsSize = LocalTUDecls.size();
         for (int i = 0; i < LocalTUDeclsSize; i++) {
             auto D = LocalTUDecls[i];
-            CG.addToCallGraph(D);
+            CG.addToReverseCallGraph(D);
         }
         DumpCallGraph();
 
@@ -128,9 +128,9 @@ public:
             return;
         }
         
-        llvm::ReversePostOrderTraversal<clang::CallGraph*> RPOT(&CG);
+        llvm::ReversePostOrderTraversal<clang::ReverseCallGraph*> RPOT(&CG);
         SourceManager &SM = Context.getSourceManager();
-        for (CallGraphNode *N : RPOT) {
+        for (ReverseCallGraphNode *N : RPOT) {
             if (N == CG.getRoot()) continue;
             Decl *D = N->getDecl();
             // CG only record canonical decls, so it's neccessary to
@@ -179,8 +179,8 @@ public:
             *OS << "--- Call Graph ---\n";
         }
 
-        llvm::ReversePostOrderTraversal<clang::CallGraph*> RPOT(&CG);
-        for (CallGraphNode *N : RPOT) {
+        llvm::ReversePostOrderTraversal<clang::ReverseCallGraph*> RPOT(&CG);
+        for (ReverseCallGraphNode *N : RPOT) {
             if (N == CG.getRoot()) continue;
             Decl *D = N->getDecl();
             if (IncOpt.DumpUSR) {
@@ -199,8 +199,8 @@ public:
             }
             *OS << "\n[\n";
             SetOfConstDecls CalleeSet;
-            for (CallGraphNode::CallRecord &CR : N->callees()) {
-                Decl *Callee = CR.Callee->getDecl();
+            for (ReverseCallGraphNode::CallRecord &CR : N->callers()) {
+                Decl *Callee = CR.Caller->getDecl();
                 if (CalleeSet.contains(Callee))
                     continue;
                 CalleeSet.insert(Callee);
@@ -269,7 +269,7 @@ private:
     const IncOptions &IncOpt;
     llvm::StringRef MainFilePath;
     DiffLineManager DLM;
-    CallGraph CG;
+    ReverseCallGraph CG;
     IncInfoCollectASTVisitor IncVisitor;
     std::deque<Decl *> LocalTUDecls;
     std::unordered_set<const Decl *> FunctionsNeedReanalyze;

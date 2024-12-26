@@ -1,4 +1,4 @@
-//===- CallGraph.h - AST-based Call graph -----------------------*- C++ -*-===//
+//===- ReverseCallGraph.h - AST-based Call graph -----------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-//  This file declares the AST-based CallGraph.
+//  This file declares the AST-based ReverseCallGraph.
 //
 //  A call graph for functions whose definitions/bodies are available in the
 //  current translation unit. The graph has a "virtual" root node that contains
@@ -14,8 +14,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_ANALYSIS_CALLGRAPH_H
-#define LLVM_CLANG_ANALYSIS_CALLGRAPH_H
+#ifndef LLVM_CLANG_ANALYSIS_REVERSE_CALLGRAPH_H
+#define LLVM_CLANG_ANALYSIS_REVERSE_CALLGRAPH_H
 
 #include "clang/AST/Decl.h"
 #include "clang/AST/RecursiveASTVisitor.h"
@@ -29,7 +29,7 @@
 
 namespace clang {
 
-class CallGraphNode;
+class ReverseCallGraphNode;
 class Decl;
 class DeclContext;
 class Stmt;
@@ -39,27 +39,27 @@ class Stmt;
 /// The call graph extends itself with the given declarations by implementing
 /// the recursive AST visitor, which constructs the graph by visiting the given
 /// declarations.
-class CallGraph : public RecursiveASTVisitor<CallGraph> {
-  friend class CallGraphNode;
+class ReverseCallGraph : public RecursiveASTVisitor<ReverseCallGraph> {
+  friend class ReverseCallGraphNode;
 
   using FunctionMapTy =
-      llvm::DenseMap<const Decl *, std::unique_ptr<CallGraphNode>>;
+      llvm::DenseMap<const Decl *, std::unique_ptr<ReverseCallGraphNode>>;
 
-  /// FunctionMap owns all CallGraphNodes.
+  /// FunctionMap owns all ReverseCallGraphNodes.
   FunctionMapTy FunctionMap;
 
   /// This is a virtual root node that has edges to all the functions.
-  CallGraphNode *Root;
+  ReverseCallGraphNode *Root;
 
 public:
-  CallGraph();
-  ~CallGraph();
+  ReverseCallGraph();
+  ~ReverseCallGraph();
 
   /// Populate the call graph with the functions in the given
   /// declaration.
   ///
   /// Recursively walks the declaration to find all the dependent Decls as well.
-  void addToCallGraph(Decl *D) {
+  void addToReverseCallGraph(Decl *D) {
     TraverseDecl(D);
   }
 
@@ -72,11 +72,11 @@ public:
   static bool includeCalleeInGraph(const Decl *D);
 
   /// Lookup the node for the given declaration.
-  CallGraphNode *getNode(const Decl *) const;
+  ReverseCallGraphNode *getNode(const Decl *) const;
 
   /// Lookup the node for the given declaration. If none found, insert
   /// one into the graph.
-  CallGraphNode *getOrInsertNode(Decl *);
+  ReverseCallGraphNode *getOrInsertNode(Decl *);
 
   using iterator = FunctionMapTy::iterator;
   using const_iterator = FunctionMapTy::const_iterator;
@@ -93,13 +93,13 @@ public:
 
   /// Get the virtual root of the graph, all the functions available externally
   /// are represented as callees of the node.
-  CallGraphNode *getRoot() const { return Root; }
+  ReverseCallGraphNode *getRoot() const { return Root; }
 
   /// Iterators through all the nodes of the graph that have no parent. These
   /// are the unreachable nodes, which are either unused or are due to us
   /// failing to add a call edge due to the analysis imprecision.
-  using nodes_iterator = llvm::SetVector<CallGraphNode *>::iterator;
-  using const_nodes_iterator = llvm::SetVector<CallGraphNode *>::const_iterator;
+  using nodes_iterator = llvm::SetVector<ReverseCallGraphNode *>::iterator;
+  using const_nodes_iterator = llvm::SetVector<ReverseCallGraphNode *>::const_iterator;
 
   void print(raw_ostream &os) const;
   void dump() const;
@@ -144,53 +144,53 @@ private:
   void addNodeForDecl(Decl *D, bool IsGlobal);
 };
 
-class CallGraphNode {
+class ReverseCallGraphNode {
 public:
   struct CallRecord {
-    CallGraphNode *Callee;
+    ReverseCallGraphNode *Caller;
     Expr *CallExpr;
 
     CallRecord() = default;
 
-    CallRecord(CallGraphNode *Callee_, Expr *CallExpr_)
-        : Callee(Callee_), CallExpr(CallExpr_) {}
+    CallRecord(ReverseCallGraphNode *Caller_, Expr *CallExpr_)
+        : Caller(Caller_), CallExpr(CallExpr_) {}
 
     // The call destination is the only important data here,
     // allow to transparently unwrap into it.
-    operator CallGraphNode *() const { return Callee; }
+    operator ReverseCallGraphNode *() const { return Caller; }
   };
 
 private:
   /// The function/method declaration.
   Decl *FD;
 
-  /// The list of functions called from this node.
-  SmallVector<CallRecord, 5> CalledFunctions;
+  /// The list of caller functions from this node.
+  SmallVector<CallRecord, 5> CallerFunctions;
 
 public:
-  CallGraphNode(Decl *D) : FD(D) {}
+  ReverseCallGraphNode(Decl *D) : FD(D) {}
 
   using iterator = SmallVectorImpl<CallRecord>::iterator;
   using const_iterator = SmallVectorImpl<CallRecord>::const_iterator;
 
-  /// Iterators through all the callees/children of the node.
-  iterator begin() { return CalledFunctions.begin(); }
-  iterator end() { return CalledFunctions.end(); }
-  const_iterator begin() const { return CalledFunctions.begin(); }
-  const_iterator end() const { return CalledFunctions.end(); }
+  /// Iterators through all the callers/parent of the node.
+  iterator begin() { return CallerFunctions.begin(); }
+  iterator end() { return CallerFunctions.end(); }
+  const_iterator begin() const { return CallerFunctions.begin(); }
+  const_iterator end() const { return CallerFunctions.end(); }
 
-  /// Iterator access to callees/children of the node.
-  llvm::iterator_range<iterator> callees() {
+  /// Iterator access to callers/parent of the node.
+  llvm::iterator_range<iterator> callers() {
     return llvm::make_range(begin(), end());
   }
-  llvm::iterator_range<const_iterator> callees() const {
+  llvm::iterator_range<const_iterator> callers() const {
     return llvm::make_range(begin(), end());
   }
 
-  bool empty() const { return CalledFunctions.empty(); }
-  unsigned size() const { return CalledFunctions.size(); }
+  bool empty() const { return CallerFunctions.empty(); }
+  unsigned size() const { return CallerFunctions.size(); }
 
-  void addCallee(CallRecord Call) { CalledFunctions.push_back(Call); }
+  void addCaller(CallRecord Call) { CallerFunctions.push_back(Call); }
 
   Decl *getDecl() const { return FD; }
 
@@ -202,116 +202,116 @@ public:
   void dump() const;
 };
 
-// NOTE: we are comparing based on the callee only. So different call records
-// (with different call expressions) to the same callee will compare equal!
-inline bool operator==(const CallGraphNode::CallRecord &LHS,
-                       const CallGraphNode::CallRecord &RHS) {
-  return LHS.Callee == RHS.Callee;
+// NOTE: we are comparing based on the caller only. So different call records
+// (with different call expressions) to the same caller will compare equal!
+inline bool operator==(const ReverseCallGraphNode::CallRecord &LHS,
+                       const ReverseCallGraphNode::CallRecord &RHS) {
+  return LHS.Caller == RHS.Caller;
 }
 
 } // namespace clang
 
 namespace llvm {
 
-// Specialize DenseMapInfo for clang::CallGraphNode::CallRecord.
-template <> struct DenseMapInfo<clang::CallGraphNode::CallRecord> {
-  static inline clang::CallGraphNode::CallRecord getEmptyKey() {
-    return clang::CallGraphNode::CallRecord(
-        DenseMapInfo<clang::CallGraphNode *>::getEmptyKey(),
+// Specialize DenseMapInfo for clang::ReverseCallGraphNode::CallRecord.
+template <> struct DenseMapInfo<clang::ReverseCallGraphNode::CallRecord> {
+  static inline clang::ReverseCallGraphNode::CallRecord getEmptyKey() {
+    return clang::ReverseCallGraphNode::CallRecord(
+        DenseMapInfo<clang::ReverseCallGraphNode *>::getEmptyKey(),
         DenseMapInfo<clang::Expr *>::getEmptyKey());
   }
 
-  static inline clang::CallGraphNode::CallRecord getTombstoneKey() {
-    return clang::CallGraphNode::CallRecord(
-        DenseMapInfo<clang::CallGraphNode *>::getTombstoneKey(),
+  static inline clang::ReverseCallGraphNode::CallRecord getTombstoneKey() {
+    return clang::ReverseCallGraphNode::CallRecord(
+        DenseMapInfo<clang::ReverseCallGraphNode *>::getTombstoneKey(),
         DenseMapInfo<clang::Expr *>::getTombstoneKey());
   }
 
-  static unsigned getHashValue(const clang::CallGraphNode::CallRecord &Val) {
-    // NOTE: we are comparing based on the callee only.
-    // Different call records with the same callee will compare equal!
-    return DenseMapInfo<clang::CallGraphNode *>::getHashValue(Val.Callee);
+  static unsigned getHashValue(const clang::ReverseCallGraphNode::CallRecord &Val) {
+    // NOTE: we are comparing based on the caller only.
+    // Different call records with the same caller will compare equal!
+    return DenseMapInfo<clang::ReverseCallGraphNode *>::getHashValue(Val.Caller);
   }
 
-  static bool isEqual(const clang::CallGraphNode::CallRecord &LHS,
-                      const clang::CallGraphNode::CallRecord &RHS) {
+  static bool isEqual(const clang::ReverseCallGraphNode::CallRecord &LHS,
+                      const clang::ReverseCallGraphNode::CallRecord &RHS) {
     return LHS == RHS;
   }
 };
 
 // Graph traits for iteration, viewing.
-template <> struct GraphTraits<clang::CallGraphNode*> {
-  using NodeType = clang::CallGraphNode;
-  using NodeRef = clang::CallGraphNode *;
+template <> struct GraphTraits<clang::ReverseCallGraphNode*> {
+  using NodeType = clang::ReverseCallGraphNode;
+  using NodeRef = clang::ReverseCallGraphNode *;
   using ChildIteratorType = NodeType::iterator;
 
-  static NodeType *getEntryNode(clang::CallGraphNode *CGN) { return CGN; }
+  static NodeType *getEntryNode(clang::ReverseCallGraphNode *CGN) { return CGN; }
   static ChildIteratorType child_begin(NodeType *N) { return N->begin();  }
   static ChildIteratorType child_end(NodeType *N) { return N->end(); }
 };
 
-template <> struct GraphTraits<const clang::CallGraphNode*> {
-  using NodeType = const clang::CallGraphNode;
-  using NodeRef = const clang::CallGraphNode *;
+template <> struct GraphTraits<const clang::ReverseCallGraphNode*> {
+  using NodeType = const clang::ReverseCallGraphNode;
+  using NodeRef = const clang::ReverseCallGraphNode *;
   using ChildIteratorType = NodeType::const_iterator;
 
-  static NodeType *getEntryNode(const clang::CallGraphNode *CGN) { return CGN; }
+  static NodeType *getEntryNode(const clang::ReverseCallGraphNode *CGN) { return CGN; }
   static ChildIteratorType child_begin(NodeType *N) { return N->begin();}
   static ChildIteratorType child_end(NodeType *N) { return N->end(); }
 };
 
-template <> struct GraphTraits<clang::CallGraph*>
-  : public GraphTraits<clang::CallGraphNode*> {
-  static NodeType *getEntryNode(clang::CallGraph *CGN) {
+template <> struct GraphTraits<clang::ReverseCallGraph*>
+  : public GraphTraits<clang::ReverseCallGraphNode*> {
+  static NodeType *getEntryNode(clang::ReverseCallGraph *CGN) {
     return CGN->getRoot();  // Start at the external node!
   }
 
-  static clang::CallGraphNode *
-  CGGetValue(clang::CallGraph::const_iterator::value_type &P) {
+  static clang::ReverseCallGraphNode *
+  CGGetValue(clang::ReverseCallGraph::const_iterator::value_type &P) {
     return P.second.get();
   }
 
   // nodes_iterator/begin/end - Allow iteration over all nodes in the graph
   using nodes_iterator =
-      mapped_iterator<clang::CallGraph::iterator, decltype(&CGGetValue)>;
+      mapped_iterator<clang::ReverseCallGraph::iterator, decltype(&CGGetValue)>;
 
-  static nodes_iterator nodes_begin(clang::CallGraph *CG) {
+  static nodes_iterator nodes_begin(clang::ReverseCallGraph *CG) {
     return nodes_iterator(CG->begin(), &CGGetValue);
   }
 
-  static nodes_iterator nodes_end  (clang::CallGraph *CG) {
+  static nodes_iterator nodes_end  (clang::ReverseCallGraph *CG) {
     return nodes_iterator(CG->end(), &CGGetValue);
   }
 
-  static unsigned size(clang::CallGraph *CG) { return CG->size(); }
+  static unsigned size(clang::ReverseCallGraph *CG) { return CG->size(); }
 };
 
-template <> struct GraphTraits<const clang::CallGraph*> :
-  public GraphTraits<const clang::CallGraphNode*> {
-  static NodeType *getEntryNode(const clang::CallGraph *CGN) {
+template <> struct GraphTraits<const clang::ReverseCallGraph*> :
+  public GraphTraits<const clang::ReverseCallGraphNode*> {
+  static NodeType *getEntryNode(const clang::ReverseCallGraph *CGN) {
     return CGN->getRoot();
   }
 
-  static clang::CallGraphNode *
-  CGGetValue(clang::CallGraph::const_iterator::value_type &P) {
+  static clang::ReverseCallGraphNode *
+  CGGetValue(clang::ReverseCallGraph::const_iterator::value_type &P) {
     return P.second.get();
   }
 
   // nodes_iterator/begin/end - Allow iteration over all nodes in the graph
   using nodes_iterator =
-      mapped_iterator<clang::CallGraph::const_iterator, decltype(&CGGetValue)>;
+      mapped_iterator<clang::ReverseCallGraph::const_iterator, decltype(&CGGetValue)>;
 
-  static nodes_iterator nodes_begin(const clang::CallGraph *CG) {
+  static nodes_iterator nodes_begin(const clang::ReverseCallGraph *CG) {
     return nodes_iterator(CG->begin(), &CGGetValue);
   }
 
-  static nodes_iterator nodes_end(const clang::CallGraph *CG) {
+  static nodes_iterator nodes_end(const clang::ReverseCallGraph *CG) {
     return nodes_iterator(CG->end(), &CGGetValue);
   }
 
-  static unsigned size(const clang::CallGraph *CG) { return CG->size(); }
+  static unsigned size(const clang::ReverseCallGraph *CG) { return CG->size(); }
 };
 
 } // namespace llvm
 
-#endif // LLVM_CLANG_ANALYSIS_CALLGRAPH_H
+#endif // LLVM_CLANG_ANALYSIS_REVERSE_CALLGRAPH_H

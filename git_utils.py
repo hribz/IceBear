@@ -1,11 +1,13 @@
+import json
 import os
 from git import Repo
 import pandas as pd
 import subprocess
 from datetime import datetime, timedelta
+import requests
 
 from IncAnalysis.logger import logger
-from IncAnalysis.utils import makedir
+from IncAnalysis.utils import makedir, remake_dir, Path
 
 ignore_repos = {'xbmc/xbmc', 'mirror/busybox'}
 
@@ -15,12 +17,15 @@ def get_repo_csv(csv_path: str) -> pd.DataFrame:
 
 def clone_project(repo_name: str) -> bool:
     try:
+        logger.info(f"[Clone Project] cloning repository {repo_name}")
         repo_dir = f"repos/{repo_name}"
         # repo_dir exist and not empty.
-        if os.path.exists(repo_dir) and os.listdir(repo_dir):
-            logger.info(f"[Clone Project] repository {repo_dir} already exists.")
-            return True
-        makedir(repo_dir)
+        if os.path.exists(repo_dir):
+            dir_list = os.listdir(repo_dir)
+            if os.path.exists(repo_dir) and len(dir_list) > 0 and dir_list != ['.git']:
+                logger.info(f"[Clone Project] repository {repo_dir} already exists.")
+                return True
+        remake_dir(Path(repo_dir))
         Repo.clone_from(f"git@github.com:{repo_name}.git", repo_dir, multi_options=['--recurse-submodules'])
         return True
     except Exception as e:
@@ -110,3 +115,64 @@ def get_recent_n_daily_commits(repo_dir: str, n: int, branch):
             break
     daily_commits.reverse()
     return daily_commits
+
+def get_repo_specific_info(repo_name: str) -> dict:
+    try:
+        repo_url = f"https://api.github.com/repos/{repo_name}"
+        response = requests.get(repo_url)
+        response.raise_for_status()
+        repo_info = response.json()
+        stars = repo_info.get('stargazers_count', 0)
+        forks = repo_info.get('forks_count', 0)
+        watchers = repo_info.get('watchers_count', 0)
+        open_issues = repo_info.get('open_issues_count', 0)
+        
+        repo_dir = f"repos/{repo_name}"
+        if not os.path.exists(repo_dir):
+            return {
+                'project': repo_name,
+                'status': 'Not Cloned'
+            }
+        loc = subprocess.check_output(['cloc', repo_dir, '--json']).decode('utf-8')
+        loc_info = json.loads(loc)
+
+        c_cpp_relate_file_info = {
+            'C': loc_info.get('C', {}), 
+            'C++': loc_info.get('C++', {}), 
+            'C/C++ Header': loc_info.get('C/C++ Header', {})
+        }
+        c_cpp_file = c_cpp_relate_file_info['C++'].get('nFiles', 0) +\
+                    c_cpp_relate_file_info['C'].get('nFiles', 0) +\
+                    c_cpp_relate_file_info['C/C++ Header'].get('nFiles', 0)
+        c_cpp_loc = c_cpp_relate_file_info['C++'].get('code', 0) +\
+                    c_cpp_relate_file_info['C'].get('code', 0) +\
+                    c_cpp_relate_file_info['C/C++ Header'].get('code', 0)
+        
+        return {
+            'project': repo_name,
+            'stars': stars,
+            'forks': forks,
+            'watchers': watchers,
+            'open_issues': open_issues,
+            'C/C++ Files': c_cpp_file,
+            'C/C++ lines': c_cpp_loc
+        }
+    except Exception as e:
+        logger.error(f"Error getting repository information for {repo_name}.\n{e}")
+        return {}
+    
+if __name__ == "__main__":
+    benchmark = 'repos/benchmark.json'
+    repo_list = benchmark
+    result_file = 'repos/repos_info.json'
+
+    with open(repo_list, 'r') as f:
+        repo_json = json.load(f)
+    
+    result = []
+    for repo in repo_json:
+        repo_info = get_repo_specific_info(repo['project'])
+        result.append(repo_info)
+
+    with open(result_file, 'w') as f:
+        json.dump(result, f, indent=4)

@@ -1,0 +1,49 @@
+[
+    {
+        "project": "vim/vim",
+        "stars": 36987,
+        "forks": 5502,
+        "watchers": 36987,
+        "open_issues": 1515,
+        "C/C++ Files": 264,
+        "C/C++ lines": 419655
+    },
+    {
+        "project": "redis/redis",
+        "status": "Not Cloned"
+    },
+    {
+        "project": "openssl/openssl",
+        "stars": 26216,
+        "forks": 10212,
+        "watchers": 26216,
+        "open_issues": 1894,
+        "C/C++ Files": 4470,
+        "C/C++ lines": 1341447
+    },
+    {
+        "project": "FFmpeg/FFmpeg",
+        "status": "Not Cloned"
+    },
+    {
+        "project": "bitcoin/bitcoin",
+        "stars": 80884,
+        "forks": 36509,
+        "watchers": 80884,
+        "open_issues": 691,
+        "C/C++ Files": 1394,
+        "C/C++ lines": 267775
+    },
+    {
+        "project": "grpc/grpc",
+        "status": "Not Cloned"
+    },
+    {
+        "project": "opencv/opencv",
+        "status": "Not Cloned"
+    },
+    {
+        "project": "llvm/llvm-project",
+        "status": "Not Cloned"
+    }
+]

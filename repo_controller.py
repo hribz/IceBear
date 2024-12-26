@@ -17,27 +17,34 @@ class RepoParser(ArgumentParser):
         self.parser.add_argument('--daily', type=int, default=10, dest='daily', help='Analyse n daily commits.')
         self.parser.add_argument('--codechecker', action='store_true', dest='codechecker', help='Use CodeChecker as scheduler.')
 
+def get_if_exists(dict, key, default=None):
+    return dict[key] if key in dict else default
+
 class RepoInfo:
     def __init__(self, repo, env: Environment):
         self.repo_name = repo["project"]
         self.repo_dir = Path(env.PWD / f"repos/{self.repo_name}")
-        self.build_type = repo["build_type"]
-        self.default_options = repo["config_options"] if repo.get("config_options") else []
+        self.build_type = get_if_exists(repo, "build_type", BuildType.UNKNOWN)
+        self.default_options = get_if_exists(repo, "config_options", [])
         self.branch = repo["branch"]
-        self.out_of_tree = True if repo.get("out_of_tree") is None else repo.get("out_of_tree")
+        self.out_of_tree = get_if_exists(repo, "out_of_tree", True)
+        self.configure_scripts = get_if_exists(repo, "configure_scripts", None)
+        self.build_script = get_if_exists(repo, "build_script", None)
+        self.cmakefile_path = get_if_exists(repo, "cmakefile_path", None)
         
         self.abs_repo_path = str(self.repo_dir.absolute())
         if env.analyze_opts.codechecker:
             self.workspace = f"{self.abs_repo_path}_workspace/codechecker_{env.timestamp}"
         else:
             self.workspace = f"{self.abs_repo_path}_workspace/{env.timestamp}_{env.analyze_opts.inc}"
+        logger.TAG = self.repo_name
 
-def IncAnalyzerAction(Repo: UpdateConfigRepository, version_stamp, repo_info: RepoInfo, env: Environment, result_file, result_file_specific, init_csv) -> UpdateConfigRepository:
+def IncAnalyzerAction(Repo: UpdateConfigRepository, version_stamp, repo_info: RepoInfo, env: Environment) -> UpdateConfigRepository:
     if Repo is None:
         # Analysis first commit as baseline.
         Repo = UpdateConfigRepository(repo_info.repo_name, repo_info.abs_repo_path, env, build_root=f"{repo_info.abs_repo_path}_build", default_options=repo_info.default_options,
-                        version_stamp=version_stamp, default_build_type=repo_info.build_type, can_skip_configure=False, workspace=repo_info.workspace, out_of_tree=repo_info.out_of_tree)
-        
+                        version_stamp=version_stamp, default_build_type=repo_info.build_type, can_skip_configure=False, workspace=repo_info.workspace, out_of_tree=repo_info.out_of_tree,
+                        configure_scripts=repo_info.configure_scripts, build_script=repo_info.build_script, cmakefile_path=repo_info.cmakefile_path)    
     else:
         Repo.update_version(version_stamp)
     Repo.process_one_config()
@@ -118,12 +125,9 @@ def main(args):
     opts = parser.parse_args(args)
     env = Environment(opts)
     repos = 'repos/repos.json'
-    test_repos = 'repos/test_grpc.json'
-    FFmpeg = 'repos/test_ffmpeg.json'
-    grpc = 'repos/test_grpc.json'
-    ica_demo = 'repos/test_ica_demo.json'
+    benchmark = 'repos/benchmark.json'
 
-    repo_list = repos
+    repo_list = benchmark
 
     result_file = f'repos/result/{env.timestamp}_{env.analyze_opts.inc}_result.csv'
     result_file_specific = f'repos/result/{env.timestamp}_{env.analyze_opts.inc}_result_specific.csv'
@@ -168,7 +172,7 @@ def main(args):
                 if opts.codechecker:
                     Repo = CodeCheckerAction(Repo, version_stamp, repo_info, env)
                 else:
-                    Repo = IncAnalyzerAction(Repo, version_stamp, repo_info, env, result_file, result_file_specific, init_csv)
+                    Repo = IncAnalyzerAction(Repo, version_stamp, repo_info, env)
             else:
                 status = STATUS.CHECK_FAILED
                 logger.error(f"[Checkout Commit] {repo_info.repo_name} checkout to {commit_sha} failed!")

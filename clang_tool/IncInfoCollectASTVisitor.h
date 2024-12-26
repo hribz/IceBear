@@ -22,9 +22,9 @@
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Index/USRGeneration.h"
 #include "clang/Analysis/AnalysisDeclContext.h"
-#include "clang/Analysis/CallGraph.h"
 
 #include "DiffLineManager.h"
+#include "ReverseCallGraph.h"
 
 using namespace clang;
 using SetOfConstDecls = llvm::DenseSet<const Decl *>;
@@ -71,7 +71,7 @@ private:
 class IncInfoCollectASTVisitor : public RecursiveASTVisitor<IncInfoCollectASTVisitor> {
 public:
     explicit IncInfoCollectASTVisitor(ASTContext *Context, DiffLineManager &dlm, 
-        CallGraph &CG, std::unordered_set<const Decl *> &FuncsNeedRA, const IncOptions &incOpt)
+        ReverseCallGraph &CG, std::unordered_set<const Decl *> &FuncsNeedRA, const IncOptions &incOpt)
         : Context(Context), DLM(dlm), CG(CG), FunctionsNeedReanalyze(FuncsNeedRA), IncOpt(incOpt) {}
     
     bool isGlobalConstant(const Decl *D);
@@ -111,7 +111,7 @@ private:
     std::unordered_set<const Decl *> TaintDecls; 
     std::unordered_set<const Decl *> &FunctionsNeedReanalyze;
     DiffLineManager &DLM;
-    CallGraph &CG;
+    ReverseCallGraph &CG;
     DeclRefFinder DRFinder;
     std::vector<const Decl *> inFunctionOrMethodStack;
     const IncOptions &IncOpt;
