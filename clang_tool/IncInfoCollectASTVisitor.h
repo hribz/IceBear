@@ -72,7 +72,7 @@ class IncInfoCollectASTVisitor : public RecursiveASTVisitor<IncInfoCollectASTVis
 public:
     explicit IncInfoCollectASTVisitor(ASTContext *Context, DiffLineManager &dlm, 
         ReverseCallGraph &CG, std::unordered_set<const Decl *> &FuncsNeedRA, const IncOptions &incOpt)
-        : Context(Context), DLM(dlm), CG(CG), FunctionsNeedReanalyze(FuncsNeedRA), IncOpt(incOpt) {}
+        : Context(Context), DLM(dlm), CG(CG), FunctionsChanged(FuncsNeedRA), IncOpt(incOpt) {}
     
     bool isGlobalConstant(const Decl *D);
 
@@ -105,11 +105,11 @@ private:
     std::unordered_set<const Decl *> GlobalConstantSet;
     // Decls have changed, the function/method use these should reanalyze.
     // Don't record changed functions and methods, they are recorded in 
-    // FunctionsNeedReanalyze. Just consider indirect factors which make
+    // FunctionsChanged. Just consider indirect factors which make
     // functions/methods need to reanalyze. Such as GlobalConstant and 
     // class/struct change.
     std::unordered_set<const Decl *> TaintDecls; 
-    std::unordered_set<const Decl *> &FunctionsNeedReanalyze;
+    std::unordered_set<const Decl *> &FunctionsChanged;
     DiffLineManager &DLM;
     ReverseCallGraph &CG;
     DeclRefFinder DRFinder;

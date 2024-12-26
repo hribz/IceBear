@@ -70,7 +70,7 @@ public:
   void addCalledDecl(Decl *D, Expr *CallExpr) {
     if (G->includeCalleeInGraph(D)) {
       ReverseCallGraphNode *CalleeNode = G->getOrInsertNode(D);
-      CalleeNode->addCaller({CallerNode, CallExpr});
+      CalleeNode->addCaller(CallerNode);
     }
   }
 
@@ -212,7 +212,7 @@ ReverseCallGraphNode *ReverseCallGraph::getOrInsertNode(Decl *F) {
   Node = std::make_unique<ReverseCallGraphNode>(F);
   // Make Root node a parent of all functions to make sure all are reachable.
   if (F)
-    Root->addCaller({Node.get(), /*Call=*/nullptr});
+    Root->addCaller(Node.get());
   return Node.get();
 }
 
@@ -235,8 +235,9 @@ void ReverseCallGraph::print(raw_ostream &OS) const {
     OS << " calls: ";
     for (ReverseCallGraphNode::const_iterator CI = N->begin(),
                                        CE = N->end(); CI != CE; ++CI) {
-      assert(CI->Caller != Root && "No one can call the root node.");
-      CI->Caller->print(OS);
+      assert(*CI != Root && "No one can call the root node.");
+      (*CI)->print(OS);
+      
       OS << " ";
     }
     OS << '\n';

@@ -45,7 +45,7 @@ class IncInfoCollectConsumer : public clang::ASTConsumer {
 public:
     explicit IncInfoCollectConsumer(CompilerInstance &CI, std::string &diffPath, const IncOptions &incOpt)
     : CG(), IncOpt(incOpt), DLM(CI.getASTContext().getSourceManager()), PP(CI.getPreprocessor()),
-      IncVisitor(&CI.getASTContext(), DLM, CG, FunctionsNeedReanalyze, IncOpt) {
+      IncVisitor(&CI.getASTContext(), DLM, CG, FunctionsChanged, IncOpt) {
         std::unique_ptr<llvm::Timer> consumerTimer = std::make_unique<llvm::Timer>(
             "Consumer Timer", "Consumer Constructor Time");
         consumerTimer->startTimer();
@@ -128,6 +128,7 @@ public:
             return;
         }
         
+        // Find changed functions on the call graph.
         llvm::ReversePostOrderTraversal<clang::ReverseCallGraph*> RPOT(&CG);
         SourceManager &SM = Context.getSourceManager();
         for (ReverseCallGraphNode *N : RPOT) {
@@ -136,10 +137,17 @@ public:
             // CG only record canonical decls, so it's neccessary to
             // judge if there are changes in Function Definition scope. 
             if (DLM.isChangedDecl(D)) {
-                FunctionsNeedReanalyze.insert(D);
+                FunctionsChanged.insert(D);
             }
         }
+
+        // Consider other factors on AST which make functions need to reanalyze.
         IncVisitor.TraverseDecl(Context.getTranslationUnitDecl());
+
+        // Propogate the reanalyze flag on call graph.
+        Propogate();
+
+        // Output the result.
         IncVisitor.DumpGlobalConstantSet();
         IncVisitor.DumpTaintDecls();
         DumpFunctionsNeedReanalyze();
@@ -149,6 +157,25 @@ public:
         toolEnd -= toolPrepare;
         llvm::errs() << "Analysis CF ";
         DisplayTime(toolEnd);
+    }
+
+    void Propogate() {
+        for (auto &decl : FunctionsChanged) {
+            ReverseCallGraphNode *node_from_cf = CG.getNode(decl);
+            auto worklist = std::vector<ReverseCallGraphNode *>({node_from_cf});
+            while (!worklist.empty()) {
+                auto node = worklist.back();
+                worklist.pop_back();
+                if (node->needsReanalyze()) {
+                    continue;
+                }
+                node->markAsReanalyze();
+                FunctionsNeedReanalyze.push_back(node->getDecl());
+                for (auto &caller : node->callers()) {
+                    worklist.push_back(caller);
+                }
+            }
+        }
     }
 
     static void getUSRName(const Decl *D, std::string &Str) {
@@ -199,8 +226,8 @@ public:
             }
             *OS << "\n[\n";
             SetOfConstDecls CalleeSet;
-            for (ReverseCallGraphNode::CallRecord &CR : N->callers()) {
-                Decl *Callee = CR.Caller->getDecl();
+            for (ReverseCallGraphNode *CR : N->callers()) {
+                Decl *Callee = CR->getDecl();
                 if (CalleeSet.contains(Callee))
                     continue;
                 CalleeSet.insert(Callee);
@@ -228,11 +255,11 @@ public:
     }
 
     void DumpFunctionsNeedReanalyze() {
-        // Although there maybe no function changed, we still create .cf file.
+        // Although there maybe no function changed, we still create .rf file.
         std::ostream* OS = &std::cout;
         std::shared_ptr<std::ofstream> outFile;
         if (IncOpt.DumpToFile) {
-            std::string ReanalyzeFunctionsFile = MainFilePath.str() + ".cf";
+            std::string ReanalyzeFunctionsFile = MainFilePath.str() + ".rf";
             outFile = std::make_shared<std::ofstream>(ReanalyzeFunctionsFile);
             if (!outFile->is_open()) {
                 llvm::errs() << "Error: Could not open file " << ReanalyzeFunctionsFile << " for writing.\n";
@@ -272,7 +299,8 @@ private:
     ReverseCallGraph CG;
     IncInfoCollectASTVisitor IncVisitor;
     std::deque<Decl *> LocalTUDecls;
-    std::unordered_set<const Decl *> FunctionsNeedReanalyze;
+    std::unordered_set<const Decl *> FunctionsChanged;
+    std::vector<const Decl *> FunctionsNeedReanalyze;
     Preprocessor &PP;
 };
 

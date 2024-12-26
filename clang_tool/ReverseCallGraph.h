@@ -25,6 +25,7 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator_range.h"
+#include <llvm/ADT/DenseSet.h>
 #include <memory>
 
 namespace clang {
@@ -165,13 +166,15 @@ private:
   Decl *FD;
 
   /// The list of caller functions from this node.
-  SmallVector<CallRecord, 5> CallerFunctions;
+  llvm::SmallSetVector<ReverseCallGraphNode *, 5> CallerFunctions;
+
+  bool Reanalyze;
 
 public:
-  ReverseCallGraphNode(Decl *D) : FD(D) {}
+  ReverseCallGraphNode(Decl *D) : FD(D), Reanalyze(false) {}
 
-  using iterator = SmallVectorImpl<CallRecord>::iterator;
-  using const_iterator = SmallVectorImpl<CallRecord>::const_iterator;
+  using iterator = llvm::SmallSetVector<ReverseCallGraphNode *, 5>::iterator;
+  using const_iterator = llvm::SmallSetVector<ReverseCallGraphNode *, 5>::const_iterator;
 
   /// Iterators through all the callers/parent of the node.
   iterator begin() { return CallerFunctions.begin(); }
@@ -190,7 +193,11 @@ public:
   bool empty() const { return CallerFunctions.empty(); }
   unsigned size() const { return CallerFunctions.size(); }
 
-  void addCaller(CallRecord Call) { CallerFunctions.push_back(Call); }
+  void addCaller(ReverseCallGraphNode * Caller) { CallerFunctions.insert(Caller); }
+
+  bool needsReanalyze() const { return Reanalyze; }
+
+  void markAsReanalyze() { Reanalyze = true; }
 
   Decl *getDecl() const { return FD; }
 

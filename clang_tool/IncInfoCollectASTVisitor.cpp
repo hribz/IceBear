@@ -104,9 +104,9 @@ bool IncInfoCollectASTVisitor::TraverseDecl(Decl *D) {
             // maybe inlined only when ctu analysis.
             return true;
         }
-        if (CountCanonicalDeclInSet(FunctionsNeedReanalyze, D) || DLM.isChangedDecl(D)) {
+        if (CountCanonicalDeclInSet(FunctionsChanged, D) || DLM.isChangedDecl(D)) {
             // If this `Decl` has been confirmed need to be reanalyzed, we don't need to traverse it.
-            InsertCanonicalDeclToSet(FunctionsNeedReanalyze, D);
+            InsertCanonicalDeclToSet(FunctionsChanged, D);
             return true;
         }
         inFunctionOrMethodStack.push_back(D->getCanonicalDecl()); // enter function/method
@@ -130,7 +130,7 @@ bool IncInfoCollectASTVisitor::VisitDeclRefExpr(DeclRefExpr *DR) {
     auto ND = DR->getFoundDecl();
     if (!inFunctionOrMethodStack.empty() && CountCanonicalDeclInSet(TaintDecls, ND)) {
         // use changed decl, reanalyze this function
-        InsertCanonicalDeclToSet(FunctionsNeedReanalyze, inFunctionOrMethodStack.back());
+        InsertCanonicalDeclToSet(FunctionsChanged, inFunctionOrMethodStack.back());
     }
     return ProcessDeclRefExpr(DR, ND);
 }
@@ -138,7 +138,7 @@ bool IncInfoCollectASTVisitor::VisitDeclRefExpr(DeclRefExpr *DR) {
 bool IncInfoCollectASTVisitor::VisitMemberExpr(MemberExpr *ME) {
     auto member = ME->getMemberDecl();
     if (!inFunctionOrMethodStack.empty() && CountCanonicalDeclInSet(TaintDecls, member)) {
-        InsertCanonicalDeclToSet(FunctionsNeedReanalyze, inFunctionOrMethodStack.back());
+        InsertCanonicalDeclToSet(FunctionsChanged, inFunctionOrMethodStack.back());
     }
     // member could be VarDecl, EnumConstantDecl, CXXMethodDecl, FieldDecl, etc.
     if (isa<VarDecl, EnumConstantDecl>(member)) {
