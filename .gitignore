@@ -17,3 +17,5 @@ repos/*
 !repos/*.json
 *.log
 myenv*
+*.ics
+diff_lines.txt

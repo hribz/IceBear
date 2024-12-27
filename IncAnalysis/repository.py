@@ -94,7 +94,7 @@ class Repository(ABC):
             #     config_data.append('Skipped')
             #     config_data.append('Skipped')
         config_data.append(len(config.file_list))
-        config_data.append(len(config.diff_file_list))
+        config_data.append(len(config.diff_file_list) if config.incrementable else len(config.file_list))
         config_data.append(config.get_changed_function_num())
         config_data.append(config.get_reanalyze_function_num())
         config_data.append(config.diff_file_with_no_cf)

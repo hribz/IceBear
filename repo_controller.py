@@ -15,6 +15,7 @@ class RepoParser(ArgumentParser):
         super().__init__()
         self.parser.add_argument('--repo', type=str, dest='repo', help='Only analyse specific repos.')
         self.parser.add_argument('--daily', type=int, default=10, dest='daily', help='Analyse n daily commits.')
+        self.parser.add_argument('--amount', type=int, default=5, dest='amount', help='Amount delta between two commits.')
         self.parser.add_argument('--codechecker', action='store_true', dest='codechecker', help='Use CodeChecker as scheduler.')
 
 def get_if_exists(dict, key, default=None):
@@ -162,7 +163,7 @@ def main(args):
                 continue
             update_submodules(repo_info.repo_dir)
 
-        commits = get_recent_n_daily_commits(repo_info.repo_dir, opts.daily, repo_info.branch) if opts.daily>0 else [commit['hash'] for commit in repo['commits']]
+        commits = get_recent_n_daily_commits(repo_info.repo_dir, opts.daily, repo_info.branch, opts.amount) if opts.daily>0 else [commit['hash'] for commit in repo['commits']]
         for commit_sha in commits:
             status = STATUS.NORMAL
             if checkout_target_commit(repo_info.abs_repo_path, commit_sha):

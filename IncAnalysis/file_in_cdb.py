@@ -5,7 +5,7 @@ from typing import List, Dict
 from enum import Enum, auto
 import hashlib
 
-from IncAnalysis.utils import makedir, commands_to_shell_script
+from IncAnalysis.utils import makedir, commands_to_shell_script, remove_file
 from IncAnalysis.analyzer_config import *
 from IncAnalysis.logger import logger
 from IncAnalysis.compile_command import CompileCommand
@@ -22,6 +22,7 @@ class FileKind(Enum):
     EFM = auto()
     CG = auto()
     CF = auto()
+    INCSUM = auto()
     RF = auto()
     FS = auto()
     TM = auto()
@@ -185,6 +186,8 @@ class FileInCDB:
                 self.baseline_file = old_file
                 # We don't need old version file before baseline_file,
                 # so just deref its baseline_file and let GC collect file version older than it.
+                if old_file.baseline_file is not None:
+                    old_file.baseline_file.clean_files()
                 old_file.baseline_file = None
             else:
                 logger.debug(f"[FileInCDB Init] Find new file {self.file_name}")
@@ -197,6 +200,10 @@ class FileInCDB:
                 else:
                     logger.debug(f"[FileInCDB Init] Find new file {self.file_name}")
     
+    def clean_files(self):
+        if self.prep_file:
+            remove_file(self.prep_file)
+
     def is_new(self):
         return self.status == FileStatus.NEW or self.status == FileStatus.DIFF_FAILED
 
@@ -224,8 +231,10 @@ class FileInCDB:
             if not self.prep_file:
                 return None
             return (self.prep_file) + '.cf'
+        elif kind == FileKind.INCSUM:
+            return (self.prep_file) + '.ics'
         elif kind == FileKind.RF:
-            return (self.csa_file) + '.rf'
+            return (self.prep_file) + '.rf'
         elif kind == FileKind.FS:
             return (self.csa_file) + '.fs'
         elif kind == FileKind.TM:
@@ -277,15 +286,40 @@ class FileInCDB:
             commands.extend(['-diff', self.diff_info_file])
         if self.parent.env.ctu:
             commands += ['-ctu']
+        commands.extend(["-rf-file", self.get_file_path(FileKind.RF)])
         commands += ['--', '-w'] + self.compile_command.arguments + ['-D__clang_analyzer__']
         ii_script = commands_to_shell_script(commands)
         try:
-            process = run(ii_script, shell=True, capture_output=True, text=True, check=True)
+            process = run(commands, capture_output=True, text=True, check=True)
             logger.info(f"[File Inc Info Success] {ii_script}")
+            self.parse_inc_sum()
             return True
         except subprocess.CalledProcessError as e:
             logger.error(f"[File Inc Info Failed] {ii_script}\n stdout: {e.stdout}\n stderr: {e.stderr}")
             return False
+
+    def parse_inc_sum(self) -> bool:
+        inc_sum_file = self.get_file_path(FileKind.INCSUM)
+        if not os.path.exists(inc_sum_file):
+            logger.error(f"[Parse Inc Sum] File {inc_sum_file} doesn't exist, It's seems file has no change.")
+            return False
+        with open(inc_sum_file, 'r') as f:
+            for line in f.readlines():
+                line = line.strip()
+                if not line:
+                    break
+                if line == 'new file':
+                    self.has_rf = False
+                    break
+                tag, val = line.split(':')
+                if tag == 'changed functions':
+                    self.cf_num = int(val)
+                elif tag == 'reanalyze functions':
+                    self.rf_num = int(val)
+                    self.has_rf = True
+                elif tag == 'cg nodes':
+                    self.cg_node_num = int(val)
+        return True
 
     def parse_cg_file(self) -> CallGraph:
         # .cg file format: 

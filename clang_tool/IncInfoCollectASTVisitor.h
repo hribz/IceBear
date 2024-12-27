@@ -35,9 +35,12 @@ public:
     bool ClassLevelTypeChange = true;
     bool FieldLevelTypeChange = false;
 
+    bool DumpCG = false;
     bool DumpToFile = true;
     bool DumpUSR = false;
     bool CTU = false;
+
+    std::string RFPath;
 };
 
 class DeclRefFinder : public RecursiveASTVisitor<DeclRefFinder> {

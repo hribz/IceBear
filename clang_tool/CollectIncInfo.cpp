@@ -103,6 +103,14 @@ public:
             // If there is no change in this file, just use old call graph.
             // DO NOTHING.
             llvm::errs() << DLM.MainFilePath << " has no change, do nothing.\n";
+            DumpIncSummary(0);
+            return;
+        }
+
+        if (DLM.isNewFile()) {
+            // If this is a new file, we just output its callgraph.
+            DumpIncSummary(1);
+            llvm::errs() << DLM.MainFilePath << " is new, do not analyze changed functions.\n";
             return;
         }
 
@@ -121,12 +129,6 @@ public:
         toolPrepare -= toolStart;
         DisplayTime(toolPrepare);
         toolTimer->startTimer();
-
-        if (DLM.isNewFile()) {
-            // If this is a new file, we just output its callgraph.
-            llvm::errs() << DLM.MainFilePath << " is new, do not analyze changed functions.\n";
-            return;
-        }
         
         // Find changed functions on the call graph.
         llvm::ReversePostOrderTraversal<clang::ReverseCallGraph*> RPOT(&CG);
@@ -151,6 +153,7 @@ public:
         IncVisitor.DumpGlobalConstantSet();
         IncVisitor.DumpTaintDecls();
         DumpFunctionsNeedReanalyze();
+        DumpIncSummary(2);
         
         toolTimer->stopTimer();
         llvm::TimeRecord toolEnd = toolTimer->getTotalTime();
@@ -190,6 +193,9 @@ public:
     }
 
     void DumpCallGraph() {
+        if (!IncOpt.DumpCG) {
+            return ;
+        }
         std::ostream* OS = &std::cout;
         // `outFile`'s life time should persist until dump finished.
         // And don't create file if don't need to dump to file.
@@ -255,11 +261,16 @@ public:
     }
 
     void DumpFunctionsNeedReanalyze() {
-        // Although there maybe no function changed, we still create .rf file.
+        if (FunctionsNeedReanalyze.empty()) {
+            return;
+        }
         std::ostream* OS = &std::cout;
         std::shared_ptr<std::ofstream> outFile;
         if (IncOpt.DumpToFile) {
             std::string ReanalyzeFunctionsFile = MainFilePath.str() + ".rf";
+            if (!IncOpt.RFPath.empty()) {
+                ReanalyzeFunctionsFile = IncOpt.RFPath;
+            }
             outFile = std::make_shared<std::ofstream>(ReanalyzeFunctionsFile);
             if (!outFile->is_open()) {
                 llvm::errs() << "Error: Could not open file " << ReanalyzeFunctionsFile << " for writing.\n";
@@ -287,6 +298,37 @@ public:
             }
             *OS << "\n";
         }
+        (*OS).flush();
+        if (IncOpt.DumpToFile)
+            outFile->close();
+    }
+
+    void DumpIncSummary(int mode) {
+        std::ostream* OS = &std::cout;
+        std::shared_ptr<std::ofstream> outFile;
+        if (IncOpt.DumpToFile) {
+            std::string IncSummaryFile = MainFilePath.str() + ".ics";
+            outFile = std::make_shared<std::ofstream>(IncSummaryFile);
+            if (!outFile->is_open()) {
+                llvm::errs() << "Error: Could not open file " << IncSummaryFile << " for writing.\n";
+                return;
+            }
+            OS = outFile.get();
+        } else {
+            *OS << "--- Inc Summary ---\n";
+        }
+
+        if (mode == 0) {
+            // no change
+        } else if (mode == 1) {
+            // new file
+            *OS << "new file\n";
+        } else {
+            *OS << "changed functions" << ":" << FunctionsChanged.size() << "\n";
+            *OS << "reanalyze functions" << ":" << FunctionsNeedReanalyze.size() << "\n";
+            *OS << "cg nodes" << ":" << CG.size()-1 << "\n";
+        }
+
         (*OS).flush();
         if (IncOpt.DumpToFile)
             outFile->close();
@@ -345,12 +387,16 @@ static llvm::cl::opt<bool> ClassLevel("class", llvm::cl::desc("Propogate type ch
     llvm::cl::value_desc("class level change"), llvm::cl::init(true));
 static llvm::cl::opt<bool> FieldLevel("field", llvm::cl::desc("Propogate type change by field level"),
     llvm::cl::value_desc("field level change"), llvm::cl::init(false));
+static llvm::cl::opt<bool> DumpCG("dump-cg", llvm::cl::desc("Dump CG or not"),
+    llvm::cl::value_desc("dump cg"), llvm::cl::init(false));
 static llvm::cl::opt<bool> DumpToFile("dump-file", llvm::cl::desc("Dump CG and CF to file"),
     llvm::cl::value_desc("dump to file or stream"), llvm::cl::init(true));
 static llvm::cl::opt<bool> DumpUSR("dump-usr", llvm::cl::desc("Dump USR function name"),
     llvm::cl::value_desc("dump usr fname"), llvm::cl::init(false));
 static llvm::cl::opt<bool> CTU("ctu", llvm::cl::desc("Consider CTU analysis"),
     llvm::cl::value_desc("consider CTU analysis"), llvm::cl::init(false));
+static llvm::cl::opt<std::string> RFPath("rf-file", llvm::cl::desc("Output RF to the path"),
+    llvm::cl::value_desc("dump rf file"), llvm::cl::init(""));
 
 int main(int argc, const char **argv) {
     std::unique_ptr<llvm::Timer> toolTimer = 
@@ -367,8 +413,8 @@ int main(int argc, const char **argv) {
     CommonOptionsParser& OptionsParser = ExpectedParser.get();
 
     ClangTool Tool(OptionsParser.getCompilations(), OptionsParser.getSourcePathList());
-    IncOptions IncOpt{.PrintLoc=PrintLoc, .ClassLevelTypeChange=ClassLevel, .FieldLevelTypeChange=FieldLevel, 
-                      .DumpToFile=DumpToFile, .DumpUSR=DumpUSR, .CTU=CTU};
+    IncOptions IncOpt{.PrintLoc=PrintLoc, .ClassLevelTypeChange=ClassLevel, .FieldLevelTypeChange=FieldLevel, .DumpCG=DumpCG, 
+                      .DumpToFile=DumpToFile, .DumpUSR=DumpUSR, .CTU=CTU, .RFPath=RFPath};
     IncInfoCollectActionFactory Factory(DiffPath, FSPath, IncOpt);
 
     toolTimer->stopTimer();

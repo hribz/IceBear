@@ -75,7 +75,7 @@ def get_local_repo_commit_parents(repo_dir: str, commit: str) -> list:
     # return parent commits
     return [commit.hexsha for commit in repo.head.commit.parents]
 
-def get_recent_n_daily_commits(repo_dir: str, n: int, branch):
+def get_recent_n_daily_commits(repo_dir: str, n: int, branch, amount):
     assert n>=0
     assert os.path.isabs(repo_dir)
     repo = Repo(repo_dir)
@@ -85,6 +85,7 @@ def get_recent_n_daily_commits(repo_dir: str, n: int, branch):
     later_commit = None
     later_commit_date = None
     daily_commits = []
+    amount_delta = 0
     if not checkout_target_commit(repo_dir, branch):
         logger.error(f"Checkout {branch} failed.")
         exit(1)
@@ -93,24 +94,25 @@ def get_recent_n_daily_commits(repo_dir: str, n: int, branch):
 
     for commit in repo.iter_commits(branch):
         commit_date = datetime.fromtimestamp(commit.committed_date).date()
+        amount_delta += 1
         if later_commit is None:
             later_commit = commit
             later_commit_date = commit_date
             daily_commits.append(commit.hexsha)
         else:
             time_delta =  later_commit_date - commit_date
-            if time_delta >= timedelta(days=1):
+            if amount_delta >= amount:
                 daily_commits.append(commit.hexsha)
                 later_commit_file = f"{commits_dir}/{repo_name}_{later_commit_date}_{later_commit.hexsha[:6]}.diff"
-                if not os.path.exists(later_commit_file):
-                    with open(later_commit_file, 'w', encoding='utf-8') as f:
-                        f.write(f"Old Date: {commit.committed_datetime}\nOld Commit: {commit.hexsha}\nNew Date: {later_commit.committed_datetime}\n"+\
-                                f"New Commit: {later_commit.hexsha}\nAuthor: {later_commit.author}\nMessage:\n{later_commit.message}\n")
-                        diff = repo.git.diff(commit.hexsha, later_commit.hexsha)
-                        diff = diff.encode('utf-8', 'replace').decode('utf-8')
-                        f.write(diff)
+                with open(later_commit_file, 'w', encoding='utf-8') as f:
+                    f.write(f"Old Date: {commit.committed_datetime}\nOld Commit: {commit.hexsha}\nNew Date: {later_commit.committed_datetime}\n"+\
+                            f"New Commit: {later_commit.hexsha}\nCommits Amount: {amount_delta}\nAuthor: {later_commit.author}\nMessage:\n{later_commit.message}\n")
+                    diff = repo.git.diff(commit.hexsha, later_commit.hexsha)
+                    diff = diff.encode('utf-8', 'replace').decode('utf-8')
+                    f.write(diff)
                 later_commit = commit
                 later_commit_date = commit_date
+                amount_delta = 0
         if len(daily_commits) >= n:
             break
     daily_commits.reverse()
@@ -133,7 +135,8 @@ def get_repo_specific_info(repo_name: str) -> dict:
                 'project': repo_name,
                 'status': 'Not Cloned'
             }
-        loc = subprocess.check_output(['cloc', repo_dir, '--json']).decode('utf-8')
+        
+        loc = subprocess.check_output(['cloc', repo_dir, '--json', '--timeout', '600', '--exclude-dir=third_party,third-party,3rdparty']).decode('utf-8')
         loc_info = json.loads(loc)
 
         c_cpp_relate_file_info = {
@@ -172,6 +175,7 @@ if __name__ == "__main__":
     result = []
     for repo in repo_json:
         repo_info = get_repo_specific_info(repo['project'])
+        print(repo_info)
         result.append(repo_info)
 
     with open(result_file, 'w') as f:

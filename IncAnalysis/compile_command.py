@@ -14,8 +14,7 @@ class CompileCommand:
             if 'command' in ccmd:
                 self.origin_cmd = ccmd['command']
             else:
-                from shlex import join
-                self.origin_cmd = join(ccmd['arguments'])
+                self.origin_cmd = " ".join(ccmd['arguments'])
             self.parse(ccmd)
 
     def __str__(self):
@@ -27,6 +26,13 @@ class CompileCommand:
                     'compiler': self.compiler,
                     'language': self.language,
                 }, indent=4)
+
+    def restore_to_json(self):
+        return {
+            'directory': self.directory,
+            'command': self.origin_cmd,
+            'file': self.file
+        }
 
     def parse(self, ccmd):
         # Check the validity of a compile command.

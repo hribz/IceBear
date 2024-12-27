@@ -36,7 +36,7 @@ class Environment:
     def prepare_env_path(self):
         # Environment path
         self.PWD: Path = Path(".").absolute()
-        self.EXTRACT_II = str(self.PWD / 'build/clang_tool/collectIncInfo')
+        self.EXTRACT_II = str(self.PWD / 'build_rcg/clang_tool/collectIncInfo')
         self.PANDA = str(self.PWD / 'panda/panda')
         # Environment CC/CXX Compiler
 
@@ -131,7 +131,7 @@ class Environment:
 class ArgumentParser:
     def __init__(self):
         self.parser = argparse.ArgumentParser(prog='IncAnalyzer', formatter_class=argparse.RawTextHelpFormatter)
-        self.parser.add_argument('--inc', type=str, dest='inc', choices=['file', 'func', 'inline'], 
+        self.parser.add_argument('--inc', type=str, dest='inc', choices=['noinc', 'file', 'func', 'inline'], default='file',
                                  help='Incremental analysis mode: file, func, inline')
         self.parser.add_argument('--verbose', action='store_true', dest='verbose', help='Record debug information.')
         self.parser.add_argument('--analyze', type=str, dest='analyze', choices=['ctu', 'no-ctu'],

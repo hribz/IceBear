@@ -11,6 +11,7 @@ from IncAnalysis.analyzer_config import *
 from IncAnalysis.file_in_cdb import FileInCDB, FileKind
 from IncAnalysis.utils import makedir, process_file_list, commands_to_shell_script
 from IncAnalysis.logger import logger
+from IncAnalysis.process import Process
 
 class Analyzer(ABC):
     def __init__(self, analyzer_config: AnalyzerConfig, file_list: List[FileInCDB]):
@@ -19,7 +20,11 @@ class Analyzer(ABC):
         self.file_list: List[FileInCDB] = file_list
     
     @abstractmethod
-    def analyze_one_file(self, file: FileInCDB):
+    def get_analyzer_name(self):
+        pass
+
+    @abstractmethod
+    def generate_analyzer_cmd(self, file: FileInCDB):
         pass
 
     def analyze_all_files(self):
@@ -35,10 +40,35 @@ class Analyzer(ABC):
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.analyzer_config.jobs) as executor:
             futures = [executor.submit(self.analyze_one_file, file) for file in self.file_list]
 
-            for future in concurrent.futures.as_completed(futures):
-                result = future.result()  # 获取任务结果，如果有的话
-                ret = ret and result
+            for idx, future in enumerate(concurrent.futures.as_completed(futures), start=1):
+                stat, file_name = future.result()  # 获取任务结果，如果有的话
+                logger.info(f"[{self.get_analyzer_name()} Analyze {idx}/{len(self.file_list)}] [{stat}] {file_name}")
+                ret = ret and stat == Process.Stat.ok
         return ret
+    
+    def analyze_one_file(self, file: FileInCDB):
+        analyzer_cmd = self.generate_analyzer_cmd(file)
+        if analyzer_cmd is None:
+            return True, file.file_name
+        script = commands_to_shell_script(analyzer_cmd)
+        
+        process = Process(analyzer_cmd, file.compile_command.directory)
+        if not isinstance(self, ClangTidy):
+            # ClangTidy commands are too long to be printed.
+            logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {script}")
+        if process.stat == Process.Stat.ok:
+            logger.debug(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
+        else:
+            logger.error(f"[{self.get_analyzer_name()} Analyze {process.stat}] {script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+        
+        # Record time cost.
+        if isinstance(self, CSA):
+            if process.stderr:
+                for line in process.stderr.splitlines():
+                    if line.startswith("  Total Execution Time"):
+                        file.csa_analyze_time = (line.split(' ')[5])
+                        break
+        return process.stat, file.file_name
 
     @staticmethod
     def __str_to_analyzer_class__(analyzer_name: str):
@@ -58,42 +88,31 @@ class CSA(Analyzer):
         super().__init__(analyzer_config, file_list)
         self.analyzer_config: CSAConfig
 
-    def analyze_one_file(self, file: FileInCDB):
+    def generate_analyzer_cmd(self, file: FileInCDB):
         compiler = self.analyzer_config.compilers[file.compile_command.language]
-        commands = [compiler] + file.compile_command.arguments
-        commands.extend(['--analyze', '-o', str(file.parent.csa_output_path)])
-        commands.extend(self.analyzer_config.analyze_args())
+        analyzer_cmd = [compiler] + file.compile_command.arguments + ['-Qunused-arguments']
+        analyzer_cmd.extend(['--analyze', '-o', str(file.parent.csa_output_path)])
+        analyzer_cmd.extend(self.analyzer_config.analyze_args())
         makedir(os.path.dirname(file.csa_file))
         # Add file specific args.
         if self.analyzer_config.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             if file.cf_num == 0 or file.rf_num == 0:
                 logger.info(f"[{__class__.__name__} No Functions] Don't need to analyze {file.file_name}")
-                return True
+                return None
             if file.parent.incrementable and file.has_rf:
-                commands.extend(['-Xanalyzer', f'-analyze-function-file={file.get_file_path(FileKind.RF)}'])
+                analyzer_cmd.extend(['-Xanalyzer', f'-analyze-function-file={file.get_file_path(FileKind.RF)}'])
             if self.analyzer_config.inc_mode == IncrementalMode.InlineLevel:
-                commands.extend(['-Xanalyzer', f'-analyzer-dump-fsum={file.get_file_path(FileKind.FS)}'])
-        csa_script = commands_to_shell_script(commands)
-        
-        process = run(csa_script, shell=True, capture_output=True, text=True, cwd=file.compile_command.directory)
-        logger.debug(f"[{__class__.__name__} Analyze Script] {csa_script}")
-        if process.returncode == 0:
-            logger.info(f"[{__class__.__name__} Analyze Success] {file.file_name}")
-        else:
-            logger.error(f"[{__class__.__name__} Analyze Failed] {csa_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
-        # Record time cost.
-        if process.stderr:
-            for line in process.stderr.splitlines():
-                if line.startswith("  Total Execution Time"):
-                    file.csa_analyze_time = (line.split(' ')[5])
-                    break
-        return process.returncode == 0
+                analyzer_cmd.extend(['-Xanalyzer', f'-analyzer-dump-fsum={file.get_file_path(FileKind.FS)}'])
+        return analyzer_cmd
+
+    def get_analyzer_name(self):
+        return __class__.__name__
 
 class ClangTidy(Analyzer):
     def __init__(self, analyzer_config: ClangTidyConfig, file_list: List[FileInCDB]):
         super().__init__(analyzer_config, file_list)
 
-    def analyze_one_file(self, file: FileInCDB):
+    def generate_analyzer_cmd(self, file):
         analyzer_cmd = [self.analyzer_config.clang_tidy]
         analyzer_cmd.extend(self.analyzer_config.analyze_args())
         analyzer_cmd.append(file.file_name)
@@ -106,17 +125,11 @@ class ClangTidy(Analyzer):
         analyzer_cmd.append("--")
         analyzer_cmd.extend(file.compile_command.arguments)
         analyzer_cmd.extend(self.analyzer_config.compiler_warnings)
+        return analyzer_cmd
 
-        clang_tidy_script = commands_to_shell_script(analyzer_cmd)
-
-        process = run(clang_tidy_script, shell=True, capture_output=True, text=True, cwd=file.compile_command.directory)
-        # logger.debug(f"[{__class__.__name__} Analyze Script] {clang_tidy_script}")
-        if process.returncode == 0:
-            logger.info(f"[{__class__.__name__} Analyze Success] {file.file_name}")
-        else:
-            logger.error(f"[{__class__.__name__} Analyze Failed] {clang_tidy_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
-        return process.returncode == 0
-
+    def get_analyzer_name(self):
+        return __class__.__name__
+    
 class CppCheck(Analyzer):
     def __init__(self, analyzer_config: CppCheckConfig, file_list: List[FileInCDB]):
         super().__init__(analyzer_config, file_list)
@@ -132,7 +145,7 @@ class CppCheck(Analyzer):
         config = self.file_list[0].parent
         makedir(config.cppcheck_build_path)
         makedir(config.cppcheck_output_path)
-        analyzer_cmd = [self.analyzer_config.cppcheck, f"--project={config.compile_database}", f"-j{config.env.analyze_opts.jobs}"]
+        analyzer_cmd = [self.analyzer_config.cppcheck, f"--project={config.compile_commands_used_by_analyzers}", f"-j{config.env.analyze_opts.jobs}"]
         analyzer_cmd.append(f"--cppcheck-build-dir={config.cppcheck_build_path}")
         analyzer_cmd.append(f"--plist-output={config.cppcheck_output_path}")
         result_extname = ".json" if self.analyzer_config.Sarif else ".xml"
@@ -148,7 +161,7 @@ class CppCheck(Analyzer):
             logger.error(f"[{__class__.__name__} Analyze Failed] {cppcheck_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         return process.returncode == 0
 
-    def analyze_one_file(self, file: FileInCDB):
+    def generate_analyzer_cmd(self, file: FileInCDB):
         analyzer_cmd = [self.analyzer_config.cppcheck]
         analyzer_cmd.extend(self.analyzer_config.analyze_args())
 
@@ -160,17 +173,11 @@ class CppCheck(Analyzer):
         makedir(output_path)
         analyzer_cmd.append('--plist-output=' + output_path)
         analyzer_cmd.append(file.file_name)
+        return analyzer_cmd
 
-        cppcheck_script = commands_to_shell_script(analyzer_cmd)
-
-        process = run(cppcheck_script, shell=True, capture_output=True, text=True, cwd=file.compile_command.directory)
-        # logger.debug(f"[{__class__.__name__} Analyze Script] {cppcheck_script}")
-        if process.returncode == 0:
-            logger.info(f"[{__class__.__name__} Analyze Success] {file.file_name}")
-        else:
-            logger.error(f"[{__class__.__name__} Analyze Failed] {cppcheck_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
-        return process.returncode == 0
-
+    def get_analyzer_name(self):
+        return __class__.__name__
+    
 class Infer(Analyzer):
     def __init__(self, analyzer_config: InferConfig, file_list: List[FileInCDB]):
         super().__init__(analyzer_config, file_list)
@@ -184,7 +191,7 @@ class Infer(Analyzer):
             return True
         config = self.file_list[0].parent
         makedir(config.infer_output_path)
-        analyzer_cmd = [self.analyzer_config.infer, "--compilation-database", f"{config.compile_database}", "-o", f"{config.infer_output_path}"]
+        analyzer_cmd = [self.analyzer_config.infer, "--compilation-database", f"{config.compile_commands_used_by_analyzers}", "-o", f"{config.infer_output_path}"]
 
         infer_script = commands_to_shell_script(analyzer_cmd)
         logger.debug(f"[{__class__.__name__} Analyze Script] {infer_script}")
@@ -195,8 +202,7 @@ class Infer(Analyzer):
             logger.error(f"[{__class__.__name__} Analyze Failed] {infer_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         return process.returncode == 0
 
-    
-    def analyze_one_file(self, file: FileInCDB):
+    def generate_analyzer_cmd(self, file: FileInCDB):
         analyzer_cmd = [self.analyzer_config.infer, 'run', '--keep-going',
                         '--project-root', '/']
         analyzer_cmd.extend(self.analyzer_config.analyze_args())
@@ -221,13 +227,8 @@ class Infer(Analyzer):
             analyzer_cmd.extend(cmd_filtered)
         else:
             logger.debug(f"[Skip Infer Analyze] {file.file_name} doesn't have compile commands.")
-            return False
-        infer_script = commands_to_shell_script(analyzer_cmd)
-
-        process = run(infer_script, shell=True, capture_output=True, text=True, cwd=file.compile_command.directory)
-        # logger.debug(f"[{__class__.__name__} Analyze Script] {infer_script}")
-        if process.returncode == 0:
-            logger.info(f"[{__class__.__name__} Analyze Success] {file.file_name}")
-        else:
-            logger.error(f"[{__class__.__name__} Analyze Failed] {infer_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
-        return process.returncode == 0
+            return None
+        return analyzer_cmd
+    
+    def get_analyzer_name(self):
+        return __class__.__name__

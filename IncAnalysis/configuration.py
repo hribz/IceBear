@@ -61,12 +61,11 @@ class BuildType(Enum):
 
 class BuildInfo:
     def __init__(self, src_path, build_path, build_type: BuildType, options: List[str], env: Environment, build_script: str=None, 
-                 configure_scripts: List[str]=None, args: List[str] = None, cmakefile_path: str=None):
+                 configure_scripts: List[str]=None, cmakefile_path: str=None):
         self.src_path = src_path
         self.build_path = build_path
         self.build_type = build_type
 
-        self.args = args
         self.options = [Option(i) for i in options]
         self.env = env
 
@@ -113,8 +112,6 @@ class BuildInfo:
             commands.extend(['-C', f'{self.build_path}'])
             for option in self.options:
                 commands.append(option.origin_cmd())
-        if self.args:
-            commands.extend(self.args)
         self.configure_commands = commands
 
     def create_build_commands(self):
@@ -167,7 +164,7 @@ class Configuration:
     incrementable: bool
     session_times: Dict
 
-    def __init__(self, name, src_path, env, options: List[str], version_stamp, args=None, build_path=None, workspace_path=None,
+    def __init__(self, name, src_path, env, options: List[str], version_stamp, build_path=None, workspace_path=None,
                  baseline=None, update_mode:bool=False, build_type: BuildType=BuildType.CMAKE, build_script = None, configure_scripts = None, 
                  cmakefile_path = None):
         self.name = name
@@ -191,20 +188,17 @@ class Configuration:
                 self.build_path = tmp_path
             else:
                 self.build_path = self.src_path / build_path
+
+        # configure may need multiple scripts.
+        self.build_type = build_type
+        self.build_info = BuildInfo(self.src_path, self.build_path, build_type, 
+                                    options, env, build_script, configure_scripts, cmakefile_path)
+        
         self.workspace = Path(workspace_path)
         if workspace_path is None:
             self.workspace = self.build_path / 'workspace_for_cdb'
         makedir(str(self.workspace))
         self.update_workspace_path()
-        if args:
-            self.args = args
-        else:
-            self.args = None
-        
-        # configure may need multiple scripts.
-        self.build_type = build_type
-        self.build_info = BuildInfo(self.src_path, self.build_path, build_type, 
-                                    options, env, build_script, configure_scripts, self.args, cmakefile_path)
 
         self.reply_database = []
         self.diff_file_list = []
@@ -244,7 +238,7 @@ class Configuration:
         self.reply_path = self.cmake_api_path / 'reply'
         # Compile database.
         if self.build_type == BuildType.CMAKE:
-            self.compile_database = self.build_path / 'incremental_commands.json'
+            self.compile_database = self.build_path / 'build_commands.json'
         else:
             self.compile_database = self.build_path / 'compile_commands.json'
         # Preprocess & diff Path.
@@ -254,6 +248,8 @@ class Configuration:
         self.preprocess_diff_files_path = self.preprocess_path / 'preprocess_diff_files.txt'
         self.diff_files_path = self.preprocess_path / 'diff_files.txt'
         self.diff_path = self.workspace / 'diff' / self.version_stamp
+        # Compile database used by analysers.
+        self.compile_commands_used_by_analyzers = self.preprocess_path / 'compile_commands_used_by_analyzers.json'
         # CSA Path.
         self.csa_path = self.workspace / 'csa'
         self.csa_output_path = self.csa_path / 'csa-reports' / self.version_stamp
@@ -270,6 +266,8 @@ class Configuration:
         self.infer_output_path = self.infer_path / self.version_stamp
         # CodeChecker workspace.
         self.codechecker_path = self.workspace / self.version_stamp
+        # Reports statistics
+        self.reports_statistics_path = self.workspace / 'reports_statistics.json'
     
     def update_version(self, version_stamp):
         self.version_stamp = version_stamp
@@ -302,10 +300,11 @@ class Configuration:
             self.diff_with_other(self.baseline, not has_init)
         # 3. extract inc info
         if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
-            self.extract_inc_info()
-        # 4. execute analyzers
-        if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
-            self.propagate_reanalyze_attr()
+            self.extract_inc_info(has_init)
+        # This process have been merge in `extract_inc_info`.
+        # # 4. execute analyzers
+        # if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+        #     self.propagate_reanalyze_attr()
 
         end_real_time = time.time()
         end_cpu_time = os.times()
@@ -329,6 +328,8 @@ class Configuration:
         self.analyze_real_time = end_real_time - start_real_time
         self.analyze_cpu_time_user = (end_cpu_time.user - start_cpu_time.user)
         self.analyze_cpu_time_sys = (end_cpu_time.system - start_cpu_time.system)
+
+        self.reports_statistics()
 
         return True
 
@@ -451,6 +452,8 @@ class Configuration:
             process = run(build_script, shell=True, capture_output=True, text=True, check=True)
             self.session_times['build'] = time.time() - start_time
             logger.info(f"[Repo Build Success]")
+            makedir(os.path.dirname(self.compile_commands_used_by_analyzers))
+            shutil.copy(self.compile_database, self.compile_commands_used_by_analyzers)
         except subprocess.CalledProcessError as e:
             self.session_times['build'] = SessionStatus.Failed
             logger.error(f"[Repo Build Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
@@ -513,15 +516,19 @@ class Configuration:
             with open(self.preprocess_compile_database, 'w') as f:
                 json.dump(cdb, f, indent=4)
             logger.info(f"[Preprocess Files Success] {preprocess_script}")
-            logger.debug(f"[Preprocess Files Success] stdout: {process.stdout}\n stderr: {process.stderr}")
+            logger.debug(f"[Preprocess Files Success] stderr: {process.stderr}")
         except subprocess.CalledProcessError as e:
             self.session_times['preprocess_repo'] = SessionStatus.Failed
             logger.error(f"[Preprocess Files Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
     
-    def extract_inc_info(self):
+    def extract_inc_info(self, has_init):
         '''
         use clang_tool/CollectIncInfo.cpp to generate information used by incremental analysis
         '''
+        self.session_times['extract_inc_info'] = SessionStatus.Skipped
+        if not has_init:
+            logger.info(f"[Extract Inc Info] Don't need to extract inc info when baseline analysis.")
+            return
         if not self.compile_database.exists():
             logger.error(f"[Extract Inc Info] can't extract inc info without file {self.compile_database}")
             return
@@ -537,7 +544,7 @@ class Configuration:
         makedir(self.csa_path, "[EDM Files DIR exists]")
         commands = self.env.DEFAULT_PANDA_COMMANDS.copy()
         commands.append('--ctu-loading-ast-files') # Prepare CTU analysis for loading AST files.
-        commands.extend(['-f', str(self.compile_database)])
+        commands.extend(['-f', str(self.compile_commands_used_by_analyzers)])
         commands.extend(['-o', str(self.csa_path)])
         if self.incrementable:
             commands.extend(['--file-list', f"{self.diff_files_path}"])
@@ -624,6 +631,55 @@ class Configuration:
             analyzer.analyze_all_files()
             self.session_times[analyzer.__class__.__name__] = time.time() - analyzer_time
         self.session_times['analyze'] = time.time() - start_time
+    
+    def reports_statistics(self):
+        def list_files(directory):
+            if not os.path.exists(directory):
+                return []
+            return [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+
+        if not os.path.exists(self.reports_statistics_path):
+            statistics = {
+                "CSA": [],
+                "ClangTidy": [],
+                "CppCheck": [],
+                "Infer": []
+            }
+        else:
+            statistics = json.load(open(self.reports_statistics_path, 'r'))
+
+        for analyzer in self.analyzers:
+            reports = []
+            if isinstance(analyzer, CSA):
+                if not os.path.exists(self.csa_output_path):
+                    continue
+                reports = list_files(self.csa_output_path)
+            elif isinstance(analyzer, ClangTidy):
+                if not os.path.exists(self.clang_tidy_output_path):
+                    continue
+                reports = list_files(self.clang_tidy_output_path)
+            elif isinstance(analyzer, CppCheck):
+                if not os.path.exists(self.cppcheck_output_path / 'result.json'):
+                    continue
+                with open(self.cppcheck_output_path / 'result.json', 'r') as f:
+                    cppcheck_result = json.load(f)
+                    results = cppcheck_result["runs"][0]["results"]
+                    reports = [{k: v for k, v in result.items() if k != 'locations'} for result in results]
+            elif isinstance(analyzer, Infer):
+                if not os.path.exists(self.infer_output_path / 'report.json'):
+                    continue
+                with open(self.infer_output_path / 'report.json', 'r') as f:
+                    infer_result = json.load(f)
+                    key_set = {'bug_type', 'qualifier', 'severity', 'category', 'procedure', 'file', 'key', 'bug_type_hum'}
+                    reports = [{k: v for k, v in result.items() if k in key_set} for result in infer_result]
+
+            statistics[analyzer.__class__.__name__].append({
+                'version': self.version_stamp,
+                'reports': reports
+            })
+
+        with open(self.reports_statistics_path, 'w') as f:
+            json.dump(statistics, f, indent=4)
 
     def prepare_diff_dir(self):
         if not self.env.analyze_opts.udp:
@@ -672,6 +728,12 @@ class Configuration:
             
             f_diff_files.close()
             f_prep_diff_files.close()
+
+            with open(self.compile_commands_used_by_analyzers, 'w') as f:
+                cdb = []
+                for file in self.diff_file_list:
+                    cdb.append(file.compile_command.restore_to_json())
+                json.dump(cdb, f, indent=4)
 
             self.incrementable = self.env.inc_mode != IncrementalMode.NoInc
             self.session_times['diff_with_other'] = time.time() - start_time
@@ -759,13 +821,13 @@ class Configuration:
         for file in self.file_list:
             # file, status, analyze time, cg nodes num, cf num, rf num, baseline fs num
             data = [file.file_name, str(file.status)]
-            if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value and file.is_changed():
-                # Parse CG maybe skipped if it's new file or no function changed.
-                # Or just because inc_mode < function level.
-                if not file.has_cg:
-                    file.parse_cg_file()
-            if self.env.inc_mode == IncrementalMode.InlineLevel and not file.baseline_has_fs:
-                file.parse_baseline_fs_file()
+            # if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value and file.is_changed():
+            #     # Parse CG maybe skipped if it's new file or no function changed.
+            #     # Or just because inc_mode < function level.
+            #     if not file.has_cg:
+            #         file.parse_cg_file()
+            # if self.env.inc_mode == IncrementalMode.InlineLevel and not file.baseline_has_fs:
+            #     file.parse_baseline_fs_file()
             data.extend([file.csa_analyze_time, file.cg_node_num, file.cf_num, file.rf_num, file.basline_fs_num])
             datas.append(data)
             if file.status == FileStatus.NEW:

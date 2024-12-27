@@ -1,49 +1,74 @@
 [
     {
         "project": "vim/vim",
-        "stars": 36987,
-        "forks": 5502,
-        "watchers": 36987,
-        "open_issues": 1515,
+        "stars": 37003,
+        "forks": 5506,
+        "watchers": 37003,
+        "open_issues": 1513,
         "C/C++ Files": 264,
-        "C/C++ lines": 419655
+        "C/C++ lines": 419358
     },
     {
         "project": "redis/redis",
-        "status": "Not Cloned"
+        "stars": 67495,
+        "forks": 23853,
+        "watchers": 67495,
+        "open_issues": 2519,
+        "C/C++ Files": 736,
+        "C/C++ lines": 215372
     },
     {
         "project": "openssl/openssl",
-        "stars": 26216,
-        "forks": 10212,
-        "watchers": 26216,
-        "open_issues": 1894,
-        "C/C++ Files": 4470,
-        "C/C++ lines": 1341447
+        "stars": 26225,
+        "forks": 10216,
+        "watchers": 26225,
+        "open_issues": 1901,
+        "C/C++ Files": 4510,
+        "C/C++ lines": 1326235
     },
     {
         "project": "FFmpeg/FFmpeg",
-        "status": "Not Cloned"
+        "stars": 46893,
+        "forks": 12275,
+        "watchers": 46893,
+        "open_issues": 3,
+        "C/C++ Files": 4369,
+        "C/C++ lines": 1337397
     },
     {
         "project": "bitcoin/bitcoin",
-        "stars": 80884,
-        "forks": 36509,
-        "watchers": 80884,
-        "open_issues": 691,
+        "stars": 80836,
+        "forks": 36413,
+        "watchers": 80836,
+        "open_issues": 695,
         "C/C++ Files": 1394,
         "C/C++ lines": 267775
     },
     {
         "project": "grpc/grpc",
-        "status": "Not Cloned"
+        "stars": 42183,
+        "forks": 10612,
+        "watchers": 42183,
+        "open_issues": 1002,
+        "C/C++ Files": 3777,
+        "C/C++ lines": 638723
     },
     {
         "project": "opencv/opencv",
-        "status": "Not Cloned"
+        "stars": 79785,
+        "forks": 55900,
+        "watchers": 79785,
+        "open_issues": 2688,
+        "C/C++ Files": 2757,
+        "C/C++ lines": 952205
     },
     {
         "project": "llvm/llvm-project",
-        "status": "Not Cloned"
+        "stars": 29829,
+        "forks": 12317,
+        "watchers": 29829,
+        "open_issues": 27814,
+        "C/C++ Files": 59226,
+        "C/C++ lines": 8771645
     }
 ]

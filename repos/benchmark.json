@@ -1,5 +1,11 @@
 [
     {
+        "project": "c-ares/c-ares",
+        "build_type": "cmake",
+        "config_options": [],
+        "branch": "main"
+    },
+    {
         "project": "vim/vim",
         "commits": [
         ],

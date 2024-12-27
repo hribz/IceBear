@@ -24,6 +24,10 @@ def remake_dir(path: Path, debug_TAG=None):
         shutil.rmtree(path)
     os.makedirs(path)
 
+def remove_file(file: str):
+    if os.path.exists(file):
+        os.remove(file)
+
 class SessionStatus(Enum):
     Skipped = auto()
     Success = auto()
