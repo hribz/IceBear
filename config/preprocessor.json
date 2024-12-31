@@ -1,0 +1,57 @@
+{
+    "total checkers": 2310,
+    "clang-tidy": {
+        "total checkers": 1524,
+        "preprocessor checkers": 30,
+        "checker list": [
+            "bugprone-macro-parentheses",
+            "bugprone-macro-repeated-side-effects",
+            "bugprone-multiple-statement-macro",
+            "clang-diagnostic-ambiguous-macro",
+            "clang-diagnostic-builtin-macro-redefined",
+            "clang-diagnostic-compound-token-split-by-macro",
+            "clang-diagnostic-config-macros",
+            "clang-diagnostic-disabled-macro-expansion",
+            "clang-diagnostic-final-macro",
+            "clang-diagnostic-gnu-statement-expression-from-macro-expansion",
+            "clang-diagnostic-gnu-zero-variadic-macro-arguments",
+            "clang-diagnostic-import-preprocessor-directive-pedantic",
+            "clang-diagnostic-keyword-macro",
+            "clang-diagnostic-macro-redefined",
+            "clang-diagnostic-microsoft-cpp-macro",
+            "clang-diagnostic-objc-macro-redefinition",
+            "clang-diagnostic-pedantic-macros",
+            "clang-diagnostic-reserved-id-macro",
+            "clang-diagnostic-reserved-macro-identifier",
+            "clang-diagnostic-unused-macros",
+            "clang-diagnostic-variadic-macros",
+            "cppcoreguidelines-macro-to-enum",
+            "cppcoreguidelines-macro-usage",
+            "misc-macro-parentheses",
+            "misc-macro-repeated-side-effects",
+            "misc-multiple-statement-macro",
+            "modernize-macro-to-enum",
+            "modernize-replace-disallow-copy-and-assign-macro",
+            "readability-avoid-unconditional-preprocessor-if",
+            "readability-redundant-preprocessor"
+        ]
+    },
+    "cppcheck": {
+        "total checkers": 334,
+        "preprocessor checkers": 2,
+        "checker list": [
+            "cppcheck-preprocessorErrorDirective",
+            "cppcheck-unknownMacro"
+        ]
+    },
+    "infer": {
+        "total checkers": 245,
+        "preprocessor checkers": 0,
+        "checker list": []
+    },
+    "clangsa": {
+        "total checkers": 207,
+        "preprocessor checkers": 0,
+        "checker list": []
+    }
+}

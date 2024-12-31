@@ -27,6 +27,10 @@ class Analyzer(ABC):
     def generate_analyzer_cmd(self, file: FileInCDB):
         pass
 
+    @abstractmethod
+    def get_output_path(self):
+        pass
+
     def analyze_all_files(self):
         makedir(self.analyzer_config.workspace)
         ret = True

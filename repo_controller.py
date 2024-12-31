@@ -132,8 +132,7 @@ def main(args):
 
     result_file = f'repos/result/{env.timestamp}_{env.analyze_opts.inc}_result.csv'
     result_file_specific = f'repos/result/{env.timestamp}_{env.analyze_opts.inc}_result_specific.csv'
-    # result_file = 'repos/result/result_all.csv'
-    # result_file_specific = 'repos/result/result_all_specific.csv'
+    reports_file = f'repos/result/{env.timestamp}_{env.analyze_opts.inc}_reports_statistics.json'
     
     with open(repo_list, 'r') as f:
         repo_json = json.load(f)
@@ -177,12 +176,22 @@ def main(args):
             else:
                 status = STATUS.CHECK_FAILED
                 logger.error(f"[Checkout Commit] {repo_info.repo_name} checkout to {commit_sha} failed!")
-        if Repo and not opts.codechecker:
+        if Repo and not opts.codechecker and not opts.repo:
             logger.info('---------------END SUMMARY-------------\n'+Repo.session_summaries)
             headers, datas = read_csv(Repo.summary_csv_path(specific=False))
             add_to_csv(headers, datas, result_file, init_csv)
             headers, datas = read_csv(Repo.summary_csv_path(specific=True))
             add_to_csv(headers, datas, result_file_specific, init_csv)
+
+            if os.path.exists(reports_file):
+                all_reports = json.load(open(reports_file, 'r'))
+            else:
+                all_reports = {}
+            repo_reports = json.load(open(Repo.default_config.workspace / 'reports_statistics.json', 'r'))
+            with open(reports_file, 'w') as f:
+                all_reports[Repo.name] = repo_reports
+                json.dump(all_reports, f, indent=4)
+
             init_csv = False
             Repo = None
 

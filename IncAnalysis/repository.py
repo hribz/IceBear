@@ -35,9 +35,11 @@ class Repository(ABC):
                 #    "prepare for inc(real)", "prepare for inc(user)", "prepare for inc(sys)", 
                    "prepare for CSA"]
         analyzers = [i.__class__.__name__ for i in config.analyzers]
+        reports = [f"{i.__class__.__name__} reports" for i in config.analyzers]
         headers.extend(analyzers)
         headers.extend(["analyze"])
         # headers.extend(["analyze(real)", "analyze(cpu)", "analyze(sys)"])
+        headers.extend(reports)
 
         prepare_for_csa = {"generate_efm", "merge_efm"}
 
@@ -47,6 +49,7 @@ class Repository(ABC):
         prepare_csa_time = 0.0
         analyze_time = 0.0
         analyzers_time = []
+        reports_number = []
 
         for session in config.session_times.keys():
             exe_time = config.session_times[session]
@@ -61,6 +64,8 @@ class Repository(ABC):
                     analyze_time = exe_time
                 elif session in analyzers:
                     analyzers_time.append(exe_time)
+                elif session in reports:
+                    reports_number.append(exe_time)
         config_data.append("%.3lf" % config_time)
         config_data.append("%.3lf" % build_time)
         config_data.extend(["%.3lf" % config.prepare_for_inc_info_real_time, 
@@ -73,6 +78,7 @@ class Repository(ABC):
                             # "%.6lf" % config.analyze_cpu_time_user,
                             # "%.6lf" % config.analyze_cpu_time_sys
                             ])
+        config_data.extend(reports_number)
         return headers, config_data
     
     def summary_one_config_specific(self, config: Configuration):
@@ -81,13 +87,16 @@ class Repository(ABC):
             headers.append(str(session))
             # if str(session) == 'diff_with_other':
             #     headers.extend(["diff_command_time", "diff_parse_time"])
-        headers.extend(["files", "diff files", "changed function", "reanalyze function", "diff but no cf", "total cg nodes", "total csa analyze time"])
+        headers.extend(["files", "diff files", "changed function", "reanalyze function", 
+                        "diff but no cf", "total cg nodes", "total csa analyze time"])
         config = self.default_config
         config_data = [self.name, config.version_stamp]
         for session in config.session_times.keys():
             exe_time = config.session_times[session]
             if isinstance(exe_time, SessionStatus):
                 config_data.append(str(exe_time._name_))
+            elif isinstance(exe_time, int):
+                config_data.append(str(exe_time))
             else:
                 config_data.append("%.3lf" % exe_time)
             # if str(session) == 'diff_with_other' and idx == 0:

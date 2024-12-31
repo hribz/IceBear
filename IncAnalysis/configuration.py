@@ -255,15 +255,15 @@ class Configuration:
         self.csa_output_path = self.csa_path / 'csa-reports' / self.version_stamp
         # Clang-tidy Path.
         self.clang_tidy_path = self.workspace / 'clang-tidy'
-        self.clang_tidy_output_path = self.clang_tidy_path / self.version_stamp
+        self.clang_tidy_output_path = self.clang_tidy_path / 'clang-tidy-reports' / self.version_stamp
         self.clang_tidy_fixit = self.clang_tidy_output_path / 'fixit'
         # Cppcheck Path.
         self.cppcheck_path = self.workspace / 'cppcheck'
         self.cppcheck_build_path = self.cppcheck_path / 'build'
-        self.cppcheck_output_path = self.cppcheck_path / self.version_stamp
+        self.cppcheck_output_path = self.cppcheck_path / 'cppcheck-reports' / self.version_stamp
         # Infer Path
         self.infer_path = self.workspace / 'infer'
-        self.infer_output_path = self.infer_path / self.version_stamp
+        self.infer_output_path = self.infer_path / 'infer-reports' / self.version_stamp
         # CodeChecker workspace.
         self.codechecker_path = self.workspace / self.version_stamp
         # Reports statistics
@@ -640,16 +640,15 @@ class Configuration:
 
         if not os.path.exists(self.reports_statistics_path):
             statistics = {
-                "CSA": [],
-                "ClangTidy": [],
-                "CppCheck": [],
-                "Infer": []
             }
         else:
             statistics = json.load(open(self.reports_statistics_path, 'r'))
 
         for analyzer in self.analyzers:
             reports = []
+            if analyzer.__class__.__name__ not in statistics:
+                statistics[analyzer.__class__.__name__] = []
+            self.session_times[f"{analyzer.__class__.__name__} reports"] = 0
             if isinstance(analyzer, CSA):
                 if not os.path.exists(self.csa_output_path):
                     continue
@@ -677,6 +676,7 @@ class Configuration:
                 'version': self.version_stamp,
                 'reports': reports
             })
+            self.session_times[f"{analyzer.__class__.__name__} reports"] = len(reports)
 
         with open(self.reports_statistics_path, 'w') as f:
             json.dump(statistics, f, indent=4)

@@ -16,11 +16,15 @@ def list_files(directory: str):
         return []
     return [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
 
-def list_dir(directory: str):
+def list_dir(directory: str, filt_set: set=None):
     if not os.path.exists(directory):
         logger.info(f"{directory} does not exist.")
         return []
-    return [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
+    dir_list = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
+    if filt_set:
+        return list(filter(lambda x: (x in filt_set), dir_list))
+    else:
+        return dir_list
 
 def collect_reports(analyzer_output_path: str):
     commit_to_reports = {}
@@ -115,53 +119,97 @@ def main(args):
             logger.info(f"{repo_info.repo_name} is in ignore repo list")
             continue
 
-        json1 = os.path.join(repo_info.workspace, 'reports_statistics.json')
-        json2 = os.path.join(repo_info2.workspace, 'reports_statistics.json')
-        statistics1 = json.load(open(json1, 'r'))['CSA']
-        statistics2 = json.load(open(json2, 'r'))['CSA']
+        def get_statistics_from_workspace(workspace):
+            analyzers = ['csa', 'clang-tidy', 'cppcheck', 'infer']
+            analyzers_floder = [os.path.join(workspace, analyzer) for analyzer in list_dir(workspace, analyzers)]
+            statistics = {k: [] for k in analyzers}
+
+            for analyzer in analyzers_floder:
+                if analyzer.endswith('csa'):
+                    reports_path = os.path.join(analyzer, 'csa-reports')
+                elif analyzer.endswith('clang-tidy'):
+                    reports_path = os.path.join(analyzer, 'clang-tidy-reports')
+                elif analyzer.endswith('cppcheck'):
+                    reports_path = os.path.join(analyzer, 'cppcheck-reports')
+                elif analyzer.endswith('infer'):
+                    reports_path = os.path.join(analyzer, 'infer-reports')
+
+                versions = list_dir(reports_path)
+                for version in versions:
+                    output_path = os.path.join(reports_path, version)
+                    reports = []
+                    if analyzer not in statistics:
+                        statistics[analyzer] = []
+                    if analyzer.endswith('csa'):
+                        analyzer_name = 'csa'
+                        if not os.path.exists(output_path):
+                            continue
+                        reports = list_files(output_path)
+                    elif analyzer.endswith('clang-tidy'):
+                        analyzer_name = 'clang-tidy'
+                        if not os.path.exists(output_path):
+                            continue
+                        reports = list_files(output_path)
+                    elif analyzer.endswith('cppcheck'):
+                        analyzer_name = 'cppcheck'
+                        if not os.path.exists(output_path / 'result.json'):
+                            continue
+                        with open(output_path / 'result.json', 'r') as f:
+                            cppcheck_result = json.load(f)
+                            results = cppcheck_result["runs"][0]["results"]
+                            reports = [{k: v for k, v in result.items() if k != 'locations'} for result in results]
+                    elif analyzer.endswith('infer'):
+                        analyzer_name = 'infer'
+                        if not os.path.exists(output_path / 'report.json'):
+                            continue
+                        with open(output_path / 'report.json', 'r') as f:
+                            infer_result = json.load(f)
+                            key_set = {'bug_type', 'qualifier', 'severity', 'category', 'procedure', 'file', 'key', 'bug_type_hum'}
+                            reports = [{k: v for k, v in result.items() if k in key_set} for result in infer_result]
+                    
+                    statistics[analyzer_name].append({
+                        'version': version,
+                        'reports': reports
+                    })
+                    
+            return statistics
         
+        statistics1 = get_statistics_from_workspace(repo_info.workspace)['csa']
+        statistics2 = get_statistics_from_workspace(repo_info2.workspace)['csa']
+
         # [
         #     {'version': commit['version'], 'reports': [Report1, Report2, ...]},
         #     ......
         # ]
         def versions_and_reports(statistics: list) -> dict:
-            versions_and_reports = []
+            versions_and_reports = {}
             for commit in statistics:
                 version = commit['version']
                 reports_from_this_commit = commit['reports']
-                reports = []
+                reports = set()
                 for report in reports_from_this_commit:
                     report_name = report
                     specific_info = {}
                     reports.add(Report(version, report_name, specific_info))
-                versions_and_reports.append({'version': version, 'reports': reports})
+                versions_and_reports[version] = reports
             return versions_and_reports
         
-        def dump_veen_diagram(versions_and_reports):
-            # Group reports by version
-            version_reports_dict = {}
-            for item in versions_and_reports:
-                version = item['version']
-                reports = item['reports']
-                if version not in version_reports_dict:
-                    version_reports_dict[version] = set()
-                version_reports_dict[version].update(reports)
-
+        def dump_veen_diagram(versions_and_reports, figure):
+            if len(versions_and_reports.keys()) == 0:
+                return 
             # Draw Venn diagram
             import matplotlib.pyplot as plt
+            from venn import venn
 
-            if len(version_reports_dict) == 2:
-                versions = list(version_reports_dict.keys())
-                reports1 = version_reports_dict[versions[0]]
-                reports2 = version_reports_dict[versions[1]]
-                
-                plt.figure(figsize=(10, 7))
-                venn2([reports1, reports2], set_labels=(versions[0], versions[1]))
-                plt.title('Venn Diagram of Reports by Version')
-                plt.show()
+            # 绘制Venn图
+            plt.figure()
+            venn(versions_and_reports, fmt='{size}', cmap='tab10')
+            plt.savefig(figure)
         
         versions_and_reports1 = versions_and_reports(statistics1)
+        dump_veen_diagram(versions_and_reports1, f"{repo_info.workspace}/veen.png")
         versions_and_reports2 = versions_and_reports(statistics2)
+        dump_veen_diagram(versions_and_reports2, f"{repo_info2.workspace}/veen.png")
 
         def all_reports_from_json(statistics: list) -> set:
             reports = set()

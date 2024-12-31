@@ -431,3 +431,9 @@ int main () {
 ## diff初筛文件的作用
 - 除了`configure`带来的“未知”影响外，增量编译确实存在`Redundant Dependencies`带来无必要的重复增量编译
 - 并且，编译依赖并不会考虑文件中的预处理指令，如果修改了其它配置下的代码，对当前配置下的静态分析并不会造成影响，因此通过`diff`将这些不变的文件筛掉。
+
+# 2024/12/29
+## 静态分析工具的不同粒度的增量
+- 不用`func-level`的说法，而是用`line 粒度`的说法，对于CSA从line映射到func，对于ClangTidy和CppCheck，通过line来抑制某些不必要的报告，而Infer本身就支持file/procedures级别的增量，我们直接将信息给它，对其进行调度即可。
+- 对于ClangTidy，加上参数`--line-filter='[{"name":"file.cpp","lines":[[1,10]]}]'`表示只输出1~10行相关的报告。
+- 对于CppCheck，加上参数`--suppress-list=<file>`表示抑制匹配file中`<spec>`的报告，`<spec>`的格式为`*:[filename]:[line]`
