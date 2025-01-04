@@ -1,6 +1,6 @@
-[submodule "llvm-project-ica"]
-	path = external/llvm-project-ica
-	url = https://github.com/hribz/llvm-project-ica.git
 [submodule "external/llvm-project-ica"]
 	path = external/llvm-project-ica
 	url = https://github.com/hribz/llvm-project-ica.git
+[submodule "external/cppcheck-ica"]
+	path = external/cppcheck-ica
+	url = https://github.com/hribz/cppcheck-ica.git
