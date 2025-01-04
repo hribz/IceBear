@@ -37,7 +37,7 @@ class Environment:
         # Environment path
         self.PWD: Path = Path(".").absolute()
         self.EXTRACT_II = str(self.PWD / 'build_rcg/clang_tool/collectIncInfo')
-        self.PANDA = str(self.PWD / 'panda/panda')
+        self.PANDA = str(self.PWD / 'external/panda/panda')
         # Environment CC/CXX Compiler
 
         self.CC = shutil.which(self.analyze_opts.cc)
