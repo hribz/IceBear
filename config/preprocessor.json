@@ -1,14 +1,30 @@
 {
     "total checkers": 2310,
+    "cppcheck": {
+        "total checkers": 334,
+        "preprocessor checkers": 2,
+        "checker list": [
+            "cppcheck-preprocessorErrorDirective",
+            "cppcheck-unknownMacro"
+        ]
+    },
+    "clangsa": {
+        "total checkers": 207,
+        "preprocessor checkers": 0,
+        "checker list": []
+    },
     "clang-tidy": {
         "total checkers": 1524,
-        "preprocessor checkers": 30,
+        "preprocessor checkers": 37,
         "checker list": [
+            "bugprone-argument-comment",
             "bugprone-macro-parentheses",
             "bugprone-macro-repeated-side-effects",
             "bugprone-multiple-statement-macro",
             "clang-diagnostic-ambiguous-macro",
             "clang-diagnostic-builtin-macro-redefined",
+            "clang-diagnostic-comment",
+            "clang-diagnostic-comments",
             "clang-diagnostic-compound-token-split-by-macro",
             "clang-diagnostic-config-macros",
             "clang-diagnostic-disabled-macro-expansion",
@@ -18,6 +34,7 @@
             "clang-diagnostic-import-preprocessor-directive-pedantic",
             "clang-diagnostic-keyword-macro",
             "clang-diagnostic-macro-redefined",
+            "clang-diagnostic-microsoft-comment-paste",
             "clang-diagnostic-microsoft-cpp-macro",
             "clang-diagnostic-objc-macro-redefinition",
             "clang-diagnostic-pedantic-macros",
@@ -27,6 +44,9 @@
             "clang-diagnostic-variadic-macros",
             "cppcoreguidelines-macro-to-enum",
             "cppcoreguidelines-macro-usage",
+            "google-readability-namespace-comments",
+            "llvm-namespace-comment",
+            "misc-argument-comment",
             "misc-macro-parentheses",
             "misc-macro-repeated-side-effects",
             "misc-multiple-statement-macro",
@@ -36,21 +56,8 @@
             "readability-redundant-preprocessor"
         ]
     },
-    "cppcheck": {
-        "total checkers": 334,
-        "preprocessor checkers": 2,
-        "checker list": [
-            "cppcheck-preprocessorErrorDirective",
-            "cppcheck-unknownMacro"
-        ]
-    },
     "infer": {
         "total checkers": 245,
-        "preprocessor checkers": 0,
-        "checker list": []
-    },
-    "clangsa": {
-        "total checkers": 207,
         "preprocessor checkers": 0,
         "checker list": []
     }

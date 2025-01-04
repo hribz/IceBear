@@ -8,7 +8,7 @@ def list_files(directory):
 
 if __name__ == '__main__':
     checkers_file = filter(lambda x: x.endswith('checkers.json'), list_files('.'))
-    preprocessor_matcher = re.compile(r'preprocessor|macro', re.IGNORECASE)
+    preprocessor_matcher = re.compile(r'preprocessor|macro|comment', re.IGNORECASE)
     preprocessor_checkers = {
         'total checkers': 0
     }

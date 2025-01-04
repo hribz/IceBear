@@ -27,10 +27,6 @@ class Analyzer(ABC):
     def generate_analyzer_cmd(self, file: FileInCDB):
         pass
 
-    @abstractmethod
-    def get_output_path(self):
-        pass
-
     def analyze_all_files(self):
         makedir(self.analyzer_config.workspace)
         ret = True
@@ -62,8 +58,10 @@ class Analyzer(ABC):
             logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {script}")
         if process.stat == Process.Stat.ok:
             logger.debug(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
+            if self.analyzer_config.verbose:
+                logger.debug(f"[{self.get_analyzer_name()} Analyze Output]\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         else:
-            logger.error(f"[{self.get_analyzer_name()} Analyze {process.stat}] {script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+            logger.error(f"[{self.get_analyzer_name()} Analyze {process.stat}]\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         
         # Record time cost.
         if isinstance(self, CSA):
@@ -150,6 +148,7 @@ class CppCheck(Analyzer):
         makedir(config.cppcheck_build_path)
         makedir(config.cppcheck_output_path)
         analyzer_cmd = [self.analyzer_config.cppcheck, f"--project={config.compile_commands_used_by_analyzers}", f"-j{config.env.analyze_opts.jobs}"]
+        analyzer_cmd.append(f"--showtime=file")
         analyzer_cmd.append(f"--cppcheck-build-dir={config.cppcheck_build_path}")
         analyzer_cmd.append(f"--plist-output={config.cppcheck_output_path}")
         result_extname = ".json" if self.analyzer_config.Sarif else ".xml"

@@ -257,7 +257,9 @@ class UpdateConfigRepository(Repository):
         self.default_config.update_version(version_stamp)
 
     def process_one_config(self):
-        self.default_config.process_this_config(self.can_skip_configure, self.has_init)
+        if not self.default_config.process_this_config(self.can_skip_configure, self.has_init):
+            logger.error("Process failed.")
+            return
         self.append_session_summary()
         self.summary_to_csv()
         self.summary_to_csv_specific()

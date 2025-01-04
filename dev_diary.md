@@ -437,3 +437,11 @@ int main () {
 - 不用`func-level`的说法，而是用`line 粒度`的说法，对于CSA从line映射到func，对于ClangTidy和CppCheck，通过line来抑制某些不必要的报告，而Infer本身就支持file/procedures级别的增量，我们直接将信息给它，对其进行调度即可。
 - 对于ClangTidy，加上参数`--line-filter='[{"name":"file.cpp","lines":[[1,10]]}]'`表示只输出1~10行相关的报告。
 - 对于CppCheck，加上参数`--suppress-list=<file>`表示抑制匹配file中`<spec>`的报告，`<spec>`的格式为`*:[filename]:[line]`
+
+# 2025/1/4
+## ClangTidy一个筛报告的例子
+假如修改了`clang_tool/test/class_field.cpp`第4行`int const b = 0;`，将导致第26行发生除0错误。如果只告诉clang-tidy报告第4行相关的错误，将会导致这个新报告丢失。需要将第4行修改的影响传播给其它行，再将所有行都告诉clang-tidy。
+```bash
+# 无报告
+clang-tidy '--line-filter=[{"name":"class_field.cpp","lines":[[4,5]]}]' '-config={"HeaderFilterRegex": ".*"}' class_field.cpp --export-fixes .
+```
