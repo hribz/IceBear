@@ -39,6 +39,7 @@ public:
     bool DumpCG = false;
     bool DumpToFile = true;
     bool DumpUSR = false;
+    bool DumpANR = false;
     bool CTU = false;
 
     std::string RFPath;
@@ -108,7 +109,6 @@ public:
 
     void DumpTaintDecls();
 
-private:
     ASTContext *Context;
     llvm::DenseSet<const Decl *> GlobalConstantSet;
     // Decls have changed, the function/method use these should reanalyze.

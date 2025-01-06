@@ -188,8 +188,12 @@ def main(args):
                 reports_from_this_commit = commit['reports']
                 reports = set()
                 for report in reports_from_this_commit:
-                    report_name = report
-                    specific_info = {}
+                    if isinstance(report, str):
+                        report_name = report
+                        specific_info = {}
+                    else:
+                        report_name = report["message"]["text"]
+                        specific_info = report
                     reports.add(Report(version, report_name, specific_info))
                 versions_and_reports[version] = reports
             return versions_and_reports

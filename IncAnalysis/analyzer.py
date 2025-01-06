@@ -148,7 +148,7 @@ class CppCheck(Analyzer):
         makedir(config.cppcheck_build_path)
         makedir(config.cppcheck_output_path)
         analyzer_cmd = [self.analyzer_config.cppcheck, f"--project={config.compile_commands_used_by_analyzers}", f"-j{config.env.analyze_opts.jobs}"]
-        analyzer_cmd.append(f"--showtime=file")
+        analyzer_cmd.append(f"--showtime=file-total")
         analyzer_cmd.append(f"--cppcheck-build-dir={config.cppcheck_build_path}")
         analyzer_cmd.append(f"--plist-output={config.cppcheck_output_path}")
         result_extname = ".json" if self.analyzer_config.Sarif else ".xml"
@@ -157,11 +157,13 @@ class CppCheck(Analyzer):
 
         cppcheck_script = commands_to_shell_script(analyzer_cmd)
         logger.debug(f"[{__class__.__name__} Analyze Script] {cppcheck_script}")
-        process = run(cppcheck_script, shell=True, capture_output=True, text=True, cwd=config.cppcheck_output_path)
+        process = run(analyzer_cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=config.cppcheck_output_path)
+        logger.info(f"[{__class__.__name__} Stdout] {process.stdout}")
+        logger.info(f"[{__class__.__name__} Stderr] {process.stderr}")
         if process.returncode == 0:
             logger.info(f"[{__class__.__name__} Analyze Success]")
         else:
-            logger.error(f"[{__class__.__name__} Analyze Failed] {cppcheck_script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+            logger.error(f"[{__class__.__name__} Analyze Failed]")
         return process.returncode == 0
 
     def generate_analyzer_cmd(self, file: FileInCDB):

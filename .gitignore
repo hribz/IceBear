@@ -21,3 +21,4 @@ myenv*
 diff_lines.txt
 functions.txt
 *.fixit
+*.anr

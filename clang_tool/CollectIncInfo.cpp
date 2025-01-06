@@ -46,14 +46,13 @@ void DisplayTime(llvm::TimeRecord &Time) {
 class IncInfoCollectConsumer : public clang::ASTConsumer {
 public:
     explicit IncInfoCollectConsumer(CompilerInstance &CI, std::string &diffPath, const IncOptions &incOpt)
-    : CG(), IncOpt(incOpt), DLM(CI.getASTContext().getSourceManager()), PP(CI.getPreprocessor()),
+    : CG(), IncOpt(incOpt), DLM(CI.getASTContext().getSourceManager()), PP(CI.getPreprocessor()), SM(CI.getASTContext().getSourceManager()),
       IncVisitor(&CI.getASTContext(), DLM, CG, FunctionsChanged, ICChanged, IncOpt) {
         std::unique_ptr<llvm::Timer> consumerTimer = std::make_unique<llvm::Timer>(
             "Consumer Timer", "Consumer Constructor Time");
         consumerTimer->startTimer();
         llvm::TimeRecord consumerStart = consumerTimer->getTotalTime();
 
-        const SourceManager &SM = CI.getASTContext().getSourceManager();
         FileID MainFileID = SM.getMainFileID();
         const FileEntry *FE = SM.getFileEntryForID(MainFileID);
         MainFilePath = FE->tryGetRealPathName();
@@ -166,13 +165,16 @@ public:
         IncVisitor.DumpGlobalConstantSet();
         IncVisitor.DumpTaintDecls();
         DumpFunctionsNeedReanalyze();
-        DumpIncSummary(2);
         
         toolTimer->stopTimer();
         llvm::TimeRecord toolEnd = toolTimer->getTotalTime();
         toolEnd -= toolPrepare;
         llvm::errs() << "Analysis CF ";
         DisplayTime(toolEnd);
+
+        DumpIncSummary(2);
+        DumpAffectedNodesRanges();
+        DumpFunctionsNeedReanalyzeForCppcheck();
     }
 
     void Propogate() {
@@ -316,6 +318,76 @@ public:
             outFile->close();
     }
 
+    void DumpFunctionsNeedReanalyzeForCppcheck() {
+        if (IncOpt.CppcheckRFPath.empty()) {
+            return;
+        }
+        std::ostream* OS = &std::cout;
+        std::shared_ptr<std::ofstream> outFile;
+        if (IncOpt.DumpToFile) {
+            std::string ReanalyzeFunctionsFile = IncOpt.CppcheckRFPath;
+            outFile = std::make_shared<std::ofstream>(ReanalyzeFunctionsFile);
+            if (!outFile->is_open()) {
+                llvm::errs() << "Error: Could not open file " << ReanalyzeFunctionsFile << " for writing.\n";
+                return;
+            }
+            OS = outFile.get();
+        } else {
+            *OS << "--- Functions Cppcheck Need to Reanalyze ---\n";
+        }
+
+        for (auto &D : FunctionsNeedReanalyze) {
+            if (auto *FD = llvm::dyn_cast<FunctionDecl>(D->getCanonicalDecl())) {
+                // Cppcheck use raw name.
+                *OS << FD->getNameAsString();
+                *OS << "\n";
+            }
+        }
+        (*OS).flush();
+        if (IncOpt.DumpToFile)
+            outFile->close();
+    }
+
+    void DumpAffectedNodesRanges() {
+        if (!IncOpt.DumpANR) {
+            return ;
+        }
+        std::ostream* OS = &std::cout;
+        std::shared_ptr<std::ofstream> outFile;
+        if (IncOpt.DumpToFile) {
+            std::string ANRFile = MainFilePath.str() + ".anr";
+            outFile = std::make_shared<std::ofstream>(ANRFile);
+            if (!outFile->is_open()) {
+                llvm::errs() << "Error: Could not open file " << ANRFile << " for writing.\n";
+                return;
+            }
+            OS = outFile.get();
+        } else {
+            *OS << "--- Affected node ranges ---\n";
+        }
+
+        llvm::DenseSet<const Decl *> AN;
+        AN.insert(IncVisitor.TaintDecls.begin(), IncVisitor.TaintDecls.end());
+        AN.insert(FunctionsNeedReanalyze.begin(), FunctionsNeedReanalyze.end());        
+
+        std::set<std::pair<unsigned, unsigned>> RangeSet;
+        for (auto D: AN) {
+            if (DLM.IsInMainFile(D)) {
+                auto loc = DLM.OriginStartAndEndLineOfDecl(D);
+                if (!loc) continue;
+                RangeSet.insert(*loc);
+            }
+        }
+
+        for (const auto &Range: RangeSet) {
+            *OS << Range.first << "," << Range.second << "\n";
+        }
+        
+        (*OS).flush();
+        if (IncOpt.DumpToFile)
+            outFile->close();
+    }
+
     void DumpIncSummary(int mode) {
         std::ostream* OS = &std::cout;
         std::shared_ptr<std::ofstream> outFile;
@@ -359,6 +431,7 @@ private:
     llvm::DenseSet<const Decl *> ICChanged;
     std::vector<const Decl *> FunctionsNeedReanalyze;
     Preprocessor &PP;
+    const clang::SourceManager &SM;
 };
 
 class IncInfoCollectAction : public clang::ASTFrontendAction {
@@ -408,6 +481,8 @@ static llvm::cl::opt<bool> DumpToFile("dump-file", llvm::cl::desc("Dump CG and C
     llvm::cl::value_desc("dump to file or stream"), llvm::cl::init(true));
 static llvm::cl::opt<bool> DumpUSR("dump-usr", llvm::cl::desc("Dump USR function name"),
     llvm::cl::value_desc("dump usr fname"), llvm::cl::init(false));
+static llvm::cl::opt<bool> DumpANR("dump-anr", llvm::cl::desc("Dump affected nodes line ranges"),
+    llvm::cl::value_desc("dump ANR"), llvm::cl::init(false));
 static llvm::cl::opt<bool> CTU("ctu", llvm::cl::desc("Consider CTU analysis"),
     llvm::cl::value_desc("consider CTU analysis"), llvm::cl::init(false));
 static llvm::cl::opt<std::string> RFPath("rf-file", llvm::cl::desc("Output RF to the path"),
@@ -431,7 +506,7 @@ int main(int argc, const char **argv) {
 
     ClangTool Tool(OptionsParser.getCompilations(), OptionsParser.getSourcePathList());
     IncOptions IncOpt{.PrintLoc=PrintLoc, .ClassLevelTypeChange=ClassLevel, .FieldLevelTypeChange=FieldLevel, .DumpCG=DumpCG, 
-                      .DumpToFile=DumpToFile, .DumpUSR=DumpUSR, .CTU=CTU, .RFPath=RFPath, .CppcheckRFPath=CppcheckRFPath};
+                      .DumpToFile=DumpToFile, .DumpUSR=DumpUSR, .DumpANR=DumpANR, .CTU=CTU, .RFPath=RFPath, .CppcheckRFPath=CppcheckRFPath};
     IncInfoCollectActionFactory Factory(DiffPath, FSPath, IncOpt);
 
     toolTimer->stopTimer();

@@ -62,8 +62,9 @@ class Environment:
             self.analyzers.append('clang-tidy')
         if os.path.exists(self.cppcheck):
             self.analyzers.append('cppcheck')
-        if os.path.exists(self.infer):
-            self.analyzers.append('infer')
+        # Don't support infer.
+        # if os.path.exists(self.infer):
+        #     self.analyzers.append('infer')
 
         self.example_compiler_action_plugin = {
             "comment": "Example plugin for Panda driver.",

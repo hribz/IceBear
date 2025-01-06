@@ -54,6 +54,27 @@ std::optional<std::pair<int, int>> DiffLineManager::StartAndEndLineOfDecl(const 
     return std::make_pair(StartLoc, EndLoc);
 }
 
+std::optional<std::pair<int, int>> DiffLineManager::OriginStartAndEndLineOfDecl(const Decl *D) {
+    if (auto FD = D->getAsFunction()) {
+        // Just care about changes in function definition
+        if (auto Definition = FD->getDefinition())
+            D = FD->getDefinition();
+    }
+    
+    SourceLocation Loc = D->getLocation();
+    if (!(Loc.isValid() && Loc.isFileID())) {
+        return std::nullopt;
+    }
+    auto StartLoc = SM.getPresumedLineNumber(D->getBeginLoc());
+    auto EndLoc = SM.getPresumedLineNumber(D->getEndLoc());
+    return std::make_pair(StartLoc, EndLoc);
+}
+
+bool DiffLineManager::IsInMainFile(const Decl *D) {
+    auto Loc = D->getLocation();
+    return SM.isInMainFile(Loc);
+}
+
 bool DiffLineManager::isChangedLine(unsigned int line, unsigned int end_line) {
     if (!DiffLines) {
         return true;
