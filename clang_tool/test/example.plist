@@ -3,26 +3,12 @@
 <plist version="1.0">
 <dict>
  <key>clang_version</key>
-<string>clang version 20.0.0git (https://github.com/llvm/llvm-project.git 62e5b6e817cd4d2dd1fd8193453660d77b41acc9)</string>
+<string>clang version 19.1.5 (https://github.com/hribz/llvm-project-ica.git 6a00f08985eb91ff047355200eab1027891769e6)</string>
  <key>diagnostics</key>
  <array>
   <dict>
    <key>path</key>
    <array>
-    <dict>
-     <key>kind</key><string>event</string>
-     <key>location</key>
-     <dict>
-      <key>line</key><integer>33</integer>
-      <key>col</key><integer>5</integer>
-      <key>file</key><integer>0</integer>
-     </dict>
-     <key>depth</key><integer>0</integer>
-     <key>extended_message</key>
-     <string>[debug] analyzing from moo(char, int, int)</string>
-     <key>message</key>
-     <string>[debug] analyzing from moo(char, int, int)</string>
-    </dict>
     <dict>
      <key>kind</key><string>control</string>
      <key>edges</key>
@@ -561,20 +547,6 @@
    <key>path</key>
    <array>
     <dict>
-     <key>kind</key><string>event</string>
-     <key>location</key>
-     <dict>
-      <key>line</key><integer>33</integer>
-      <key>col</key><integer>5</integer>
-      <key>file</key><integer>0</integer>
-     </dict>
-     <key>depth</key><integer>0</integer>
-     <key>extended_message</key>
-     <string>[debug] analyzing from moo(char, int, int)</string>
-     <key>message</key>
-     <string>[debug] analyzing from moo(char, int, int)</string>
-    </dict>
-    <dict>
      <key>kind</key><string>control</string>
      <key>edges</key>
       <array>
@@ -850,20 +822,6 @@
   <dict>
    <key>path</key>
    <array>
-    <dict>
-     <key>kind</key><string>event</string>
-     <key>location</key>
-     <dict>
-      <key>line</key><integer>33</integer>
-      <key>col</key><integer>5</integer>
-      <key>file</key><integer>0</integer>
-     </dict>
-     <key>depth</key><integer>0</integer>
-     <key>extended_message</key>
-     <string>[debug] analyzing from moo(char, int, int)</string>
-     <key>message</key>
-     <string>[debug] analyzing from moo(char, int, int)</string>
-    </dict>
     <dict>
      <key>kind</key><string>event</string>
      <key>location</key>
@@ -1218,20 +1176,6 @@
      <key>kind</key><string>event</string>
      <key>location</key>
      <dict>
-      <key>line</key><integer>33</integer>
-      <key>col</key><integer>5</integer>
-      <key>file</key><integer>0</integer>
-     </dict>
-     <key>depth</key><integer>0</integer>
-     <key>extended_message</key>
-     <string>[debug] analyzing from moo(char, int, int)</string>
-     <key>message</key>
-     <string>[debug] analyzing from moo(char, int, int)</string>
-    </dict>
-    <dict>
-     <key>kind</key><string>event</string>
-     <key>location</key>
-     <dict>
       <key>line</key><integer>34</integer>
       <key>col</key><integer>49</integer>
       <key>file</key><integer>0</integer>
@@ -1480,20 +1424,6 @@
   <dict>
    <key>path</key>
    <array>
-    <dict>
-     <key>kind</key><string>event</string>
-     <key>location</key>
-     <dict>
-      <key>line</key><integer>33</integer>
-      <key>col</key><integer>5</integer>
-      <key>file</key><integer>0</integer>
-     </dict>
-     <key>depth</key><integer>0</integer>
-     <key>extended_message</key>
-     <string>[debug] analyzing from moo(char, int, int)</string>
-     <key>message</key>
-     <string>[debug] analyzing from moo(char, int, int)</string>
-    </dict>
     <dict>
      <key>kind</key><string>control</string>
      <key>edges</key>
@@ -1882,20 +1812,6 @@
      <key>kind</key><string>event</string>
      <key>location</key>
      <dict>
-      <key>line</key><integer>33</integer>
-      <key>col</key><integer>5</integer>
-      <key>file</key><integer>0</integer>
-     </dict>
-     <key>depth</key><integer>0</integer>
-     <key>extended_message</key>
-     <string>[debug] analyzing from moo(char, int, int)</string>
-     <key>message</key>
-     <string>[debug] analyzing from moo(char, int, int)</string>
-    </dict>
-    <dict>
-     <key>kind</key><string>event</string>
-     <key>location</key>
-     <dict>
       <key>line</key><integer>50</integer>
       <key>col</key><integer>14</integer>
       <key>file</key><integer>0</integer>
@@ -1960,20 +1876,6 @@
   <dict>
    <key>path</key>
    <array>
-    <dict>
-     <key>kind</key><string>event</string>
-     <key>location</key>
-     <dict>
-      <key>line</key><integer>33</integer>
-      <key>col</key><integer>5</integer>
-      <key>file</key><integer>0</integer>
-     </dict>
-     <key>depth</key><integer>0</integer>
-     <key>extended_message</key>
-     <string>[debug] analyzing from moo(char, int, int)</string>
-     <key>message</key>
-     <string>[debug] analyzing from moo(char, int, int)</string>
-    </dict>
     <dict>
      <key>kind</key><string>control</string>
      <key>edges</key>

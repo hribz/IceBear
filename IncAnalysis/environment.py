@@ -51,7 +51,10 @@ class Environment:
         self.CLANG_PLUS_PLUS = os.path.join(clang_bin, 'clang++')
         self.clang_tidy = os.path.join(clang_bin, 'clang-tidy')
         self.diagtool = os.path.join(clang_bin, 'diagtool')
-        self.cppcheck = shutil.which('cppcheck')
+        if self.analyze_opts.cppcheck:
+            self.cppcheck = shutil.which(self.analyze_opts.cppcheck)
+        else:
+            self.cppcheck = shutil.which('cppcheck')
         self.infer = shutil.which('infer')
 
         self.analyzers = ['clangsa']
@@ -137,7 +140,7 @@ class ArgumentParser:
         self.parser.add_argument('--analyze', type=str, dest='analyze', choices=['ctu', 'no-ctu'],
                                  help='Execute Clang Static Analyzer.')
         self.parser.add_argument('--clang', type=str, dest='clang', default=None, 
-                                 help='Customize the Clang compiler for CSA file/inline level incremental analysis.(Clang++ will be specified automatically)')
+                                 help='Customize the Clang compiler for CSA func level incremental analysis.(Clang++ will be specified automatically)')
         self.parser.add_argument('--cc', type=str, dest='cc', default='clang', help='Customize the C compiler for configure & build.')
         self.parser.add_argument('--cxx', type=str, dest='cxx', default='clang++', help='Customize the C++ compiler for configure & build.')
         self.parser.add_argument('-j', '--jobs', type=int, dest='jobs', default=1, help='Number of jobs can be executed in parallel.')
@@ -146,6 +149,8 @@ class ArgumentParser:
         self.parser.add_argument('--analyzers', nargs='+', dest='analyzers', metavar='ANALYZER', required=False, choices=supported_analyzers,
                                default=None, help="Run analysis only with the analyzers specified. Currently supported analyzers "
                                     "are: " + ', '.join(supported_analyzers) + ".")
+        self.parser.add_argument('--cppcheck', type=str, dest='cppcheck', default=None, 
+                                 help='Customize the Cppcheck path for func level incremental analysis.')
         self.parser.add_argument('--csa-config', type=str, dest='csa_config', default=None, help='CSA config file.')
         self.parser.add_argument('--clang-tidy-config', type=str, dest='clang_tidy_config', default=None, help='Clang-tidy config file.')
         self.parser.add_argument('--cppcheck-config', type=str, dest='cppcheck_config', default=None, help='Cppcheck config file.')

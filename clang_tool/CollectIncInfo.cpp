@@ -397,6 +397,8 @@ static llvm::cl::opt<bool> CTU("ctu", llvm::cl::desc("Consider CTU analysis"),
     llvm::cl::value_desc("consider CTU analysis"), llvm::cl::init(false));
 static llvm::cl::opt<std::string> RFPath("rf-file", llvm::cl::desc("Output RF to the path"),
     llvm::cl::value_desc("dump rf file"), llvm::cl::init(""));
+static llvm::cl::opt<std::string> CppcheckRFPath("cppcheck-rf-file", llvm::cl::desc("Output Cppcheck RF to the path"),
+    llvm::cl::value_desc("dump cppcheck rf file"), llvm::cl::init(""));
 
 int main(int argc, const char **argv) {
     std::unique_ptr<llvm::Timer> toolTimer = 
@@ -414,7 +416,7 @@ int main(int argc, const char **argv) {
 
     ClangTool Tool(OptionsParser.getCompilations(), OptionsParser.getSourcePathList());
     IncOptions IncOpt{.PrintLoc=PrintLoc, .ClassLevelTypeChange=ClassLevel, .FieldLevelTypeChange=FieldLevel, .DumpCG=DumpCG, 
-                      .DumpToFile=DumpToFile, .DumpUSR=DumpUSR, .CTU=CTU, .RFPath=RFPath};
+                      .DumpToFile=DumpToFile, .DumpUSR=DumpUSR, .CTU=CTU, .RFPath=RFPath, .CppcheckRFPath=CppcheckRFPath};
     IncInfoCollectActionFactory Factory(DiffPath, FSPath, IncOpt);
 
     toolTimer->stopTimer();

@@ -41,6 +41,7 @@ public:
     bool CTU = false;
 
     std::string RFPath;
+    std::string CppcheckRFPath;
 };
 
 class DeclRefFinder : public RecursiveASTVisitor<DeclRefFinder> {

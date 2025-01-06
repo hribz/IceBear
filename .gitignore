@@ -19,4 +19,5 @@ repos/*
 myenv*
 *.ics
 diff_lines.txt
+functions.txt
 *.fixit
