@@ -152,6 +152,7 @@ class FileInCDB:
         # self.call_graph: CallGraph = None
         self.cg_node_num = 'Skip'
         self.has_cg = False # File has .cg.
+        self.indirect_call_num = 0
         self.rf_num = 'All'
         self.has_rf = False # Propagate reanalyze attribute(if needed) successfully.
         self.basline_fs_num = 'Skip'
@@ -319,6 +320,8 @@ class FileInCDB:
                     self.has_rf = True
                 elif tag == 'cg nodes':
                     self.cg_node_num = int(val)
+                elif tag == 'indirect call':
+                    self.indirect_call_num = int(val)
         return True
 
     def parse_cg_file(self) -> CallGraph:

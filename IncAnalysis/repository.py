@@ -40,6 +40,7 @@ class Repository(ABC):
         headers.extend(["analyze"])
         # headers.extend(["analyze(real)", "analyze(cpu)", "analyze(sys)"])
         headers.extend(reports)
+        headers.append("reports")
 
         prepare_for_csa = {"generate_efm", "merge_efm"}
 
@@ -79,6 +80,7 @@ class Repository(ABC):
                             # "%.6lf" % config.analyze_cpu_time_sys
                             ])
         config_data.extend(reports_number)
+        config_data.append(sum(reports_number))
         return headers, config_data
     
     def summary_one_config_specific(self, config: Configuration):
@@ -87,7 +89,7 @@ class Repository(ABC):
             headers.append(str(session))
             # if str(session) == 'diff_with_other':
             #     headers.extend(["diff_command_time", "diff_parse_time"])
-        headers.extend(["files", "diff files", "changed function", "reanalyze function", 
+        headers.extend(["files", "diff files", "changed function", "reanalyze function", "indirect call",
                         "diff but no cf", "total cg nodes", "total csa analyze time"])
         config = self.default_config
         config_data = [self.name, config.version_stamp]
@@ -106,6 +108,7 @@ class Repository(ABC):
         config_data.append(len(config.diff_file_list) if config.incrementable else len(config.file_list))
         config_data.append(config.get_changed_function_num())
         config_data.append(config.get_reanalyze_function_num())
+        config_data.append(config.get_indirect_call_num())
         config_data.append(config.diff_file_with_no_cf)
         config_data.append(config.get_total_cg_nodes_num())
         config_data.append("%.6lf" % config.get_total_csa_analyze_time())

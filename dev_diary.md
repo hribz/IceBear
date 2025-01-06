@@ -438,6 +438,12 @@ int main () {
 - 对于ClangTidy，加上参数`--line-filter='[{"name":"file.cpp","lines":[[1,10]]}]'`表示只输出1~10行相关的报告。
 - 对于CppCheck，加上参数`--suppress-list=<file>`表示抑制匹配file中`<spec>`的报告，`<spec>`的格式为`*:[filename]:[line]`
 
+# 2025/1/3
+## 函数指针和虚函数
+- 虚函数：如果一个函数在`FunctionsChanged`中的同时，也是虚函数，那么把它的所有父函数记录在`ICChanged`，在遇到虚函数调用时，先在`ICChanged`进行查找，如果存在，才重新分析调用者
+- 函数指针：假设一个函数要通过函数指针使用，那么它必然被用于赋值、传参等操作。如果函数既在`FunctionsChanged`中，又被用于赋值，就认为可能存在变化的函数被作为虚函数使用，此时才考虑函数指针。
+- isChangedLine存在bug，输入20,22, diff:[[13,14]]返回true。(并不是bug，[13,14]指的是13后的14行)
+
 # 2025/1/4
 ## ClangTidy一个筛报告的例子
 假如修改了`clang_tool/test/class_field.cpp`第4行`int const b = 0;`，将导致第26行发生除0错误。如果只告诉clang-tidy报告第4行相关的错误，将会导致这个新报告丢失。需要将第4行修改的影响传播给其它行，再将所有行都告诉clang-tidy。

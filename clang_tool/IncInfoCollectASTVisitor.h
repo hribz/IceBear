@@ -11,6 +11,7 @@
 #include <clang/AST/ExprCXX.h>
 #include <clang/AST/Stmt.h>
 #include <clang/Basic/LLVM.h>
+#include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/JSON.h>
@@ -75,8 +76,8 @@ private:
 class IncInfoCollectASTVisitor : public RecursiveASTVisitor<IncInfoCollectASTVisitor> {
 public:
     explicit IncInfoCollectASTVisitor(ASTContext *Context, DiffLineManager &dlm, 
-        ReverseCallGraph &CG, std::unordered_set<const Decl *> &FuncsNeedRA, const IncOptions &incOpt)
-        : Context(Context), DLM(dlm), CG(CG), FunctionsChanged(FuncsNeedRA), IncOpt(incOpt) {}
+        ReverseCallGraph &CG, llvm::DenseSet<const Decl *> &FuncsChanged, llvm::DenseSet<const Decl *> &ICC, const IncOptions &incOpt)
+        : Context(Context), DLM(dlm), CG(CG), FunctionsChanged(FuncsChanged), ICChanged(ICC), IncOpt(incOpt) {}
     
     bool isGlobalConstant(const Decl *D);
 
@@ -92,11 +93,14 @@ public:
     // Use
     bool VisitMemberExpr(MemberExpr *ME);
 
-    void InsertCanonicalDeclToSet(std::unordered_set<const Decl *> &set, const Decl *D) {
+    // Process indirect call.
+    bool VisitCallExpr(CallExpr *CE);
+
+    void InsertCanonicalDeclToSet(llvm::DenseSet<const Decl *> &set, const Decl *D) {
         set.insert(D->getCanonicalDecl());
     }
 
-    int CountCanonicalDeclInSet(std::unordered_set<const Decl *> &set, const Decl *D) {
+    int CountCanonicalDeclInSet(llvm::DenseSet<const Decl *> &set, const Decl *D) {
         return set.count(D->getCanonicalDecl());
     }
 
@@ -106,14 +110,16 @@ public:
 
 private:
     ASTContext *Context;
-    std::unordered_set<const Decl *> GlobalConstantSet;
+    llvm::DenseSet<const Decl *> GlobalConstantSet;
     // Decls have changed, the function/method use these should reanalyze.
     // Don't record changed functions and methods, they are recorded in 
     // FunctionsChanged. Just consider indirect factors which make
     // functions/methods need to reanalyze. Such as GlobalConstant and 
     // class/struct change.
-    std::unordered_set<const Decl *> TaintDecls; 
-    std::unordered_set<const Decl *> &FunctionsChanged;
+    llvm::DenseSet<const Decl *> TaintDecls; 
+    llvm::DenseSet<const Decl *> &FunctionsChanged;
+    llvm::DenseSet<const Decl *> &ICChanged;
+    llvm::DenseSet<const Decl *> FPChanged;
     DiffLineManager &DLM;
     ReverseCallGraph &CG;
     DeclRefFinder DRFinder;

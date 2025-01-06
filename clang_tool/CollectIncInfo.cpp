@@ -10,6 +10,8 @@
 #include <clang/Basic/LLVM.h>
 #include <iostream>
 #include <fstream>
+#include <llvm/ADT/DenseSet.h>
+#include <llvm/Support/Casting.h>
 #include <llvm/Support/Timer.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/ADT/StringRef.h>
@@ -45,7 +47,7 @@ class IncInfoCollectConsumer : public clang::ASTConsumer {
 public:
     explicit IncInfoCollectConsumer(CompilerInstance &CI, std::string &diffPath, const IncOptions &incOpt)
     : CG(), IncOpt(incOpt), DLM(CI.getASTContext().getSourceManager()), PP(CI.getPreprocessor()),
-      IncVisitor(&CI.getASTContext(), DLM, CG, FunctionsChanged, IncOpt) {
+      IncVisitor(&CI.getASTContext(), DLM, CG, FunctionsChanged, ICChanged, IncOpt) {
         std::unique_ptr<llvm::Timer> consumerTimer = std::make_unique<llvm::Timer>(
             "Consumer Timer", "Consumer Constructor Time");
         consumerTimer->startTimer();
@@ -137,9 +139,20 @@ public:
             if (N == CG.getRoot()) continue;
             Decl *D = N->getDecl();
             // CG only record canonical decls, so it's neccessary to
-            // judge if there are changes in Function Definition scope. 
+            // judge if there are changes in Function Definition scope.
             if (DLM.isChangedDecl(D)) {
                 FunctionsChanged.insert(D);
+                if (auto MD = llvm::dyn_cast<CXXMethodDecl>(D)) {
+                    if (MD->isVirtual()) {
+                        // Record changed virtual function and all functions it overrides.
+                        ICChanged.insert(D);
+                        llvm::outs() << MD->getQualifiedNameAsString() << "\n";
+                        for (auto method: MD->overridden_methods()) {
+                            llvm::outs() << method->getQualifiedNameAsString() << "\n";
+                            ICChanged.insert(method);
+                        }
+                    }
+                }
             }
         }
 
@@ -327,6 +340,7 @@ public:
             *OS << "changed functions" << ":" << FunctionsChanged.size() << "\n";
             *OS << "reanalyze functions" << ":" << FunctionsNeedReanalyze.size() << "\n";
             *OS << "cg nodes" << ":" << CG.size()-1 << "\n";
+            *OS << "indirect call" << ":" << ICChanged.size() << "\n";
         }
 
         (*OS).flush();
@@ -341,7 +355,8 @@ private:
     ReverseCallGraph CG;
     IncInfoCollectASTVisitor IncVisitor;
     std::deque<Decl *> LocalTUDecls;
-    std::unordered_set<const Decl *> FunctionsChanged;
+    llvm::DenseSet<const Decl *> FunctionsChanged;
+    llvm::DenseSet<const Decl *> ICChanged;
     std::vector<const Decl *> FunctionsNeedReanalyze;
     Preprocessor &PP;
 };

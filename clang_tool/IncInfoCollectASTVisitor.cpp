@@ -1,5 +1,6 @@
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
+#include <clang/AST/Expr.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/Casting.h>
 
@@ -132,6 +133,13 @@ bool IncInfoCollectASTVisitor::VisitDeclRefExpr(DeclRefExpr *DR) {
         // use changed decl, reanalyze this function
         InsertCanonicalDeclToSet(FunctionsChanged, inFunctionOrMethodStack.back());
     }
+
+    // // If a function can be used by function pointers, it's must be referenced.
+    // if (isa<FunctionDecl>(ND) && CountCanonicalDeclInSet(FunctionsChanged, ND)) {
+    //     // If there is any function be referenced
+
+    // }
+
     return ProcessDeclRefExpr(DR, ND);
 }
 
@@ -145,10 +153,27 @@ bool IncInfoCollectASTVisitor::VisitMemberExpr(MemberExpr *ME) {
         ProcessDeclRefExpr(ME, member);
     } else {
         if (isa<CXXMethodDecl>(member)) {
-
+            
         } else {
             const auto *field = cast<FieldDecl>(member);
         }
+    }
+    return true;
+}
+
+bool IncInfoCollectASTVisitor::VisitCallExpr(CallExpr *CE) {
+    Expr* callee = CE->getCallee()->IgnoreImpCasts();
+
+    if (callee->getType()->isFunctionPointerType() && FPChanged.size()>0) {
+      // Reanalyze all functions call function pointer.
+      FunctionsChanged.insert(inFunctionOrMethodStack.back());
+    } else if (clang::MemberExpr* memberExpr = llvm::dyn_cast<clang::MemberExpr>(callee)) {
+      clang::ValueDecl* decl = memberExpr->getMemberDecl();
+      if (clang::CXXMethodDecl* methodDecl = llvm::dyn_cast<clang::CXXMethodDecl>(decl)) {
+        if (methodDecl->isVirtual() && CountCanonicalDeclInSet(ICChanged, methodDecl)) {
+          FunctionsChanged.insert(inFunctionOrMethodStack.back());
+        }
+      }
     }
     return true;
 }

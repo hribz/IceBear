@@ -205,6 +205,7 @@ def main(args):
             plt.figure()
             venn(versions_and_reports, fmt='{size}', cmap='tab10')
             plt.savefig(figure)
+            plt.close()
         
         versions_and_reports1 = versions_and_reports(statistics1)
         dump_veen_diagram(versions_and_reports1, f"{repo_info.workspace}/veen.png")
