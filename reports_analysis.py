@@ -1,7 +1,9 @@
+import hashlib
 import os
 from pathlib import Path
 import sys
 import json
+import yaml
 
 from IncAnalysis.repository import UpdateConfigRepository, BuildType
 from IncAnalysis.utils import *
@@ -41,6 +43,12 @@ def all_reports(commit_to_reports) -> set:
         total_reports.update(set(reports))
     return total_reports
 
+
+def dict_hash(diagnostic: dict, encoding='utf-8'):
+    sha256 = hashlib.sha256()
+    sha256.update(json.dumps(diagnostic, sort_keys=True).encode(encoding))
+    return sha256.hexdigest()
+
 class RepoParser(ArgumentParser):
     def __init__(self):
         super().__init__()
@@ -70,28 +78,37 @@ class Report:
 
     def __eq__(self, other):
         if isinstance(other, Report):
-            return self.report_name == other.report_name and self.speicific_info == other.speicific_info
+            return self.report_name == other.report_name and dict_hash(self.speicific_info) == dict_hash(other.speicific_info)
         return False
 
     def __hash__(self):
         return hash((self.report_name, self.speicific_info.__str__()))
+    
+    def __to_json__(self):
+        return {
+            "version": self.version,
+            "report name": self.report_name,
+            "specific info": self.speicific_info
+        }
 
 
 def diff_reports(reports1: set, reports2: set, dir1, dir2):
     diff1 = reports1.difference(reports2)
     diff2 = reports2.difference(reports1)
     diff = diff1.union(diff2)
+    diff_json = {}
     if len(diff) == 0:
         logger.info(f"Congratulations! There is no difference between reports in {dir1} and {dir2}")
     else:
         if len(diff1) > 0:
             logger.info(f"Sad! There are {len(diff1)} reports only in {dir1}:")
-            for report in diff1:
-                logger.info(dir1 + '/' + report.version + '/' + report.report_name)
+            diff_json[dir1] = [i.__to_json__() for i in diff1]
         if len(diff2) > 0:
             logger.info(f"Sad! There are {len(diff2)} reports only in {dir2}:")
-            for report in diff2:
-                logger.info(dir2 + '/' + report.version + '/' + report.report_name)
+            diff_json[dir2] = [i.__to_json__() for i in diff2]
+    return diff_json
+
+analyzers = ['csa', 'clang-tidy', 'cppcheck', 'infer']
 
 def main(args):
     parser = RepoParser()
@@ -118,51 +135,102 @@ def main(args):
         if repo_info.repo_name in ignore_repos:
             logger.info(f"{repo_info.repo_name} is in ignore repo list")
             continue
+        if not os.path.exists(repo_info.workspace):
+            logger.info(f"{repo_info.workspace} not exists")
+            continue
+        if not os.path.exists(repo_info2.workspace):
+            logger.info(f"{repo_info2.workspace} not exists")
+            continue
+
+        def get_versions(workspace, analyzer):
+            with open(os.path.join(workspace, 'reports_statistics.json'), 'r') as f:
+                info = json.load(f)
+                return [i['version'] for i in info[analyzer]]
 
         def get_statistics_from_workspace(workspace):
-            analyzers = ['csa', 'clang-tidy', 'cppcheck', 'infer']
             analyzers_floder = [os.path.join(workspace, analyzer) for analyzer in list_dir(workspace, analyzers)]
-            statistics = {k: [] for k in analyzers}
+            
+            statistics = {
+                "summary": {
+                    "total": 0,
+                    "unique": 0,
+                    "new": 0
+                }
+            }
+            for k in analyzers:
+                statistics[k] = []
 
             for analyzer in analyzers_floder:
                 if analyzer.endswith('csa'):
                     reports_path = os.path.join(analyzer, 'csa-reports')
+                    analyzer_name = 'csa'
                 elif analyzer.endswith('clang-tidy'):
+                    analyzer_name = 'clang-tidy'
                     reports_path = os.path.join(analyzer, 'clang-tidy-reports')
                 elif analyzer.endswith('cppcheck'):
+                    analyzer_name = 'cppcheck'
                     reports_path = os.path.join(analyzer, 'cppcheck-reports')
                 elif analyzer.endswith('infer'):
+                    analyzer_name = 'infer'
                     reports_path = os.path.join(analyzer, 'infer-reports')
 
-                versions = list_dir(reports_path)
+                analyzer_to_class = {
+                    'csa': "CSA", "clang-tidy": "ClangTidy", "cppcheck": "CppCheck"
+                }
+                versions = get_versions(workspace, analyzer_to_class[analyzer_name])
+                statistics['summary'][analyzer_name] = {
+                    "total": 0
+                }
+
                 for version in versions:
                     output_path = os.path.join(reports_path, version)
                     reports = []
-                    if analyzer not in statistics:
-                        statistics[analyzer] = []
                     if analyzer.endswith('csa'):
-                        analyzer_name = 'csa'
                         if not os.path.exists(output_path):
                             continue
                         reports = list_files(output_path)
                     elif analyzer.endswith('clang-tidy'):
-                        analyzer_name = 'clang-tidy'
                         if not os.path.exists(output_path):
                             continue
-                        reports = list_files(output_path)
+
+                        unique_reports = dict()
+                        for file in list_files(output_path):
+                            with open(os.path.join(output_path, file), 'r') as f:
+                                report = yaml.safe_load(f)
+                            diagnostics = report['Diagnostics']
+                            for diagnostic in diagnostics:
+                                report_hash = dict_hash({
+                                    "DiagnosticName": diagnostic['DiagnosticName'],
+                                    "DiagnosticMessage": {
+                                        "Message": diagnostic['DiagnosticMessage']['Message'],
+                                        "FilePath": diagnostic['DiagnosticMessage']['FilePath'],
+                                    },
+                                    "Level": diagnostic['Level'],
+                                    "BuildDirectory": diagnostic['BuildDirectory']
+                                })
+                                unique_reports[report_hash] = {
+                                    'kind': diagnostic['DiagnosticName'],
+                                    'file': diagnostic['DiagnosticMessage']['FilePath'],
+                                    'diagnostic': diagnostic['DiagnosticMessage']['Message'],
+                                    'hash': report_hash
+                                }
+                        reports = list(unique_reports.values())
                     elif analyzer.endswith('cppcheck'):
-                        analyzer_name = 'cppcheck'
-                        if not os.path.exists(output_path / 'result.json'):
+                        if not os.path.exists(os.path.join(output_path, 'result.json')):
                             continue
-                        with open(output_path / 'result.json', 'r') as f:
+                        with open(os.path.join(output_path, 'result.json'), 'r') as f:
                             cppcheck_result = json.load(f)
                             results = cppcheck_result["runs"][0]["results"]
-                            reports = [{k: v for k, v in result.items() if k != 'locations'} for result in results]
+                            for result in results:
+                                message = result['message']['text']
+                                result['message']['text'] = message[:message.rfind("at line")]
+                                report = {k:v for k, v in result.items() if k != 'locations'}
+                                report['locations'] = result['locations'][-1]['physicalLocation']['artifactLocation']['uri']
+                                reports.append(report)
                     elif analyzer.endswith('infer'):
-                        analyzer_name = 'infer'
-                        if not os.path.exists(output_path / 'report.json'):
+                        if not os.path.exists(os.path.join(output_path, 'report.json')):
                             continue
-                        with open(output_path / 'report.json', 'r') as f:
+                        with open(os.path.join(output_path, 'report.json'), 'r') as f:
                             infer_result = json.load(f)
                             key_set = {'bug_type', 'qualifier', 'severity', 'category', 'procedure', 'file', 'key', 'bug_type_hum'}
                             reports = [{k: v for k, v in result.items() if k in key_set} for result in infer_result]
@@ -171,11 +239,14 @@ def main(args):
                         'version': version,
                         'reports': reports
                     })
-                    
+                    statistics['summary'][analyzer_name]['total'] += len(reports)
+                    statistics['summary'][analyzer_name][version] = len(reports)
+                    statistics['summary']['total'] += len(reports)
+
             return statistics
         
-        statistics1 = get_statistics_from_workspace(repo_info.workspace)['csa']
-        statistics2 = get_statistics_from_workspace(repo_info2.workspace)['csa']
+        statistics1 = get_statistics_from_workspace(repo_info.workspace)
+        statistics2 = get_statistics_from_workspace(repo_info2.workspace)
 
         # [
         #     {'version': commit['version'], 'reports': [Report1, Report2, ...]},
@@ -183,20 +254,30 @@ def main(args):
         # ]
         def versions_and_reports(statistics: list) -> dict:
             versions_and_reports = {}
-            for commit in statistics:
-                version = commit['version']
-                reports_from_this_commit = commit['reports']
-                reports = set()
-                for report in reports_from_this_commit:
-                    if isinstance(report, str):
-                        report_name = report
-                        specific_info = {}
-                    else:
-                        report_name = report["message"]["text"]
-                        specific_info = report
-                    reports.add(Report(version, report_name, specific_info))
-                versions_and_reports[version] = reports
-            return versions_and_reports
+            first_version = None
+            for analyzer in analyzers:
+                analyzer_statistics = statistics[analyzer]
+                for commit in analyzer_statistics:
+                    version = commit['version']
+                    if first_version is None:
+                        first_version = version
+                    reports_from_this_commit = commit['reports']
+                    reports = set()
+                    for report in reports_from_this_commit:
+                        if isinstance(report, str):
+                            report_name = report
+                            specific_info = {}
+                        else:
+                            if "message" in report:
+                                # cppcheck report
+                                report_name = report["message"]["text"]
+                            else:
+                                # clang-tidy report
+                                report_name = report["file"] + '-' + report["hash"]
+                            specific_info = report
+                        reports.add(Report(version, report_name, specific_info))
+                    versions_and_reports[version] = reports
+            return versions_and_reports, first_version
         
         def dump_veen_diagram(versions_and_reports, figure):
             if len(versions_and_reports.keys()) == 0:
@@ -211,29 +292,45 @@ def main(args):
             plt.savefig(figure)
             plt.close()
         
-        versions_and_reports1 = versions_and_reports(statistics1)
-        dump_veen_diagram(versions_and_reports1, f"{repo_info.workspace}/veen.png")
-        versions_and_reports2 = versions_and_reports(statistics2)
-        dump_veen_diagram(versions_and_reports2, f"{repo_info2.workspace}/veen.png")
+        versions_and_reports1, baseline_version1 = versions_and_reports(statistics1)
+        # dump_veen_diagram(versions_and_reports1, f"{repo_info.workspace}/veen.png")
+        versions_and_reports2, baseline_version2 = versions_and_reports(statistics2)
+        # dump_veen_diagram(versions_and_reports2, f"{repo_info2.workspace}/veen.png")
 
-        def all_reports_from_json(statistics: list) -> set:
+        def all_reports_from_json(versions_and_reports: dict) -> set:
             reports = set()
-            for commit in statistics:
-                version = commit['version']
-                reports_from_this_commit = commit['reports']
-                for report in reports_from_this_commit:
-                    report_name = report
-                    specific_info = {}
-                    reports.add(Report(version, report_name, specific_info))
+            for val in versions_and_reports.values():
+                reports = reports.union(val)
             return reports
         
-        reports1 = all_reports_from_json(statistics1)
-        reports2 = all_reports_from_json(statistics2)
+        reports1 = all_reports_from_json(versions_and_reports1)
+        reports2 = all_reports_from_json(versions_and_reports2)
+        statistics1['summary']['unique'] = len(reports1)
+        statistics2['summary']['unique'] = len(reports2)
 
-        dir1 = os.path.join(repo_info.workspace, 'csa/csa-reports')
-        dir2 = os.path.join(repo_info2.workspace, 'csa/csa-reports')
+        dir1 = repo_info.workspace
+        dir2 = repo_info2.workspace
 
-        diff_reports(reports1, reports2, dir1, dir2)
+        diff_json = diff_reports(reports1, reports2, dir1, dir2)
+        with open(os.path.join(repo_info.workspace, "reports_diff.json"), 'w') as f:
+            json.dump(diff_json, f, indent=3)
+
+        def new_reports(all_reports: set, baseline_reports:set, output_file):
+            new_reports = all_reports.difference(baseline_reports)
+            logger.info(f"Find {len(new_reports)} new reports in {output_file}")
+            with open(output_file, 'w') as f:
+                json.dump([i.__to_json__() for i in new_reports], f, indent=3)
+            return len(new_reports)
+
+        new_reports_num1 = new_reports(reports1, versions_and_reports1[baseline_version1], os.path.join(repo_info.workspace, 'new_reports.json'))
+        new_reports_num2 = new_reports(reports2, versions_and_reports2[baseline_version2], os.path.join(repo_info2.workspace, 'new_reports.json'))
+        statistics1['summary']['new'] = new_reports_num1
+        statistics2['summary']['new'] = new_reports_num2
+
+        with open(os.path.join(repo_info.workspace, 'merged_reports.json'), 'w') as f1, \
+            open(os.path.join(repo_info2.workspace, 'merged_reports.json'), 'w') as f2:
+            json.dump(statistics1, f1, indent=3)
+            json.dump(statistics2, f2, indent=3)
 
 if __name__ == "__main__":
     main(sys.argv[1:])

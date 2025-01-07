@@ -1,4 +1,6 @@
 #include "DiffLineManager.h"
+#include <clang/Basic/FileEntry.h>
+#include <optional>
 #include <utility>
 
 void DiffLineManager::Initialize(std::string &DiffPath, std::string mainFilePath) {
@@ -54,25 +56,32 @@ std::optional<std::pair<int, int>> DiffLineManager::StartAndEndLineOfDecl(const 
     return std::make_pair(StartLoc, EndLoc);
 }
 
-std::optional<std::pair<int, int>> DiffLineManager::OriginStartAndEndLineOfDecl(const Decl *D) {
-    if (auto FD = D->getAsFunction()) {
-        // Just care about changes in function definition
-        if (auto Definition = FD->getDefinition())
-            D = FD->getDefinition();
-    }
-    
+std::optional<std::pair<std::string, std::pair<int, int>>> DiffLineManager::OriginFilenameAndLineNumberOfDecl(const Decl *D) {
     SourceLocation Loc = D->getLocation();
     if (!(Loc.isValid() && Loc.isFileID())) {
         return std::nullopt;
     }
-    auto StartLoc = SM.getPresumedLineNumber(D->getBeginLoc());
-    auto EndLoc = SM.getPresumedLineNumber(D->getEndLoc());
-    return std::make_pair(StartLoc, EndLoc);
+    auto PresumedSLoc = SM.getPresumedLoc(D->getBeginLoc());
+    if (PresumedSLoc.isInvalid()) {
+        return std::nullopt;
+    }
+    auto PresumedELoc = SM.getPresumedLoc(D->getEndLoc());
+
+    auto Filename = PresumedSLoc.getFilename();
+    auto StartLoc = PresumedSLoc.getLine();
+    auto EndLoc = PresumedELoc.getLine();
+    return std::make_pair(Filename, std::make_pair(StartLoc, EndLoc));
 }
 
 bool DiffLineManager::IsInMainFile(const Decl *D) {
     auto Loc = D->getLocation();
     return SM.isInMainFile(Loc);
+}
+
+std::string DiffLineManager::GetDeclFileName(const Decl *D) {
+    auto Location = D->getLocation();
+    auto PresumedLoc = SM.getPresumedLoc(Location);
+    return PresumedLoc.getFilename();
 }
 
 bool DiffLineManager::isChangedLine(unsigned int line, unsigned int end_line) {

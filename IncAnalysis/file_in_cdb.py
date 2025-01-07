@@ -29,6 +29,8 @@ class FileKind(Enum):
     FIX = auto() # clang-tidy fixit file.
     CPPCHECK = auto()
     INFER = auto()
+    ANR = auto()
+    CPPRF = auto()
 
 class FileStatus(Enum):
     # Abnormal status
@@ -247,6 +249,10 @@ class FileInCDB:
             return str((self.parent.cppcheck_output_path)) + '/' + self.sha256
         elif kind == FileKind.INFER:
             return str((self.parent.infer_output_path)) + '/' + self.sha256
+        elif kind == FileKind.ANR:
+            return (self.prep_file) + '.anr'
+        elif kind == FileKind.CPPRF:
+            return (self.prep_file) + '.cpprf'
         else:
             logger.error(f"[Get File Path] Unknown file kind {kind}")
 
@@ -288,6 +294,14 @@ class FileInCDB:
         if self.parent.env.ctu:
             commands += ['-ctu']
         commands.extend(["-rf-file", self.get_file_path(FileKind.RF)])
+        # ClangTidy line-level filter.
+        has_clangtidy = 'clang-tidy' in self.parent.env.analyze_opts.analyzers
+        if has_clangtidy:
+            commands.extend(["--dump-anr"])
+        # Cppcheck function-level incremental.
+        has_cppcheck = 'cppcheck' in self.parent.env.analyze_opts.analyzers
+        if has_cppcheck:
+            commands.extend(["-cppcheck-rf-file", self.get_file_path(FileKind.CPPRF)])
         commands += ['--', '-w'] + self.compile_command.arguments + ['-D__clang_analyzer__']
         ii_script = commands_to_shell_script(commands)
         try:

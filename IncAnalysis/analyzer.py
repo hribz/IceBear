@@ -1,4 +1,5 @@
 import shlex
+import shutil
 from typing import List
 import multiprocessing as mp
 import subprocess
@@ -123,7 +124,24 @@ class ClangTidy(Analyzer):
         analyzer_cmd.extend(['--export-fixes', fix_path])
         if self.analyzer_config.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             # TODO: add --line-filter to filter warnings related to diff lines.
-            pass
+            anr_file = file.get_file_path(FileKind.ANR)
+            # If ANR file doesn't exist, meaning it's a new file, do not filter its results.
+            if file.parent.incrementable and os.path.exists(anr_file):
+                line_filter_json = []
+                with open(anr_file, 'r') as f:
+                    for line in f.readlines():
+                        line = line.strip()
+                        if len(line) == 0:
+                            continue
+                        if line.endswith(":"):
+                            filename = line[:-1]
+                            line_filter_json.append({"name": filename, "lines": []})
+                        else:
+                            for s_and_e in line.split(";"):
+                                if len(s_and_e) != 0:
+                                    line_filter_json[-1]["lines"].append([int(i) for i in s_and_e.split(",")])
+                line_filter_str = json.dumps(line_filter_json, separators=(",", ":"))
+                analyzer_cmd.append("-line-filter=" + line_filter_str)
         analyzer_cmd.append("--")
         analyzer_cmd.extend(file.compile_command.arguments)
         analyzer_cmd.extend(self.analyzer_config.compiler_warnings)
@@ -136,6 +154,14 @@ class CppCheck(Analyzer):
     def __init__(self, analyzer_config: CppCheckConfig, file_list: List[FileInCDB]):
         super().__init__(analyzer_config, file_list)
         self.cppcheck = 'cppcheck'
+
+    def merge_all_cppcheckrf(self, output_file):
+        with open(output_file, 'w') as out_file:
+            for file in self.file_list:
+                cpprf_file = file.get_file_path(FileKind.CPPRF)
+                if os.path.exists(cpprf_file):
+                    with open(cpprf_file, 'r') as in_file:
+                        shutil.copyfileobj(in_file, out_file)
 
     def analyze_all_files(self):
         # return super().analyze_all_files()
@@ -153,6 +179,11 @@ class CppCheck(Analyzer):
         analyzer_cmd.append(f"--plist-output={config.cppcheck_output_path}")
         result_extname = ".json" if self.analyzer_config.Sarif else ".xml"
         analyzer_cmd.append(f"--output-file={config.cppcheck_output_path}/result{result_extname}")
+        if self.analyzer_config.inc_mode >= IncrementalMode.FuncitonLevel.value:
+            all_cppcheckrf = str(config.preprocess_path / "cppcheck.cpprf")
+            if config.incrementable:
+                self.merge_all_cppcheckrf(all_cppcheckrf)
+                analyzer_cmd.append(f"--analyze-function-file={all_cppcheckrf}")
         analyzer_cmd.extend(self.analyzer_config.analyze_args())
 
         cppcheck_script = commands_to_shell_script(analyzer_cmd)

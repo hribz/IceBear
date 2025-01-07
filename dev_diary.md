@@ -451,3 +451,6 @@ int main () {
 # 无报告
 clang-tidy '--line-filter=[{"name":"class_field.cpp","lines":[[4,5]]}]' '-config={"HeaderFilterRegex": ".*"}' class_field.cpp --export-fixes .
 ```
+
+# 一些报告
+- redis/redis_commits/redis_2024-12-23_64a40b.diff：定义了某些宏名称，clang-tidy在这些宏名称中出现了报告。

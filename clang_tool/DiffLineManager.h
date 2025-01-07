@@ -22,8 +22,9 @@ public:
     bool isChangedDecl(const Decl *D);
 
     std::optional<std::pair<int, int>> StartAndEndLineOfDecl(const Decl *);
-    std::optional<std::pair<int, int>> OriginStartAndEndLineOfDecl(const Decl *);
+    std::optional<std::pair<std::string, std::pair<int, int>>> OriginFilenameAndLineNumberOfDecl(const Decl *);
     bool IsInMainFile(const Decl *);
+    std::string GetDeclFileName(const Decl *);
 
     bool isNewFile() {
         return !DiffLines;

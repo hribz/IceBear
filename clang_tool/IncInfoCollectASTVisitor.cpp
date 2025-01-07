@@ -56,6 +56,17 @@ bool IncInfoCollectASTVisitor::VisitDecl(Decl *D) {
             // return false;
         }
     }
+
+    // Record Affected Nodes
+    if (isa<TypedefDecl, FieldDecl, VarDecl, FunctionDecl>(D)) {
+        if (!AN.count(D) && DLM.isChangedDecl(D)) {
+            AN.insert(D);
+            auto *FirstDecl = D->getCanonicalDecl();
+            for (auto *curr = FirstDecl; curr != nullptr; curr = curr->getNextDeclInContext()) {
+                AN.insert(D);
+            }
+        }
+    }
     
     if (isa<RecordDecl>(D)) {
         return true;

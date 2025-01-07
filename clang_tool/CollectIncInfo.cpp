@@ -47,7 +47,7 @@ class IncInfoCollectConsumer : public clang::ASTConsumer {
 public:
     explicit IncInfoCollectConsumer(CompilerInstance &CI, std::string &diffPath, const IncOptions &incOpt)
     : CG(), IncOpt(incOpt), DLM(CI.getASTContext().getSourceManager()), PP(CI.getPreprocessor()), SM(CI.getASTContext().getSourceManager()),
-      IncVisitor(&CI.getASTContext(), DLM, CG, FunctionsChanged, ICChanged, IncOpt) {
+      IncVisitor(&CI.getASTContext(), DLM, CG, FunctionsChanged, ICChanged, AN, IncOpt) {
         std::unique_ptr<llvm::Timer> consumerTimer = std::make_unique<llvm::Timer>(
             "Consumer Timer", "Consumer Constructor Time");
         consumerTimer->startTimer();
@@ -319,6 +319,11 @@ public:
     }
 
     void DumpFunctionsNeedReanalyzeForCppcheck() {
+        /*
+            filename.c:
+            func
+            ...
+        */
         if (IncOpt.CppcheckRFPath.empty()) {
             return;
         }
@@ -335,6 +340,8 @@ public:
         } else {
             *OS << "--- Functions Cppcheck Need to Reanalyze ---\n";
         }
+
+        *OS << IncOpt.FilePath << ":\n";
 
         for (auto &D : FunctionsNeedReanalyze) {
             if (auto *FD = llvm::dyn_cast<FunctionDecl>(D->getCanonicalDecl())) {
@@ -366,21 +373,41 @@ public:
             *OS << "--- Affected node ranges ---\n";
         }
 
-        llvm::DenseSet<const Decl *> AN;
         AN.insert(IncVisitor.TaintDecls.begin(), IncVisitor.TaintDecls.end());
-        AN.insert(FunctionsNeedReanalyze.begin(), FunctionsNeedReanalyze.end());        
-
-        std::set<std::pair<unsigned, unsigned>> RangeSet;
-        for (auto D: AN) {
-            if (DLM.IsInMainFile(D)) {
-                auto loc = DLM.OriginStartAndEndLineOfDecl(D);
-                if (!loc) continue;
-                RangeSet.insert(*loc);
+        // All Decls in FunctionsNeedReanalyze are canonical decl.
+        // Record correspond definition (if exist) in AN.
+        for (auto *D: FunctionsNeedReanalyze) {
+            if (auto *FD = llvm::dyn_cast<FunctionDecl>(D)) {
+                auto *Definition = FD->getDefinition();
+                if (Definition) {
+                    AN.insert(Definition);
+                }
             }
         }
 
-        for (const auto &Range: RangeSet) {
-            *OS << Range.first << "," << Range.second << "\n";
+        std::map<std::string, std::set<std::pair<unsigned, unsigned>>> FileToRange;
+        for (auto D: AN) {
+            auto Loc = D->getLocation();
+            if (!Loc.isValid() || SM.isInSystemHeader(Loc))
+                continue;
+            auto FileAndLine = DLM.OriginFilenameAndLineNumberOfDecl(D);
+            if (!FileAndLine) continue;
+            auto filename = FileAndLine->first;
+            auto loc = FileAndLine->second;
+            if (FileToRange.count(filename))
+                FileToRange[filename].insert(loc);
+            else
+                FileToRange[filename] = {loc};
+        }
+
+        for (auto item: FileToRange) {
+            auto filename = item.first;
+            *OS << filename << ":\n";
+            auto RangeSet = item.second;
+            for (const auto &Range: RangeSet) {
+                *OS << Range.first << "," << Range.second << ";";
+            }
+            *OS << "\n";
         }
         
         (*OS).flush();
@@ -430,6 +457,7 @@ private:
     llvm::DenseSet<const Decl *> FunctionsChanged;
     llvm::DenseSet<const Decl *> ICChanged;
     std::vector<const Decl *> FunctionsNeedReanalyze;
+    llvm::DenseSet<const Decl *> AN;
     Preprocessor &PP;
     const clang::SourceManager &SM;
 };
@@ -489,6 +517,8 @@ static llvm::cl::opt<std::string> RFPath("rf-file", llvm::cl::desc("Output RF to
     llvm::cl::value_desc("dump rf file"), llvm::cl::init(""));
 static llvm::cl::opt<std::string> CppcheckRFPath("cppcheck-rf-file", llvm::cl::desc("Output Cppcheck RF to the path"),
     llvm::cl::value_desc("dump cppcheck rf file"), llvm::cl::init(""));
+static llvm::cl::opt<std::string> FilePath("file-path", llvm::cl::desc("File path before preprocess"),
+    llvm::cl::value_desc("origin file"), llvm::cl::init(""));
 
 int main(int argc, const char **argv) {
     std::unique_ptr<llvm::Timer> toolTimer = 
@@ -506,7 +536,7 @@ int main(int argc, const char **argv) {
 
     ClangTool Tool(OptionsParser.getCompilations(), OptionsParser.getSourcePathList());
     IncOptions IncOpt{.PrintLoc=PrintLoc, .ClassLevelTypeChange=ClassLevel, .FieldLevelTypeChange=FieldLevel, .DumpCG=DumpCG, 
-                      .DumpToFile=DumpToFile, .DumpUSR=DumpUSR, .DumpANR=DumpANR, .CTU=CTU, .RFPath=RFPath, .CppcheckRFPath=CppcheckRFPath};
+                      .DumpToFile=DumpToFile, .DumpUSR=DumpUSR, .DumpANR=DumpANR, .CTU=CTU, .RFPath=RFPath, .CppcheckRFPath=CppcheckRFPath, .FilePath=FilePath};
     IncInfoCollectActionFactory Factory(DiffPath, FSPath, IncOpt);
 
     toolTimer->stopTimer();

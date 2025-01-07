@@ -20,9 +20,9 @@
 #include <vector>
 
 #include "clang/AST/RecursiveASTVisitor.h"
+#include "clang/Analysis/AnalysisDeclContext.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Index/USRGeneration.h"
-#include "clang/Analysis/AnalysisDeclContext.h"
 
 #include "DiffLineManager.h"
 #include "ReverseCallGraph.h"
@@ -32,99 +32,107 @@ using SetOfConstDecls = llvm::DenseSet<const Decl *>;
 
 class IncOptions {
 public:
-    bool PrintLoc = false;
-    bool ClassLevelTypeChange = true;
-    bool FieldLevelTypeChange = false;
+  bool PrintLoc = false;
+  bool ClassLevelTypeChange = true;
+  bool FieldLevelTypeChange = false;
 
-    bool DumpCG = false;
-    bool DumpToFile = true;
-    bool DumpUSR = false;
-    bool DumpANR = false;
-    bool CTU = false;
+  bool DumpCG = false;
+  bool DumpToFile = true;
+  bool DumpUSR = false;
+  bool DumpANR = false;
+  bool CTU = false;
 
-    std::string RFPath;
-    std::string CppcheckRFPath;
+  std::string RFPath;
+  std::string CppcheckRFPath;
+  std::string FilePath;
 };
 
 class DeclRefFinder : public RecursiveASTVisitor<DeclRefFinder> {
 public:
-    bool VisitDeclRefExpr(DeclRefExpr *DRE) {
-        FoundedDecls.push_back(DRE->getFoundDecl());
-        return true;
-    }
+  bool VisitDeclRefExpr(DeclRefExpr *DRE) {
+    FoundedDecls.push_back(DRE->getFoundDecl());
+    return true;
+  }
 
-    bool VisitMemberExpr(MemberExpr *E) {
-        auto member = E->getMemberDecl();
-        FoundedDecls.push_back(member);
-        return true;
-    }
+  bool VisitMemberExpr(MemberExpr *E) {
+    auto member = E->getMemberDecl();
+    FoundedDecls.push_back(member);
+    return true;
+  }
 
-    bool VisitCXXConstructExpr(CXXConstructExpr *E) {
-        // Global constant will not propogate through CXXConstructExpr
-        return false;
-    }
+  bool VisitCXXConstructExpr(CXXConstructExpr *E) {
+    // Global constant will not propogate through CXXConstructExpr
+    return false;
+  }
 
-    std::vector<const Decl *> getFoundedRefDecls() const { return FoundedDecls; }
+  std::vector<const Decl *> getFoundedRefDecls() const { return FoundedDecls; }
 
-    void clearRefDecls() {
-        FoundedDecls.clear();
-    }
+  void clearRefDecls() { FoundedDecls.clear(); }
 
 private:
-    std::vector<const Decl *> FoundedDecls;
+  std::vector<const Decl *> FoundedDecls;
 };
 
-class IncInfoCollectASTVisitor : public RecursiveASTVisitor<IncInfoCollectASTVisitor> {
+class IncInfoCollectASTVisitor
+    : public RecursiveASTVisitor<IncInfoCollectASTVisitor> {
 public:
-    explicit IncInfoCollectASTVisitor(ASTContext *Context, DiffLineManager &dlm, 
-        ReverseCallGraph &CG, llvm::DenseSet<const Decl *> &FuncsChanged, llvm::DenseSet<const Decl *> &ICC, const IncOptions &incOpt)
-        : Context(Context), DLM(dlm), CG(CG), FunctionsChanged(FuncsChanged), ICChanged(ICC), IncOpt(incOpt) {}
-    
-    bool isGlobalConstant(const Decl *D);
+  explicit IncInfoCollectASTVisitor(ASTContext *Context, DiffLineManager &dlm,
+                                    ReverseCallGraph &CG,
+                                    llvm::DenseSet<const Decl *> &FuncsChanged,
+                                    llvm::DenseSet<const Decl *> &ICC,
+                                    llvm::DenseSet<const Decl *> &AffectedNodes,
+                                    const IncOptions &incOpt)
+      : Context(Context), DLM(dlm), CG(CG), FunctionsChanged(FuncsChanged),
+        ICChanged(ICC), AN(AffectedNodes), IncOpt(incOpt) {}
 
-    // Def
-    bool VisitDecl(Decl *D);
+  bool isGlobalConstant(const Decl *D);
 
-    bool TraverseDecl(Decl *D);
+  // Def
+  bool VisitDecl(Decl *D);
 
-    bool ProcessDeclRefExpr(Expr * const E, NamedDecl * const ND);
+  bool TraverseDecl(Decl *D);
 
-    // Use
-    bool VisitDeclRefExpr(DeclRefExpr *DR);
-    // Use
-    bool VisitMemberExpr(MemberExpr *ME);
+  bool ProcessDeclRefExpr(Expr *const E, NamedDecl *const ND);
 
-    // Process indirect call.
-    bool VisitCallExpr(CallExpr *CE);
+  // Use
+  bool VisitDeclRefExpr(DeclRefExpr *DR);
+  // Use
+  bool VisitMemberExpr(MemberExpr *ME);
 
-    void InsertCanonicalDeclToSet(llvm::DenseSet<const Decl *> &set, const Decl *D) {
-        set.insert(D->getCanonicalDecl());
-    }
+  // Process indirect call.
+  bool VisitCallExpr(CallExpr *CE);
 
-    int CountCanonicalDeclInSet(llvm::DenseSet<const Decl *> &set, const Decl *D) {
-        return set.count(D->getCanonicalDecl());
-    }
+  void InsertCanonicalDeclToSet(llvm::DenseSet<const Decl *> &set,
+                                const Decl *D) {
+    set.insert(D->getCanonicalDecl());
+  }
 
-    void DumpGlobalConstantSet();
+  int CountCanonicalDeclInSet(llvm::DenseSet<const Decl *> &set,
+                              const Decl *D) {
+    return set.count(D->getCanonicalDecl());
+  }
 
-    void DumpTaintDecls();
+  void DumpGlobalConstantSet();
 
-    ASTContext *Context;
-    llvm::DenseSet<const Decl *> GlobalConstantSet;
-    // Decls have changed, the function/method use these should reanalyze.
-    // Don't record changed functions and methods, they are recorded in 
-    // FunctionsChanged. Just consider indirect factors which make
-    // functions/methods need to reanalyze. Such as GlobalConstant and 
-    // class/struct change.
-    llvm::DenseSet<const Decl *> TaintDecls; 
-    llvm::DenseSet<const Decl *> &FunctionsChanged;
-    llvm::DenseSet<const Decl *> &ICChanged;
-    llvm::DenseSet<const Decl *> FPChanged;
-    DiffLineManager &DLM;
-    ReverseCallGraph &CG;
-    DeclRefFinder DRFinder;
-    std::vector<const Decl *> inFunctionOrMethodStack;
-    const IncOptions &IncOpt;
+  void DumpTaintDecls();
+
+  ASTContext *Context;
+  llvm::DenseSet<const Decl *> GlobalConstantSet;
+  // Decls have changed, the function/method use these should reanalyze.
+  // Don't record changed functions and methods, they are recorded in
+  // FunctionsChanged. Just consider indirect factors which make
+  // functions/methods need to reanalyze. Such as GlobalConstant and
+  // class/struct change.
+  llvm::DenseSet<const Decl *> TaintDecls;
+  llvm::DenseSet<const Decl *> &FunctionsChanged;
+  llvm::DenseSet<const Decl *> &ICChanged;
+  llvm::DenseSet<const Decl *> FPChanged;
+  llvm::DenseSet<const Decl *> &AN;
+  DiffLineManager &DLM;
+  ReverseCallGraph &CG;
+  DeclRefFinder DRFinder;
+  std::vector<const Decl *> inFunctionOrMethodStack;
+  const IncOptions &IncOpt;
 };
 
 #endif // INC_INFO_COLLECT_AST_VISITOR_H

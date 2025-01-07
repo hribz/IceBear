@@ -6,6 +6,18 @@
         "branch": "main"
     },
     {
+        "project": "protocolbuffers/protobuf",
+        "build_type": "cmake",
+        "config_options": [],
+        "branch": "main"
+    },
+    {
+        "project": "tesseract-ocr/tesseract",
+        "build_type": "cmake",
+        "config_options": [],
+        "branch": "main"
+    },
+    {
         "project": "vim/vim",
         "commits": [
         ],

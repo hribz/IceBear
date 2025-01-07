@@ -1,20 +1,9 @@
 {
-    "total checkers": 2310,
-    "cppcheck": {
-        "total checkers": 334,
-        "preprocessor checkers": 2,
-        "checker list": [
-            "cppcheck-preprocessorErrorDirective",
-            "cppcheck-unknownMacro"
-        ]
-    },
-    "clangsa": {
-        "total checkers": 207,
-        "preprocessor checkers": 0,
-        "checker list": []
-    },
+    "total checkers": 2065,
+    "total enable checkers": 515,
     "clang-tidy": {
         "total checkers": 1524,
+        "total enable checkers": 251,
         "preprocessor checkers": 37,
         "checker list": [
             "bugprone-argument-comment",
@@ -54,11 +43,30 @@
             "modernize-replace-disallow-copy-and-assign-macro",
             "readability-avoid-unconditional-preprocessor-if",
             "readability-redundant-preprocessor"
+        ],
+        "enable checkers": [
+            "bugprone-macro-repeated-side-effects",
+            "clang-diagnostic-comment",
+            "clang-diagnostic-reserved-macro-identifier",
+            "misc-macro-parentheses",
+            "misc-macro-repeated-side-effects"
         ]
     },
-    "infer": {
-        "total checkers": 245,
+    "cppcheck": {
+        "total checkers": 334,
+        "total enable checkers": 195,
+        "preprocessor checkers": 2,
+        "checker list": [
+            "cppcheck-preprocessorErrorDirective",
+            "cppcheck-unknownMacro"
+        ],
+        "enable checkers": []
+    },
+    "clangsa": {
+        "total checkers": 207,
+        "total enable checkers": 69,
         "preprocessor checkers": 0,
-        "checker list": []
+        "checker list": [],
+        "enable checkers": []
     }
 }
