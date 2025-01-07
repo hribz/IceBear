@@ -301,6 +301,7 @@ class FileInCDB:
         # Cppcheck function-level incremental.
         has_cppcheck = 'cppcheck' in self.parent.env.analyze_opts.analyzers
         if has_cppcheck:
+            commands.extend(['-file-path', self.file_name])
             commands.extend(["-cppcheck-rf-file", self.get_file_path(FileKind.CPPRF)])
         commands += ['--', '-w'] + self.compile_command.arguments + ['-D__clang_analyzer__']
         ii_script = commands_to_shell_script(commands)

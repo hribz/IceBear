@@ -146,7 +146,7 @@ class ArgumentParser:
         self.parser.add_argument('--cxx', type=str, dest='cxx', default='clang++', help='Customize the C++ compiler for configure & build.')
         self.parser.add_argument('-j', '--jobs', type=int, dest='jobs', default=1, help='Number of jobs can be executed in parallel.')
         self.parser.add_argument('-d', '--udp', action='store_true', dest='udp', help='Use files in diff path to `diff`.')
-        supported_analyzers = ['clangsa', 'clang-tidy', 'cppcheck', 'infer']
+        supported_analyzers = ['clangsa', 'clang-tidy', 'cppcheck']
         self.parser.add_argument('--analyzers', nargs='+', dest='analyzers', metavar='ANALYZER', required=False, choices=supported_analyzers,
                                default=None, help="Run analysis only with the analyzers specified. Currently supported analyzers "
                                     "are: " + ', '.join(supported_analyzers) + ".")
@@ -155,7 +155,7 @@ class ArgumentParser:
         self.parser.add_argument('--csa-config', type=str, dest='csa_config', default=None, help='CSA config file.')
         self.parser.add_argument('--clang-tidy-config', type=str, dest='clang_tidy_config', default=None, help='Clang-tidy config file.')
         self.parser.add_argument('--cppcheck-config', type=str, dest='cppcheck_config', default=None, help='Cppcheck config file.')
-        self.parser.add_argument('--infer-config', type=str, dest='infer_config', default=None, help='Infer config file.')
+        # self.parser.add_argument('--infer-config', type=str, dest='infer_config', default=None, help='Infer config file.')
     
     def parse_args(self, args):
         return self.parser.parse_args(args)

@@ -361,10 +361,16 @@ class Configuration:
                     else:
                         self.file_list_index[compile_command.file] = len(self.file_list)
                         self.file_list.append(file_in_cdb)
-        for file_in_cdb in self.file_list:
-            # Update global_file_dict after file_list has been initialzed,
-            # make sure there is no duplicate file name.
-            self.global_file_dict[file_in_cdb.file_name] = file_in_cdb
+        with open(self.compile_commands_used_by_analyzers, 'w') as f:
+            cdb = []
+            for file_in_cdb in self.file_list:
+                # Update global_file_dict after file_list has been initialzed,
+                # make sure there is no duplicate file name.
+                self.global_file_dict[file_in_cdb.file_name] = file_in_cdb
+                # Remove duplicate file in compile database.
+                cdb.append(file_in_cdb.compile_command.restore_to_json())
+            json.dump(cdb, f, indent=4)
+
         return True
 
     def get_file(self, file_path: str, report=True) -> FileInCDB:

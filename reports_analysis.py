@@ -71,24 +71,25 @@ class RepoInfo:
         self.workspace = f"{self.abs_repo_path}_workspace/{workspace}"
 
 class Report:
-    def __init__(self, version, report_name, specific_info):
+    def __init__(self, analyzer, version, report_name, specific_info):
+        self.analyzer = analyzer
         self.version = version
         self.report_name = report_name
-        self.speicific_info = specific_info
+        self.specific_info = specific_info
 
     def __eq__(self, other):
         if isinstance(other, Report):
-            return self.report_name == other.report_name and dict_hash(self.speicific_info) == dict_hash(other.speicific_info)
+            return self.report_name == other.report_name and dict_hash(self.specific_info) == dict_hash(other.specific_info)
         return False
 
     def __hash__(self):
-        return hash((self.report_name, self.speicific_info.__str__()))
+        return hash((self.report_name, self.specific_info.__str__()))
     
     def __to_json__(self):
         return {
             "version": self.version,
             "report name": self.report_name,
-            "specific info": self.speicific_info
+            "specific info": self.specific_info
         }
 
 
@@ -159,6 +160,7 @@ def main(args):
             }
             for k in analyzers:
                 statistics[k] = []
+            baseline_reports_number = 0
 
             for analyzer in analyzers_floder:
                 if analyzer.endswith('csa'):
@@ -182,6 +184,7 @@ def main(args):
                     "total": 0
                 }
 
+                analyzer_baseline_number = None
                 for version in versions:
                     output_path = os.path.join(reports_path, version)
                     reports = []
@@ -243,6 +246,13 @@ def main(args):
                     statistics['summary'][analyzer_name][version] = len(reports)
                     statistics['summary']['total'] += len(reports)
 
+                    if analyzer_baseline_number is None:
+                        analyzer_baseline_number = len(reports)
+                
+                baseline_reports_number += analyzer_baseline_number
+
+            logger.info(f"Total {statistics['summary']['total'] - baseline_reports_number} reports(without baseline) in {workspace}")
+
             return statistics
         
         statistics1 = get_statistics_from_workspace(repo_info.workspace)
@@ -275,7 +285,7 @@ def main(args):
                                 # clang-tidy report
                                 report_name = report["file"] + '-' + report["hash"]
                             specific_info = report
-                        reports.add(Report(version, report_name, specific_info))
+                        reports.add(Report(analyzer, version, report_name, specific_info))
                     versions_and_reports[version] = reports
             return versions_and_reports, first_version
         
@@ -307,6 +317,22 @@ def main(args):
         reports2 = all_reports_from_json(versions_and_reports2)
         statistics1['summary']['unique'] = len(reports1)
         statistics2['summary']['unique'] = len(reports2)
+
+        def clang_tidy_diag_distribution(reports):
+            kinds = {}
+            for report in reports:
+                if report.analyzer == 'clang-tidy':
+                    kind = report.specific_info['kind']
+                    if kind in kinds.keys():
+                        kinds[kind] += 1
+                    else:
+                        kinds[kind] = 1
+            return sorted(kinds.items(), key=lambda item: item[1], reverse=True)
+        
+        kinds1 = clang_tidy_diag_distribution(reports1)
+        statistics1['summary']['clang-tidy distribution'] = { kind[0]: kind[1] for kind in kinds1}
+        kinds2 = clang_tidy_diag_distribution(reports2)
+        statistics2['summary']['clang-tidy distribution'] = { kind[0]: kind[1] for kind in kinds2}
 
         dir1 = repo_info.workspace
         dir2 = repo_info2.workspace

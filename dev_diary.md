@@ -454,3 +454,5 @@ clang-tidy '--line-filter=[{"name":"class_field.cpp","lines":[[4,5]]}]' '-config
 
 # 一些报告
 - redis/redis_commits/redis_2024-12-23_64a40b.diff：定义了某些宏名称，clang-tidy在这些宏名称中出现了报告。
+- 由于报告过多，关闭了`clang-diagnostic-reserved-identifier`, `clang-diagnostic-reserved-macro-identifier`, `clang-diagnostic-unused-parameter`
+- 考虑关闭`clang-diagnostic-missing-field-initializers`，`FFmpeg`此类报告过多

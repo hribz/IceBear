@@ -1,5 +1,5 @@
 # IncAnalyzer
-`IncAnalyzer` is a C/C++ static analysis tools incremental scheduler. Support static analysis tools as follow: [CSA(Clang Static Analyzer)](https://clang-analyzer.llvm.org/), [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/), [CppCheck](https://cppcheck.sourceforge.io/), [Infer](https://fbinfer.com/).
+`IncAnalyzer` is a C/C++ static analysis tools incremental scheduler. Support static analysis tools as follow: [CSA(Clang Static Analyzer)](https://clang-analyzer.llvm.org/), [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/), [CppCheck](https://cppcheck.sourceforge.io/).
 `IncAnalyzer` can incrementally schedule these tools, with all tools supporting file-level incremental scheduling, and CSA supporting function-level incremental scheduling.
 
 ## Installation
@@ -8,7 +8,7 @@
 
 ```bash
 # Dependencies
-sudo apt-get install clang cmake
+sudo apt-get install clang cmake bear
 
 # Build function-level incremental information collector.
 mkdir build && cd build

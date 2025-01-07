@@ -62,7 +62,7 @@ class Analyzer(ABC):
             if self.analyzer_config.verbose:
                 logger.debug(f"[{self.get_analyzer_name()} Analyze Output]\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         else:
-            logger.error(f"[{self.get_analyzer_name()} Analyze {process.stat}]\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+            logger.error(f"[{self.get_analyzer_name()} Analyze {str(process.stat)}]\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         
         # Record time cost.
         if isinstance(self, CSA):
@@ -179,7 +179,7 @@ class CppCheck(Analyzer):
         analyzer_cmd.append(f"--plist-output={config.cppcheck_output_path}")
         result_extname = ".json" if self.analyzer_config.Sarif else ".xml"
         analyzer_cmd.append(f"--output-file={config.cppcheck_output_path}/result{result_extname}")
-        if self.analyzer_config.inc_mode >= IncrementalMode.FuncitonLevel.value:
+        if self.analyzer_config.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             all_cppcheckrf = str(config.preprocess_path / "cppcheck.cpprf")
             if config.incrementable:
                 self.merge_all_cppcheckrf(all_cppcheckrf)
