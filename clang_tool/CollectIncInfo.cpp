@@ -374,9 +374,9 @@ public:
         }
 
         AN.insert(IncVisitor.TaintDecls.begin(), IncVisitor.TaintDecls.end());
-        // All Decls in FunctionsNeedReanalyze are canonical decl.
+        // All Decls in FunctionsChanged are canonical decl.
         // Record correspond definition (if exist) in AN.
-        for (auto *D: FunctionsNeedReanalyze) {
+        for (auto *D: FunctionsChanged) {
             if (auto *FD = llvm::dyn_cast<FunctionDecl>(D)) {
                 auto *Definition = FD->getDefinition();
                 if (Definition) {

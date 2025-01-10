@@ -1,0 +1,1133 @@
+[
+    {
+        "20250108_101806_func": {
+            "total reports": 17499,
+            "unique reports": 10925,
+            "new reports": 26,
+            "diff reports": 11
+        },
+        "20250110_112545_func": {
+            "total reports": 18436,
+            "unique reports": 13251,
+            "new reports": 26,
+            "diff reports": 11
+        }
+    },
+    {
+        "project": "protocolbuffers/protobuf",
+        "20250108_101806_func": {
+            "total": 1107,
+            "unique": 737,
+            "new": 0,
+            "clang-tidy": {
+                "total": 934,
+                "2024-12-27_7cf5cc": 605,
+                "2024-12-28_dbacaf": 25,
+                "2024-12-31_a2a284": 226,
+                "2025-01-04_fb51ac": 12,
+                "2025-01-05_ec58a3": 66,
+                "uique": 605
+            },
+            "csa": {
+                "total": 146,
+                "2024-12-27_7cf5cc": 118,
+                "2024-12-28_dbacaf": 7,
+                "2024-12-31_a2a284": 18,
+                "2025-01-05_ec58a3": 3,
+                "uique": 118
+            },
+            "cppcheck": {
+                "total": 27,
+                "2024-12-27_7cf5cc": 17,
+                "2024-12-28_dbacaf": 10,
+                "2024-12-31_a2a284": 0,
+                "2025-01-04_fb51ac": 0,
+                "2025-01-05_ec58a3": 0,
+                "uique": 14
+            },
+            "clang-tidy distribution": {
+                "performance-noexcept-swap": 81,
+                "performance-noexcept-move-constructor": 65,
+                "clang-diagnostic-sign-compare": 53,
+                "bugprone-sizeof-expression": 52,
+                "bugprone-switch-missing-default-case": 49,
+                "readability-container-data-pointer": 48,
+                "cppcoreguidelines-virtual-class-destructor": 32,
+                "cert-err33-c": 29,
+                "clang-diagnostic-double-promotion": 22,
+                "bugprone-signed-char-misuse": 22,
+                "clang-diagnostic-missing-field-initializers": 14,
+                "performance-no-automatic-move": 13,
+                "clang-diagnostic-float-conversion": 11,
+                "performance-move-const-arg": 10,
+                "bugprone-use-after-move": 10,
+                "misc-unconventional-assign-operator": 9,
+                "bugprone-suspicious-stringview-data-usage": 9,
+                "misc-redundant-expression": 8,
+                "bugprone-string-constructor": 7,
+                "bugprone-inc-dec-in-conditions": 7,
+                "bugprone-not-null-terminated-result": 7,
+                "readability-suspicious-call-argument": 6,
+                "bugprone-move-forwarding-reference": 5,
+                "bugprone-sizeof-container": 5,
+                "bugprone-suspicious-memory-comparison": 4,
+                "bugprone-forwarding-reference-overload": 3,
+                "clang-diagnostic-format-nonliteral": 3,
+                "bugprone-forward-declaration-namespace": 3,
+                "bugprone-misplaced-widening-cast": 3,
+                "misc-throw-by-value-catch-by-reference": 2,
+                "bugprone-integer-division": 2,
+                "bugprone-suspicious-missing-comma": 1,
+                "misc-new-delete-overloads": 1,
+                "bugprone-string-literal-with-embedded-nul": 1,
+                "bugprone-suspicious-realloc-usage": 1,
+                "clang-diagnostic-conditional-uninitialized": 1,
+                "performance-trivially-destructible": 1,
+                "bugprone-unused-return-value": 1,
+                "bugprone-incorrect-roundings": 1,
+                "cert-dcl58-cpp": 1,
+                "bugprone-undefined-memory-manipulation": 1,
+                "bugprone-dangling-handle": 1
+            },
+            "diff": 0
+        },
+        "20250110_112545_func": {
+            "total": 1669,
+            "unique": 1011,
+            "new": 0,
+            "clang-tidy": {
+                "total": 1669,
+                "2024-12-27_7cf5cc": 1011,
+                "2024-12-28_dbacaf": 0,
+                "2024-12-31_a2a284": 518,
+                "2025-01-04_fb51ac": 12,
+                "2025-01-05_ec58a3": 128,
+                "uique": 1011
+            },
+            "clang-tidy distribution": {
+                "clang-diagnostic-reserved-macro-identifier": 286,
+                "clang-diagnostic-unused-parameter": 120,
+                "performance-noexcept-swap": 81,
+                "performance-noexcept-move-constructor": 65,
+                "clang-diagnostic-sign-compare": 53,
+                "bugprone-sizeof-expression": 52,
+                "bugprone-switch-missing-default-case": 49,
+                "readability-container-data-pointer": 48,
+                "cppcoreguidelines-virtual-class-destructor": 32,
+                "cert-err33-c": 29,
+                "clang-diagnostic-double-promotion": 22,
+                "bugprone-signed-char-misuse": 22,
+                "clang-diagnostic-missing-field-initializers": 14,
+                "performance-no-automatic-move": 13,
+                "clang-diagnostic-float-conversion": 11,
+                "performance-move-const-arg": 10,
+                "bugprone-use-after-move": 10,
+                "misc-unconventional-assign-operator": 9,
+                "bugprone-suspicious-stringview-data-usage": 9,
+                "misc-redundant-expression": 8,
+                "bugprone-string-constructor": 7,
+                "bugprone-inc-dec-in-conditions": 7,
+                "bugprone-not-null-terminated-result": 7,
+                "readability-suspicious-call-argument": 6,
+                "bugprone-move-forwarding-reference": 5,
+                "bugprone-sizeof-container": 5,
+                "bugprone-suspicious-memory-comparison": 4,
+                "bugprone-forwarding-reference-overload": 3,
+                "clang-diagnostic-format-nonliteral": 3,
+                "bugprone-forward-declaration-namespace": 3,
+                "bugprone-misplaced-widening-cast": 3,
+                "misc-throw-by-value-catch-by-reference": 2,
+                "bugprone-integer-division": 2,
+                "bugprone-suspicious-missing-comma": 1,
+                "misc-new-delete-overloads": 1,
+                "bugprone-string-literal-with-embedded-nul": 1,
+                "bugprone-suspicious-realloc-usage": 1,
+                "clang-diagnostic-conditional-uninitialized": 1,
+                "performance-trivially-destructible": 1,
+                "bugprone-unused-return-value": 1,
+                "bugprone-incorrect-roundings": 1,
+                "cert-dcl58-cpp": 1,
+                "bugprone-undefined-memory-manipulation": 1,
+                "bugprone-dangling-handle": 1
+            },
+            "diff": 0
+        }
+    },
+    {
+        "project": "tesseract-ocr/tesseract",
+        "20250108_101806_func": {
+            "total": 2582,
+            "unique": 855,
+            "new": 9,
+            "clang-tidy": {
+                "total": 1282,
+                "2024-11-24_6d7ec8": 500,
+                "2024-12-03_0a9df9": 189,
+                "2024-12-20_d95e9f": 180,
+                "2024-12-31_014b9d": 178,
+                "2025-01-06_f657ec": 235,
+                "uique": 508
+            },
+            "csa": {
+                "total": 287,
+                "2024-11-24_6d7ec8": 100,
+                "2024-12-03_0a9df9": 57,
+                "2024-12-20_d95e9f": 64,
+                "2024-12-31_014b9d": 65,
+                "2025-01-06_f657ec": 1,
+                "uique": 101
+            },
+            "cppcheck": {
+                "total": 1013,
+                "2024-11-24_6d7ec8": 246,
+                "2024-12-03_0a9df9": 232,
+                "2024-12-20_d95e9f": 222,
+                "2024-12-31_014b9d": 222,
+                "2025-01-06_f657ec": 91,
+                "uique": 246
+            },
+            "clang-tidy distribution": {
+                "clang-diagnostic-double-promotion": 163,
+                "bugprone-forward-declaration-namespace": 62,
+                "cert-err33-c": 61,
+                "clang-diagnostic-float-conversion": 53,
+                "readability-container-data-pointer": 44,
+                "bugprone-incorrect-roundings": 25,
+                "misc-unconventional-assign-operator": 23,
+                "bugprone-signed-char-misuse": 12,
+                "bugprone-inc-dec-in-conditions": 9,
+                "readability-suspicious-call-argument": 7,
+                "bugprone-switch-missing-default-case": 6,
+                "clang-diagnostic-sign-compare": 6,
+                "bugprone-integer-division": 6,
+                "bugprone-undefined-memory-manipulation": 4,
+                "bugprone-too-small-loop-variable": 4,
+                "cert-flp30-c": 4,
+                "clang-diagnostic-conditional-uninitialized": 3,
+                "clang-diagnostic-format-nonliteral": 3,
+                "misc-header-include-cycle": 3,
+                "readability-container-contains": 2,
+                "clang-diagnostic-format-security": 2,
+                "bugprone-misplaced-widening-cast": 1,
+                "bugprone-sizeof-expression": 1,
+                "bugprone-unused-return-value": 1,
+                "misc-confusable-identifiers": 1,
+                "misc-misleading-bidirectional": 1,
+                "bugprone-not-null-terminated-result": 1
+            },
+            "diff": 1,
+            "diff reports": [
+                {
+                    "version": "2024-12-31_014b9d",
+                    "report name": "report-13f130.html",
+                    "specific info": {}
+                }
+            ]
+        },
+        "20250110_112545_func": {
+            "total": 956,
+            "unique": 636,
+            "new": 8,
+            "clang-tidy": {
+                "total": 956,
+                "2024-11-24_6d7ec8": 628,
+                "2024-12-03_0a9df9": 18,
+                "2024-12-20_d95e9f": 28,
+                "2024-12-31_014b9d": 26,
+                "2025-01-06_f657ec": 256,
+                "uique": 636
+            },
+            "clang-tidy distribution": {
+                "clang-diagnostic-double-promotion": 163,
+                "clang-diagnostic-unused-parameter": 108,
+                "bugprone-forward-declaration-namespace": 62,
+                "cert-err33-c": 61,
+                "clang-diagnostic-float-conversion": 53,
+                "readability-container-data-pointer": 44,
+                "bugprone-incorrect-roundings": 25,
+                "misc-unconventional-assign-operator": 23,
+                "clang-diagnostic-reserved-macro-identifier": 20,
+                "bugprone-signed-char-misuse": 12,
+                "bugprone-inc-dec-in-conditions": 9,
+                "readability-suspicious-call-argument": 7,
+                "bugprone-switch-missing-default-case": 6,
+                "clang-diagnostic-sign-compare": 6,
+                "bugprone-integer-division": 6,
+                "bugprone-undefined-memory-manipulation": 4,
+                "bugprone-too-small-loop-variable": 4,
+                "cert-flp30-c": 4,
+                "clang-diagnostic-conditional-uninitialized": 3,
+                "clang-diagnostic-format-nonliteral": 3,
+                "misc-header-include-cycle": 3,
+                "readability-container-contains": 2,
+                "clang-diagnostic-format-security": 2,
+                "bugprone-misplaced-widening-cast": 1,
+                "bugprone-sizeof-expression": 1,
+                "bugprone-unused-return-value": 1,
+                "misc-misleading-bidirectional": 1,
+                "bugprone-not-null-terminated-result": 1,
+                "misc-confusable-identifiers": 1
+            },
+            "diff": 0
+        }
+    },
+    {
+        "project": "vim/vim",
+        "20250108_101806_func": {
+            "total": 710,
+            "unique": 507,
+            "new": 0,
+            "clang-tidy": {
+                "total": 345,
+                "2024-12-19_b2a8df": 330,
+                "2024-12-20_b183f5": 7,
+                "2024-12-20_af0fed": 3,
+                "2024-12-21_70881b": 1,
+                "2024-12-22_89a107": 4,
+                "uique": 330
+            },
+            "csa": {
+                "total": 126,
+                "2024-12-19_b2a8df": 120,
+                "2024-12-20_b183f5": 5,
+                "2024-12-20_af0fed": 1,
+                "uique": 120
+            },
+            "cppcheck": {
+                "total": 239,
+                "2024-12-19_b2a8df": 132,
+                "2024-12-20_b183f5": 0,
+                "2024-12-20_af0fed": 0,
+                "2024-12-21_70881b": 0,
+                "2024-12-22_89a107": 107,
+                "uique": 57
+            },
+            "clang-tidy distribution": {
+                "clang-diagnostic-format-nonliteral": 93,
+                "clang-diagnostic-conditional-uninitialized": 66,
+                "bugprone-switch-missing-default-case": 51,
+                "cert-err33-c": 36,
+                "bugprone-signed-char-misuse": 28,
+                "bugprone-inc-dec-in-conditions": 25,
+                "readability-suspicious-call-argument": 9,
+                "bugprone-misplaced-widening-cast": 8,
+                "clang-diagnostic-double-promotion": 3,
+                "clang-diagnostic-float-conversion": 3,
+                "bugprone-not-null-terminated-result": 2,
+                "misc-redundant-expression": 2,
+                "bugprone-suspicious-realloc-usage": 2,
+                "bugprone-suspicious-semicolon": 1,
+                "bugprone-suspicious-memory-comparison": 1
+            },
+            "diff": 0
+        },
+        "20250110_112545_func": {
+            "total": 356,
+            "unique": 348,
+            "new": 0,
+            "clang-tidy": {
+                "total": 356,
+                "2024-12-19_b2a8df": 348,
+                "2024-12-20_b183f5": 3,
+                "2024-12-20_af0fed": 1,
+                "2024-12-21_70881b": 1,
+                "2024-12-22_89a107": 3,
+                "uique": 348
+            },
+            "clang-tidy distribution": {
+                "clang-diagnostic-format-nonliteral": 93,
+                "clang-diagnostic-conditional-uninitialized": 66,
+                "bugprone-switch-missing-default-case": 51,
+                "cert-err33-c": 36,
+                "bugprone-signed-char-misuse": 28,
+                "bugprone-inc-dec-in-conditions": 25,
+                "clang-diagnostic-reserved-macro-identifier": 18,
+                "readability-suspicious-call-argument": 9,
+                "bugprone-misplaced-widening-cast": 8,
+                "clang-diagnostic-double-promotion": 3,
+                "clang-diagnostic-float-conversion": 3,
+                "bugprone-not-null-terminated-result": 2,
+                "misc-redundant-expression": 2,
+                "bugprone-suspicious-realloc-usage": 2,
+                "bugprone-suspicious-semicolon": 1,
+                "bugprone-suspicious-memory-comparison": 1
+            },
+            "diff": 0
+        }
+    },
+    {
+        "project": "redis/redis",
+        "20250108_101806_func": {
+            "total": 622,
+            "unique": 284,
+            "new": 9,
+            "clang-tidy": {
+                "total": 462,
+                "2024-11-12_cf8380": 188,
+                "2024-11-21_9ebf80": 19,
+                "2024-12-03_2af69a": 130,
+                "2024-12-13_f8942f": 92,
+                "2024-12-23_64a40b": 33,
+                "uique": 191
+            },
+            "csa": {
+                "total": 153,
+                "2024-11-12_cf8380": 82,
+                "2024-11-21_9ebf80": 11,
+                "2024-12-03_2af69a": 8,
+                "2024-12-13_f8942f": 41,
+                "2024-12-23_64a40b": 11,
+                "uique": 88
+            },
+            "cppcheck": {
+                "total": 7,
+                "2024-11-12_cf8380": 5,
+                "2024-11-21_9ebf80": 0,
+                "2024-12-03_2af69a": 0,
+                "2024-12-13_f8942f": 2,
+                "2024-12-23_64a40b": 0,
+                "uique": 5
+            },
+            "clang-tidy distribution": {
+                "cert-err33-c": 34,
+                "clang-diagnostic-conditional-uninitialized": 29,
+                "clang-diagnostic-missing-field-initializers": 22,
+                "misc-misplaced-const": 21,
+                "clang-diagnostic-float-conversion": 20,
+                "bugprone-switch-missing-default-case": 18,
+                "clang-diagnostic-double-promotion": 16,
+                "clang-diagnostic-format-nonliteral": 10,
+                "bugprone-signed-char-misuse": 7,
+                "bugprone-sizeof-expression": 5,
+                "bugprone-integer-division": 2,
+                "readability-suspicious-call-argument": 1,
+                "bugprone-inc-dec-in-conditions": 1,
+                "bugprone-assert-side-effect": 1,
+                "misc-header-include-cycle": 1,
+                "concurrency-thread-canceltype-asynchronous": 1,
+                "bugprone-signal-handler": 1,
+                "bugprone-suspicious-memory-comparison": 1
+            },
+            "diff": 6,
+            "diff reports": [
+                {
+                    "version": "2024-12-23_64a40b",
+                    "report name": "report-b12fd9.html",
+                    "specific info": {}
+                },
+                {
+                    "version": "2024-11-21_9ebf80",
+                    "report name": "report-133769.html",
+                    "specific info": {}
+                },
+                {
+                    "version": "2024-11-21_9ebf80",
+                    "report name": "report-3bc498.html",
+                    "specific info": {}
+                },
+                {
+                    "version": "2024-11-21_9ebf80",
+                    "report name": "report-540920.html",
+                    "specific info": {}
+                },
+                {
+                    "version": "2024-11-21_9ebf80",
+                    "report name": "report-2e984d.html",
+                    "specific info": {}
+                },
+                {
+                    "version": "2024-12-23_64a40b",
+                    "report name": "report-4bc9f1.html",
+                    "specific info": {}
+                }
+            ]
+        },
+        "20250110_112545_func": {
+            "total": 653,
+            "unique": 241,
+            "new": 3,
+            "clang-tidy": {
+                "total": 653,
+                "2024-11-12_cf8380": 238,
+                "2024-11-21_9ebf80": 12,
+                "2024-12-03_2af69a": 174,
+                "2024-12-13_f8942f": 182,
+                "2024-12-23_64a40b": 47,
+                "uique": 241
+            },
+            "clang-tidy distribution": {
+                "clang-diagnostic-reserved-macro-identifier": 50,
+                "cert-err33-c": 34,
+                "clang-diagnostic-conditional-uninitialized": 29,
+                "clang-diagnostic-missing-field-initializers": 22,
+                "misc-misplaced-const": 21,
+                "clang-diagnostic-float-conversion": 20,
+                "bugprone-switch-missing-default-case": 18,
+                "clang-diagnostic-double-promotion": 16,
+                "clang-diagnostic-format-nonliteral": 10,
+                "bugprone-signed-char-misuse": 7,
+                "bugprone-sizeof-expression": 5,
+                "bugprone-integer-division": 2,
+                "bugprone-assert-side-effect": 1,
+                "readability-suspicious-call-argument": 1,
+                "misc-header-include-cycle": 1,
+                "concurrency-thread-canceltype-asynchronous": 1,
+                "bugprone-signal-handler": 1,
+                "bugprone-suspicious-memory-comparison": 1,
+                "bugprone-inc-dec-in-conditions": 1
+            },
+            "diff": 0
+        }
+    },
+    {
+        "project": "openssl/openssl",
+        "20250108_101806_func": {
+            "total": 1088,
+            "unique": 1002,
+            "new": 3,
+            "clang-tidy": {
+                "total": 569,
+                "2024-12-13_ffa1cf": 554,
+                "2024-12-17_a05515": 11,
+                "2024-12-19_982a9b": 0,
+                "2024-12-21_b3bb21": 0,
+                "2024-12-23_b85e6f": 4,
+                "uique": 556
+            },
+            "csa": {
+                "total": 318,
+                "2024-12-13_ffa1cf": 316,
+                "2024-12-17_a05515": 1,
+                "2024-12-19_982a9b": 1,
+                "uique": 316
+            },
+            "cppcheck": {
+                "total": 201,
+                "2024-12-13_ffa1cf": 152,
+                "2024-12-17_a05515": 44,
+                "2024-12-19_982a9b": 0,
+                "2024-12-21_b3bb21": 0,
+                "2024-12-23_b85e6f": 5,
+                "uique": 130
+            },
+            "clang-tidy distribution": {
+                "clang-diagnostic-missing-field-initializers": 271,
+                "bugprone-switch-missing-default-case": 130,
+                "cert-err33-c": 35,
+                "misc-header-include-cycle": 20,
+                "readability-suspicious-call-argument": 17,
+                "bugprone-inc-dec-in-conditions": 15,
+                "clang-diagnostic-format-nonliteral": 15,
+                "bugprone-signed-char-misuse": 14,
+                "bugprone-sizeof-expression": 12,
+                "misc-redundant-expression": 7,
+                "misc-confusable-identifiers": 7,
+                "bugprone-not-null-terminated-result": 3,
+                "bugprone-suspicious-memory-comparison": 2,
+                "misc-non-copyable-objects": 2,
+                "clang-diagnostic-double-promotion": 1,
+                "bugprone-too-small-loop-variable": 1,
+                "bugprone-string-literal-with-embedded-nul": 1,
+                "bugprone-suspicious-missing-comma": 1,
+                "bugprone-signal-handler": 1,
+                "bugprone-misplaced-widening-cast": 1
+            },
+            "diff": 1,
+            "diff reports": [
+                {
+                    "version": "2024-12-17_a05515",
+                    "report name": "Signed integer overflow for expression '(~((int)1<<(sizeof(int)*8-1)))-b'.",
+                    "specific info": {
+                        "level": "warning",
+                        "message": {
+                            "text": "Signed integer overflow for expression '(~((int)1<<(sizeof(int)*8-1)))-b'."
+                        },
+                        "ruleId": "integerOverflow",
+                        "locations": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/crypto/evp/evp_enc.c"
+                    }
+                }
+            ]
+        },
+        "20250110_112545_func": {
+            "total": 2054,
+            "unique": 2028,
+            "new": 13,
+            "clang-tidy": {
+                "total": 2054,
+                "2024-12-13_ffa1cf": 2015,
+                "2024-12-17_a05515": 24,
+                "2024-12-19_982a9b": 0,
+                "2024-12-21_b3bb21": 2,
+                "2024-12-23_b85e6f": 13,
+                "uique": 2028
+            },
+            "clang-tidy distribution": {
+                "clang-diagnostic-unused-parameter": 1459,
+                "clang-diagnostic-missing-field-initializers": 271,
+                "bugprone-switch-missing-default-case": 130,
+                "cert-err33-c": 35,
+                "misc-header-include-cycle": 20,
+                "readability-suspicious-call-argument": 17,
+                "clang-diagnostic-format-nonliteral": 15,
+                "bugprone-inc-dec-in-conditions": 15,
+                "bugprone-signed-char-misuse": 14,
+                "clang-diagnostic-reserved-macro-identifier": 13,
+                "bugprone-sizeof-expression": 12,
+                "misc-confusable-identifiers": 7,
+                "misc-redundant-expression": 7,
+                "bugprone-not-null-terminated-result": 3,
+                "bugprone-suspicious-memory-comparison": 2,
+                "misc-non-copyable-objects": 2,
+                "bugprone-suspicious-missing-comma": 1,
+                "clang-diagnostic-double-promotion": 1,
+                "bugprone-too-small-loop-variable": 1,
+                "bugprone-string-literal-with-embedded-nul": 1,
+                "bugprone-signal-handler": 1,
+                "bugprone-misplaced-widening-cast": 1
+            },
+            "diff": 11,
+            "diff reports": [
+                {
+                    "version": "2024-12-21_b3bb21",
+                    "report name": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/p_test.c-05d02a8e8810d39ccc0c582882d297c34fed064a53edae416e38d25a02742dd1",
+                    "specific info": {
+                        "kind": "clang-diagnostic-unused-parameter",
+                        "file": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/p_test.c",
+                        "diagnostic": "unused parameter 'operation_id'",
+                        "hash": "05d02a8e8810d39ccc0c582882d297c34fed064a53edae416e38d25a02742dd1"
+                    }
+                },
+                {
+                    "version": "2024-12-17_a05515",
+                    "report name": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/fake_pipelineprov.c-5d4d711f25b9e3143e7a299926471af1848537bb1e4416d3bf557f937695f566",
+                    "specific info": {
+                        "kind": "clang-diagnostic-unused-parameter",
+                        "file": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/fake_pipelineprov.c",
+                        "diagnostic": "unused parameter 'keylen'",
+                        "hash": "5d4d711f25b9e3143e7a299926471af1848537bb1e4416d3bf557f937695f566"
+                    }
+                },
+                {
+                    "version": "2024-12-17_a05515",
+                    "report name": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/fake_pipelineprov.c-4871a2f8daa8d60ebfdd46327ee8a702ed7e8ea3bacbff811caa3cd6ba4fd60b",
+                    "specific info": {
+                        "kind": "clang-diagnostic-unused-parameter",
+                        "file": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/fake_pipelineprov.c",
+                        "diagnostic": "unused parameter 'params'",
+                        "hash": "4871a2f8daa8d60ebfdd46327ee8a702ed7e8ea3bacbff811caa3cd6ba4fd60b"
+                    }
+                },
+                {
+                    "version": "2024-12-17_a05515",
+                    "report name": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/fake_pipelineprov.c-9c8a2c8093b5fd51854edee6fa302cc6a158920926c1e5c1ce6b830e5e3a25ad",
+                    "specific info": {
+                        "kind": "clang-diagnostic-unused-parameter",
+                        "file": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/fake_pipelineprov.c",
+                        "diagnostic": "unused parameter 'handle'",
+                        "hash": "9c8a2c8093b5fd51854edee6fa302cc6a158920926c1e5c1ce6b830e5e3a25ad"
+                    }
+                },
+                {
+                    "version": "2024-12-23_b85e6f",
+                    "report name": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/crypto/x509/v3_attrmap.c-e61a6f0c2a550626efb4682b7349dc8b2325cedc34a469e766fa664d3187a203",
+                    "specific info": {
+                        "kind": "clang-diagnostic-unused-parameter",
+                        "file": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/crypto/x509/v3_attrmap.c",
+                        "diagnostic": "unused parameter 'indent'",
+                        "hash": "e61a6f0c2a550626efb4682b7349dc8b2325cedc34a469e766fa664d3187a203"
+                    }
+                },
+                {
+                    "version": "2024-12-17_a05515",
+                    "report name": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/fake_pipelineprov.c-4ceb19dff18848f1323317b99abc8a3d72d04270f681aebac8bc2a21ddc8dc40",
+                    "specific info": {
+                        "kind": "clang-diagnostic-unused-parameter",
+                        "file": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/fake_pipelineprov.c",
+                        "diagnostic": "unused parameter 'prov'",
+                        "hash": "4ceb19dff18848f1323317b99abc8a3d72d04270f681aebac8bc2a21ddc8dc40"
+                    }
+                },
+                {
+                    "version": "2024-12-17_a05515",
+                    "report name": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/fake_pipelineprov.c-d0738983c64cd00083b2191468dad5648907d3716abe819be0f54d729f2c52bd",
+                    "specific info": {
+                        "kind": "clang-diagnostic-unused-parameter",
+                        "file": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/fake_pipelineprov.c",
+                        "diagnostic": "unused parameter 'outsize'",
+                        "hash": "d0738983c64cd00083b2191468dad5648907d3716abe819be0f54d729f2c52bd"
+                    }
+                },
+                {
+                    "version": "2024-12-17_a05515",
+                    "report name": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/fake_pipelineprov.c-243f1bcbc320508145d0fbde73a69d106bc981119f9e6b24e4409d1fbc098cf1",
+                    "specific info": {
+                        "kind": "clang-diagnostic-unused-parameter",
+                        "file": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/fake_pipelineprov.c",
+                        "diagnostic": "unused parameter 'ivlen'",
+                        "hash": "243f1bcbc320508145d0fbde73a69d106bc981119f9e6b24e4409d1fbc098cf1"
+                    }
+                },
+                {
+                    "version": "2024-12-23_b85e6f",
+                    "report name": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/crypto/x509/v3_attrmap.c-db9f916f2f88f6786eaad09656ccb44c08c52185348220ec05e606cce332b772",
+                    "specific info": {
+                        "kind": "clang-diagnostic-unused-parameter",
+                        "file": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/crypto/x509/v3_attrmap.c",
+                        "diagnostic": "unused parameter 'method'",
+                        "hash": "db9f916f2f88f6786eaad09656ccb44c08c52185348220ec05e606cce332b772"
+                    }
+                },
+                {
+                    "version": "2024-12-17_a05515",
+                    "report name": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/fake_pipelineprov.c-06b6c054ddd9f324d38b558d33cf0c36ec3a15b5fdd434631b5d3dc93692e360",
+                    "specific info": {
+                        "kind": "clang-diagnostic-unused-parameter",
+                        "file": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/fake_pipelineprov.c",
+                        "diagnostic": "unused parameter 'in'",
+                        "hash": "06b6c054ddd9f324d38b558d33cf0c36ec3a15b5fdd434631b5d3dc93692e360"
+                    }
+                },
+                {
+                    "version": "2024-12-21_b3bb21",
+                    "report name": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/p_test.c-30b3ee4db3a44ced4650ba2ecc64644dae834db8b88efab1d4cd5408f1b51102",
+                    "specific info": {
+                        "kind": "clang-diagnostic-unused-parameter",
+                        "file": "/home/xiaoyu/IncAnalyzer/repos/openssl/openssl/test/p_test.c",
+                        "diagnostic": "unused parameter 'prov'",
+                        "hash": "30b3ee4db3a44ced4650ba2ecc64644dae834db8b88efab1d4cd5408f1b51102"
+                    }
+                }
+            ]
+        }
+    },
+    {
+        "project": "FFmpeg/FFmpeg",
+        "20250108_101806_func": {
+            "total": 9241,
+            "unique": 5757,
+            "new": 2,
+            "clang-tidy": {
+                "total": 7411,
+                "2024-12-23_3428a8": 4709,
+                "2024-12-23_eecdc2": 2679,
+                "2024-12-24_34c06f": 5,
+                "2024-12-24_fe1aeb": 6,
+                "2024-12-24_954d55": 12,
+                "uique": 4709
+            },
+            "csa": {
+                "total": 720,
+                "2024-12-23_3428a8": 711,
+                "2024-12-23_eecdc2": 4,
+                "2024-12-24_fe1aeb": 2,
+                "2024-12-24_954d55": 3,
+                "uique": 711
+            },
+            "cppcheck": {
+                "total": 1110,
+                "2024-12-23_3428a8": 700,
+                "2024-12-23_eecdc2": 365,
+                "2024-12-24_34c06f": 13,
+                "2024-12-24_fe1aeb": 16,
+                "2024-12-24_954d55": 16,
+                "uique": 337
+            },
+            "clang-tidy distribution": {
+                "clang-diagnostic-sign-compare": 1330,
+                "clang-diagnostic-missing-field-initializers": 1066,
+                "clang-diagnostic-float-conversion": 429,
+                "clang-diagnostic-conditional-uninitialized": 338,
+                "clang-diagnostic-double-promotion": 327,
+                "bugprone-switch-missing-default-case": 298,
+                "clang-diagnostic-switch": 182,
+                "cert-err33-c": 152,
+                "bugprone-signed-char-misuse": 131,
+                "clang-diagnostic-shift-op-parentheses": 99,
+                "clang-diagnostic-logical-op-parentheses": 91,
+                "clang-diagnostic-parentheses": 59,
+                "bugprone-integer-division": 40,
+                "readability-suspicious-call-argument": 35,
+                "bugprone-incorrect-roundings": 19,
+                "clang-diagnostic-format-nonliteral": 15,
+                "bugprone-inc-dec-in-conditions": 14,
+                "clang-diagnostic-bitwise-op-parentheses": 13,
+                "misc-redundant-expression": 12,
+                "bugprone-not-null-terminated-result": 11,
+                "clang-diagnostic-dangling-else": 9,
+                "bugprone-suspicious-memory-comparison": 8,
+                "clang-diagnostic-unused-const-variable": 6,
+                "misc-confusable-identifiers": 4,
+                "bugprone-too-small-loop-variable": 3,
+                "cert-flp30-c": 3,
+                "clang-diagnostic-unused-variable": 3,
+                "clang-diagnostic-unused-function": 2,
+                "bugprone-sizeof-expression": 2,
+                "bugprone-chained-comparison": 2,
+                "clang-diagnostic-unused-but-set-variable": 1,
+                "clang-diagnostic-logical-not-parentheses": 1,
+                "clang-diagnostic-sometimes-uninitialized": 1,
+                "clang-diagnostic-bool-operation": 1,
+                "bugprone-terminating-continue": 1,
+                "clang-diagnostic-ignored-qualifiers": 1
+            },
+            "diff": 2,
+            "diff reports": [
+                {
+                    "version": "2024-12-23_eecdc2",
+                    "report name": "Uninitialized variable: td",
+                    "specific info": {
+                        "level": "warning",
+                        "message": {
+                            "text": "Uninitialized variable: td"
+                        },
+                        "ruleId": "legacyUninitvar",
+                        "locations": "/home/xiaoyu/IncAnalyzer/repos/FFmpeg/FFmpeg/libavfilter/vf_selectivecolor.c"
+                    }
+                },
+                {
+                    "version": "2024-12-23_eecdc2",
+                    "report name": "Using argument last_dc that points at uninitialized variable last_dc",
+                    "specific info": {
+                        "level": "warning",
+                        "message": {
+                            "text": "Using argument last_dc that points at uninitialized variable last_dc"
+                        },
+                        "ruleId": "ctuuninitvar",
+                        "locations": "/home/xiaoyu/IncAnalyzer/repos/FFmpeg/FFmpeg/libavcodec/hqx.c"
+                    }
+                }
+            ]
+        },
+        "20250110_112545_func": {
+            "total": 9308,
+            "unique": 5934,
+            "new": 0,
+            "clang-tidy": {
+                "total": 9308,
+                "2024-12-23_3428a8": 5934,
+                "2024-12-23_eecdc2": 3360,
+                "2024-12-24_34c06f": 4,
+                "2024-12-24_fe1aeb": 4,
+                "2024-12-24_954d55": 6,
+                "uique": 5934
+            },
+            "clang-tidy distribution": {
+                "clang-diagnostic-sign-compare": 1330,
+                "clang-diagnostic-unused-parameter": 1219,
+                "clang-diagnostic-missing-field-initializers": 1066,
+                "clang-diagnostic-float-conversion": 429,
+                "clang-diagnostic-conditional-uninitialized": 338,
+                "clang-diagnostic-double-promotion": 327,
+                "bugprone-switch-missing-default-case": 298,
+                "clang-diagnostic-switch": 182,
+                "cert-err33-c": 152,
+                "bugprone-signed-char-misuse": 131,
+                "clang-diagnostic-shift-op-parentheses": 99,
+                "clang-diagnostic-logical-op-parentheses": 91,
+                "clang-diagnostic-parentheses": 59,
+                "bugprone-integer-division": 40,
+                "readability-suspicious-call-argument": 35,
+                "bugprone-incorrect-roundings": 19,
+                "clang-diagnostic-format-nonliteral": 15,
+                "bugprone-inc-dec-in-conditions": 14,
+                "clang-diagnostic-bitwise-op-parentheses": 13,
+                "misc-redundant-expression": 12,
+                "bugprone-not-null-terminated-result": 11,
+                "clang-diagnostic-dangling-else": 9,
+                "bugprone-suspicious-memory-comparison": 8,
+                "clang-diagnostic-unused-const-variable": 6,
+                "clang-diagnostic-reserved-macro-identifier": 6,
+                "misc-confusable-identifiers": 4,
+                "bugprone-too-small-loop-variable": 3,
+                "cert-flp30-c": 3,
+                "clang-diagnostic-unused-variable": 3,
+                "clang-diagnostic-unused-function": 2,
+                "bugprone-sizeof-expression": 2,
+                "bugprone-chained-comparison": 2,
+                "clang-diagnostic-unused-but-set-variable": 1,
+                "clang-diagnostic-logical-not-parentheses": 1,
+                "clang-diagnostic-sometimes-uninitialized": 1,
+                "clang-diagnostic-bool-operation": 1,
+                "bugprone-terminating-continue": 1,
+                "clang-diagnostic-ignored-qualifiers": 1
+            },
+            "diff": 0
+        }
+    },
+    {
+        "project": "bitcoin/bitcoin",
+        "20250108_101806_func": {
+            "total": 868,
+            "unique": 578,
+            "new": 3,
+            "clang-tidy": {
+                "total": 626,
+                "2024-12-18_a60d57": 446,
+                "2024-12-18_366fbf": 81,
+                "2024-12-19_ea5356": 78,
+                "2024-12-19_bb5701": 21,
+                "2024-12-20_fc7b21": 0,
+                "uique": 448
+            },
+            "csa": {
+                "total": 82,
+                "2024-12-18_a60d57": 43,
+                "2024-12-18_366fbf": 19,
+                "2024-12-19_ea5356": 19,
+                "2024-12-19_bb5701": 1,
+                "uique": 44
+            },
+            "cppcheck": {
+                "total": 160,
+                "2024-12-18_a60d57": 96,
+                "2024-12-18_366fbf": 31,
+                "2024-12-19_ea5356": 31,
+                "2024-12-19_bb5701": 1,
+                "2024-12-20_fc7b21": 1,
+                "uique": 86
+            },
+            "clang-tidy distribution": {
+                "clang-diagnostic-unused-function": 139,
+                "readability-container-contains": 61,
+                "cert-err33-c": 60,
+                "performance-noexcept-move-constructor": 22,
+                "performance-move-const-arg": 19,
+                "bugprone-switch-missing-default-case": 17,
+                "cppcoreguidelines-virtual-class-destructor": 12,
+                "clang-diagnostic-float-conversion": 12,
+                "clang-diagnostic-non-virtual-dtor": 10,
+                "google-build-namespaces": 10,
+                "bugprone-inc-dec-in-conditions": 7,
+                "readability-suspicious-call-argument": 7,
+                "readability-container-data-pointer": 7,
+                "bugprone-signed-char-misuse": 6,
+                "bugprone-sizeof-container": 6,
+                "misc-unconventional-assign-operator": 5,
+                "bugprone-optional-value-conversion": 4,
+                "misc-redundant-expression": 4,
+                "bugprone-sizeof-expression": 4,
+                "bugprone-misplaced-widening-cast": 3,
+                "bugprone-forwarding-reference-overload": 3,
+                "bugprone-too-small-loop-variable": 3,
+                "modernize-min-max-use-initializer-list": 3,
+                "bugprone-integer-division": 2,
+                "clang-diagnostic-format-nonliteral": 2,
+                "bugprone-unused-return-value": 2,
+                "cert-flp30-c": 2,
+                "bugprone-use-after-move": 2,
+                "readability-reference-to-constructed-temporary": 2,
+                "cert-dcl58-cpp": 2,
+                "bugprone-incorrect-roundings": 2,
+                "clang-diagnostic-double-promotion": 2,
+                "bugprone-suspicious-missing-comma": 1,
+                "bugprone-string-literal-with-embedded-nul": 1,
+                "bugprone-not-null-terminated-result": 1,
+                "performance-trivially-destructible": 1,
+                "clang-diagnostic-conditional-uninitialized": 1,
+                "bugprone-bool-pointer-implicit-conversion": 1
+            },
+            "diff": 1,
+            "diff reports": [
+                {
+                    "version": "2024-12-18_366fbf",
+                    "report name": "report-cbe246.html",
+                    "specific info": {}
+                }
+            ]
+        },
+        "20250110_112545_func": {
+            "total": 1397,
+            "unique": 1107,
+            "new": 2,
+            "clang-tidy": {
+                "total": 1397,
+                "2024-12-18_a60d57": 1105,
+                "2024-12-18_366fbf": 116,
+                "2024-12-19_ea5356": 36,
+                "2024-12-19_bb5701": 140,
+                "2024-12-20_fc7b21": 0,
+                "uique": 1107
+            },
+            "clang-tidy distribution": {
+                "clang-diagnostic-unused-parameter": 638,
+                "clang-diagnostic-unused-function": 139,
+                "readability-container-contains": 61,
+                "cert-err33-c": 60,
+                "performance-noexcept-move-constructor": 22,
+                "clang-diagnostic-reserved-macro-identifier": 21,
+                "performance-move-const-arg": 19,
+                "bugprone-switch-missing-default-case": 17,
+                "cppcoreguidelines-virtual-class-destructor": 12,
+                "clang-diagnostic-float-conversion": 12,
+                "clang-diagnostic-non-virtual-dtor": 10,
+                "google-build-namespaces": 10,
+                "bugprone-inc-dec-in-conditions": 7,
+                "readability-container-data-pointer": 7,
+                "readability-suspicious-call-argument": 7,
+                "bugprone-signed-char-misuse": 6,
+                "bugprone-sizeof-container": 6,
+                "misc-unconventional-assign-operator": 5,
+                "bugprone-optional-value-conversion": 4,
+                "misc-redundant-expression": 4,
+                "bugprone-sizeof-expression": 4,
+                "bugprone-misplaced-widening-cast": 3,
+                "bugprone-forwarding-reference-overload": 3,
+                "bugprone-too-small-loop-variable": 3,
+                "modernize-min-max-use-initializer-list": 3,
+                "bugprone-integer-division": 2,
+                "clang-diagnostic-format-nonliteral": 2,
+                "readability-reference-to-constructed-temporary": 2,
+                "cert-dcl58-cpp": 2,
+                "bugprone-incorrect-roundings": 2,
+                "bugprone-use-after-move": 2,
+                "bugprone-unused-return-value": 2,
+                "cert-flp30-c": 2,
+                "clang-diagnostic-double-promotion": 2,
+                "bugprone-string-literal-with-embedded-nul": 1,
+                "bugprone-not-null-terminated-result": 1,
+                "bugprone-suspicious-missing-comma": 1,
+                "performance-trivially-destructible": 1,
+                "clang-diagnostic-conditional-uninitialized": 1,
+                "bugprone-bool-pointer-implicit-conversion": 1
+            },
+            "diff": 0
+        }
+    },
+    {
+        "project": "grpc/grpc",
+        "20250108_101806_func": {
+            "total": 1281,
+            "unique": 1205,
+            "new": 0,
+            "clang-tidy": {
+                "total": 939,
+                "2024-12-17_9a10ab": 875,
+                "2024-12-18_4e65d1": 14,
+                "2024-12-24_9b7713": 50,
+                "uique": 875
+            },
+            "csa": {
+                "total": 260,
+                "2024-12-17_9a10ab": 254,
+                "2024-12-18_4e65d1": 4,
+                "2024-12-24_9b7713": 2,
+                "uique": 254
+            },
+            "cppcheck": {
+                "total": 82,
+                "2024-12-17_9a10ab": 82,
+                "2024-12-18_4e65d1": 0,
+                "2024-12-24_9b7713": 0,
+                "uique": 76
+            },
+            "clang-tidy distribution": {
+                "cppcoreguidelines-virtual-class-destructor": 113,
+                "bugprone-switch-missing-default-case": 98,
+                "performance-noexcept-move-constructor": 89,
+                "bugprone-sizeof-expression": 78,
+                "cert-err33-c": 77,
+                "performance-noexcept-swap": 48,
+                "readability-container-data-pointer": 47,
+                "clang-diagnostic-sign-compare": 37,
+                "clang-diagnostic-double-promotion": 36,
+                "bugprone-signed-char-misuse": 31,
+                "readability-suspicious-call-argument": 19,
+                "clang-diagnostic-float-conversion": 19,
+                "clang-diagnostic-missing-field-initializers": 18,
+                "performance-no-automatic-move": 15,
+                "misc-redundant-expression": 14,
+                "bugprone-inc-dec-in-conditions": 13,
+                "performance-move-const-arg": 11,
+                "bugprone-use-after-move": 10,
+                "bugprone-not-null-terminated-result": 10,
+                "bugprone-suspicious-stringview-data-usage": 9,
+                "clang-diagnostic-format-nonliteral": 8,
+                "misc-unconventional-assign-operator": 8,
+                "bugprone-string-constructor": 8,
+                "misc-new-delete-overloads": 7,
+                "bugprone-move-forwarding-reference": 6,
+                "misc-header-include-cycle": 5,
+                "bugprone-suspicious-memory-comparison": 5,
+                "clang-diagnostic-conditional-uninitialized": 5,
+                "bugprone-sizeof-container": 4,
+                "misc-definitions-in-headers": 4,
+                "bugprone-suspicious-realloc-usage": 3,
+                "bugprone-unused-return-value": 3,
+                "misc-confusable-identifiers": 3,
+                "google-build-namespaces": 2,
+                "bugprone-integer-division": 2,
+                "bugprone-misplaced-widening-cast": 2,
+                "bugprone-forward-declaration-namespace": 1,
+                "cert-dcl58-cpp": 1,
+                "bugprone-dangling-handle": 1,
+                "clang-diagnostic-deprecated-copy": 1,
+                "bugprone-undefined-memory-manipulation": 1,
+                "bugprone-forwarding-reference-overload": 1,
+                "performance-trivially-destructible": 1,
+                "bugprone-suspicious-missing-comma": 1
+            },
+            "diff": 0
+        },
+        "20250110_112545_func": {
+            "total": 2043,
+            "unique": 1946,
+            "new": 0,
+            "clang-tidy": {
+                "total": 2043,
+                "2024-12-17_9a10ab": 1946,
+                "2024-12-18_4e65d1": 0,
+                "2024-12-24_9b7713": 97,
+                "uique": 1946
+            },
+            "clang-tidy distribution": {
+                "clang-diagnostic-unused-parameter": 578,
+                "clang-diagnostic-reserved-macro-identifier": 493,
+                "cppcoreguidelines-virtual-class-destructor": 113,
+                "bugprone-switch-missing-default-case": 98,
+                "performance-noexcept-move-constructor": 89,
+                "bugprone-sizeof-expression": 78,
+                "cert-err33-c": 77,
+                "performance-noexcept-swap": 48,
+                "readability-container-data-pointer": 47,
+                "clang-diagnostic-sign-compare": 37,
+                "clang-diagnostic-double-promotion": 36,
+                "bugprone-signed-char-misuse": 31,
+                "readability-suspicious-call-argument": 19,
+                "clang-diagnostic-float-conversion": 19,
+                "clang-diagnostic-missing-field-initializers": 18,
+                "performance-no-automatic-move": 15,
+                "misc-redundant-expression": 14,
+                "bugprone-inc-dec-in-conditions": 13,
+                "performance-move-const-arg": 11,
+                "bugprone-use-after-move": 10,
+                "bugprone-not-null-terminated-result": 10,
+                "bugprone-suspicious-stringview-data-usage": 9,
+                "clang-diagnostic-format-nonliteral": 8,
+                "misc-unconventional-assign-operator": 8,
+                "bugprone-string-constructor": 8,
+                "misc-new-delete-overloads": 7,
+                "bugprone-move-forwarding-reference": 6,
+                "misc-header-include-cycle": 5,
+                "bugprone-suspicious-memory-comparison": 5,
+                "clang-diagnostic-conditional-uninitialized": 5,
+                "bugprone-sizeof-container": 4,
+                "misc-definitions-in-headers": 4,
+                "bugprone-suspicious-realloc-usage": 3,
+                "bugprone-unused-return-value": 3,
+                "misc-confusable-identifiers": 3,
+                "google-build-namespaces": 2,
+                "bugprone-integer-division": 2,
+                "bugprone-misplaced-widening-cast": 2,
+                "bugprone-forward-declaration-namespace": 1,
+                "cert-dcl58-cpp": 1,
+                "bugprone-dangling-handle": 1,
+                "clang-diagnostic-deprecated-copy": 1,
+                "bugprone-undefined-memory-manipulation": 1,
+                "bugprone-forwarding-reference-overload": 1,
+                "performance-trivially-destructible": 1,
+                "bugprone-suspicious-missing-comma": 1
+            },
+            "diff": 0
+        }
+    }
+]

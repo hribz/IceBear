@@ -1,9 +1,9 @@
 {
     "total checkers": 2065,
-    "total enable checkers": 515,
+    "total enable checkers": 512,
     "clang-tidy": {
         "total checkers": 1524,
-        "total enable checkers": 251,
+        "total enable checkers": 248,
         "preprocessor checkers": 37,
         "checker list": [
             "bugprone-argument-comment",
@@ -47,7 +47,6 @@
         "enable checkers": [
             "bugprone-macro-repeated-side-effects",
             "clang-diagnostic-comment",
-            "clang-diagnostic-reserved-macro-identifier",
             "misc-macro-parentheses",
             "misc-macro-repeated-side-effects"
         ]

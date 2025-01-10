@@ -62,8 +62,16 @@ bool IncInfoCollectASTVisitor::VisitDecl(Decl *D) {
         if (!AN.count(D) && DLM.isChangedDecl(D)) {
             AN.insert(D);
             auto *FirstDecl = D->getCanonicalDecl();
+            // All relevant decls should be added to AN.
             for (auto *curr = FirstDecl; curr != nullptr; curr = curr->getNextDeclInContext()) {
-                AN.insert(D);
+                AN.insert(D);    
+                // // Function definition should be added to AN.
+                // if (auto *FD = llvm::dyn_cast<FunctionDecl>(D)) {
+                //     auto *Definition = FD->getDefinition();
+                //     if (Definition) {
+                //         AN.insert(Definition);
+                //     }
+                // }
             }
         }
     }
@@ -143,6 +151,8 @@ bool IncInfoCollectASTVisitor::VisitDeclRefExpr(DeclRefExpr *DR) {
     if (!inFunctionOrMethodStack.empty() && CountCanonicalDeclInSet(TaintDecls, ND)) {
         // use changed decl, reanalyze this function
         InsertCanonicalDeclToSet(FunctionsChanged, inFunctionOrMethodStack.back());
+        // add it to AN.
+        // InsertCanonicalDeclToSet(AN, inFunctionOrMethodStack.back());
     }
 
     // // If a function can be used by function pointers, it's must be referenced.
@@ -158,6 +168,7 @@ bool IncInfoCollectASTVisitor::VisitMemberExpr(MemberExpr *ME) {
     auto member = ME->getMemberDecl();
     if (!inFunctionOrMethodStack.empty() && CountCanonicalDeclInSet(TaintDecls, member)) {
         InsertCanonicalDeclToSet(FunctionsChanged, inFunctionOrMethodStack.back());
+        // InsertCanonicalDeclToSet(AN, inFunctionOrMethodStack.back());
     }
     // member could be VarDecl, EnumConstantDecl, CXXMethodDecl, FieldDecl, etc.
     if (isa<VarDecl, EnumConstantDecl>(member)) {

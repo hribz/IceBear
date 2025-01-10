@@ -50,7 +50,7 @@ class Analyzer(ABC):
     def analyze_one_file(self, file: FileInCDB):
         analyzer_cmd = self.generate_analyzer_cmd(file)
         if analyzer_cmd is None:
-            return True, file.file_name
+            return Process.Stat.skipped, file.file_name
         script = commands_to_shell_script(analyzer_cmd)
         
         process = Process(analyzer_cmd, file.compile_command.directory)

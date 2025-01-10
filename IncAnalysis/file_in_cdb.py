@@ -193,7 +193,8 @@ class FileInCDB:
                     old_file.baseline_file.clean_files()
                 old_file.baseline_file = None
             else:
-                logger.debug(f"[FileInCDB Init] Find new file {self.file_name}")
+                pass
+                # logger.debug(f"[FileInCDB Init] Find new file {self.file_name}")
         else:
             if self.parent.baseline != self.parent:
                 # Find baseline file.
@@ -201,7 +202,8 @@ class FileInCDB:
                 if self.baseline_file:
                     self.status = FileStatus.UNCHANGED
                 else:
-                    logger.debug(f"[FileInCDB Init] Find new file {self.file_name}")
+                    pass
+                    # logger.debug(f"[FileInCDB Init] Find new file {self.file_name}")
     
     def clean_files(self):
         if self.prep_file:
@@ -295,19 +297,17 @@ class FileInCDB:
             commands += ['-ctu']
         commands.extend(["-rf-file", self.get_file_path(FileKind.RF)])
         # ClangTidy line-level filter.
-        has_clangtidy = 'clang-tidy' in self.parent.env.analyze_opts.analyzers
-        if has_clangtidy:
+        if self.parent.enable_clangtidy:
             commands.extend(["--dump-anr"])
         # Cppcheck function-level incremental.
-        has_cppcheck = 'cppcheck' in self.parent.env.analyze_opts.analyzers
-        if has_cppcheck:
+        if self.parent.enable_cppcheck:
             commands.extend(['-file-path', self.file_name])
             commands.extend(["-cppcheck-rf-file", self.get_file_path(FileKind.CPPRF)])
         commands += ['--', '-w'] + self.compile_command.arguments + ['-D__clang_analyzer__']
         ii_script = commands_to_shell_script(commands)
         try:
             process = run(commands, capture_output=True, text=True, check=True)
-            logger.info(f"[File Inc Info Success] {ii_script}")
+            logger.debug(f"[File Inc Info Success] {ii_script}")
             self.parse_inc_sum()
             return True
         except subprocess.CalledProcessError as e:

@@ -456,3 +456,18 @@ clang-tidy '--line-filter=[{"name":"class_field.cpp","lines":[[4,5]]}]' '-config
 - redis/redis_commits/redis_2024-12-23_64a40b.diff：定义了某些宏名称，clang-tidy在这些宏名称中出现了报告。
 - 由于报告过多，关闭了`clang-diagnostic-reserved-identifier`, `clang-diagnostic-reserved-macro-identifier`, `clang-diagnostic-unused-parameter`
 - 考虑关闭`clang-diagnostic-missing-field-initializers`，`FFmpeg`此类报告过多
+- 某些CSA报告仅在func中存在，因为制定了分析的函数，导致原本因时间或资源限制未被检测出的报告被检测出，这样的报告总共有
+  - tesseract 
+    - 2024-12-31_014b9d 
+      - report-13f130.html
+  - redis 
+    - 2024-12-23_64a40b 
+      - report-b12fd9.html 
+      - report-4bc9f1.html
+  - openssl: 1个cppcheck的新报告，原因未知
+  - FFmpeg 
+    - noinc 2024-12-23_eecdc2
+      - report-e04015.html: 这个报告仅存在于noinc中，原因是CSA的波动
+    - func
+      - 两个cppcheck报告，其实是相同报告，因为改变了分析入口，导致报错信息，或者是ruleID发生了变化
+  - 

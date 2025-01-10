@@ -4604,6 +4604,7 @@
     "clang-diagnostic-reserved-identifier": [
       "doc_url:https://clang.llvm.org/docs/DiagnosticsReference.html#wreserved-identifier",
       "guideline:sei-cert",
+      "profile:default",
       "profile:extreme",
       "profile:security",
       "profile:sensitive",
@@ -5660,6 +5661,7 @@
     ],
     "clang-diagnostic-unused-parameter": [
       "doc_url:https://clang.llvm.org/docs/DiagnosticsReference.html#wunused-parameter",
+      "profile:default",
       "profile:extreme",
       "profile:sensitive",
       "severity:MEDIUM"

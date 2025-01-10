@@ -9,6 +9,7 @@ class Process:
         error = 'ERROR',
         terminated = 'TERMINATED',
         ok = 'OK'
+        skipped = 'Skipped'
 
     def __init__(self, cmd, directory, timeout=600):
         self.cmd = cmd

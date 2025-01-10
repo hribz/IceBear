@@ -217,16 +217,18 @@ class Configuration:
         if self.env.analyze_opts.analyzers:
             analyzers = self.env.analyze_opts.analyzers
         self.analyzers: List[Analyzer] = []
+        self.enable_clangtidy = False
+        self.enable_cppcheck = True
         for analyzer_name in analyzers:
             analyzer = None
             if analyzer_name == 'clangsa':
                 analyzer = CSA(CSAConfig(self.env, self.csa_path, self.env.analyze_opts.csa_config), None)
             elif analyzer_name == 'clang-tidy':
+                self.enable_clangtidy = True
                 analyzer = ClangTidy(ClangTidyConfig(self.env, self.clang_tidy_path, self.env.analyze_opts.clang_tidy_config), None)
             elif analyzer_name == 'cppcheck':
+                self.enable_cppcheck = True
                 analyzer = CppCheck(CppCheckConfig(self.env, self.cppcheck_path, self.env.analyze_opts.cppcheck_config), None)
-            elif analyzer_name == 'infer':
-                analyzer = Infer(InferConfig(self.env, self.infer_path, self.env.analyze_opts.infer_config), None)
             else:
                 logger.error(f"Don't support {analyzer_name}.")
                 continue
@@ -420,7 +422,7 @@ class Configuration:
         # CMake will not be influenced by path.
         os.chdir(self.build_path)
         for configure_script in configure_scripts:
-            logger.debug("[Repo Config Script] " + configure_script)
+            logger.info("[Repo Config Script] " + configure_script)
             try:
                 process = run(configure_script, shell=True, capture_output=True, text=True, check=True)
                 logger.info(f"[Repo Config Success] {process.stdout}")

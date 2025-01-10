@@ -9,7 +9,7 @@ import requests
 from IncAnalysis.logger import logger
 from IncAnalysis.utils import makedir, remake_dir, Path
 
-ignore_repos = {'xbmc/xbmc', 'mirror/busybox', 'llvm/llvm-project'}
+ignore_repos = {'xbmc/xbmc', 'mirror/busybox', 'llvm/llvm-project', 'opencv/opencv', 'c-ares/c-ares'}
 
 def get_repo_csv(csv_path: str) -> pd.DataFrame:
     commit_df = pd.read_csv(csv_path)

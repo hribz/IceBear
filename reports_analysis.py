@@ -109,7 +109,7 @@ def diff_reports(reports1: set, reports2: set, dir1, dir2):
             diff_json[dir2] = [i.__to_json__() for i in diff2]
     return diff_json
 
-analyzers = ['csa', 'clang-tidy', 'cppcheck', 'infer']
+analyzers = ['csa', 'clang-tidy', 'cppcheck']
 
 def main(args):
     parser = RepoParser()
@@ -119,6 +119,20 @@ def main(args):
         exit(1)
     env = Environment(opts)
     repos = 'repos/benchmark.json'
+    total_summary = [{
+        opts.workspace1: {
+            "total reports": 0,
+            "unique reports": 0,
+            "new reports": 0,
+            "diff reports": 0
+        },
+        opts.workspace2: {
+            "total reports": 0,
+            "unique reports": 0,
+            "new reports": 0,
+            "diff reports": 0
+        }
+    }]
 
     repo_list = repos
     
@@ -130,6 +144,9 @@ def main(args):
         repo_info = RepoInfo(repo, env, opts.workspace1)
         repo_info2 = RepoInfo(repo, env, opts.workspace2)
         logger.TAG = repo_info.repo_name
+        repo_summary = {
+            "project": repo_info.repo_name
+        }
         
         if opts.repo and opts.repo != repo_info.repo_name and opts.repo != os.path.basename(repo_info.repo_dir):
             continue
@@ -226,7 +243,10 @@ def main(args):
                             results = cppcheck_result["runs"][0]["results"]
                             for result in results:
                                 message = result['message']['text']
-                                result['message']['text'] = message[:message.rfind("at line")]
+                                if message.rfind("at line") != -1:
+                                    result['message']['text'] = message[:message.rfind("at line")]
+                                else:
+                                    result['message']['text'] = message
                                 report = {k:v for k, v in result.items() if k != 'locations'}
                                 report['locations'] = result['locations'][-1]['physicalLocation']['artifactLocation']['uri']
                                 reports.append(report)
@@ -249,7 +269,8 @@ def main(args):
                     if analyzer_baseline_number is None:
                         analyzer_baseline_number = len(reports)
                 
-                baseline_reports_number += analyzer_baseline_number
+                if analyzer_baseline_number is not None:
+                    baseline_reports_number += analyzer_baseline_number
 
             logger.info(f"Total {statistics['summary']['total'] - baseline_reports_number} reports(without baseline) in {workspace}")
 
@@ -269,6 +290,8 @@ def main(args):
                 analyzer_statistics = statistics[analyzer]
                 for commit in analyzer_statistics:
                     version = commit['version']
+                    if version not in versions_and_reports.keys():
+                        versions_and_reports[version] = set()
                     if first_version is None:
                         first_version = version
                     reports_from_this_commit = commit['reports']
@@ -286,7 +309,7 @@ def main(args):
                                 report_name = report["file"] + '-' + report["hash"]
                             specific_info = report
                         reports.add(Report(analyzer, version, report_name, specific_info))
-                    versions_and_reports[version] = reports
+                    versions_and_reports[version] = versions_and_reports[version].union(reports)
             return versions_and_reports, first_version
         
         def dump_veen_diagram(versions_and_reports, figure):
@@ -317,6 +340,12 @@ def main(args):
         reports2 = all_reports_from_json(versions_and_reports2)
         statistics1['summary']['unique'] = len(reports1)
         statistics2['summary']['unique'] = len(reports2)
+        for analyzer in analyzers:
+            if analyzer in statistics1['summary'].keys():
+                statistics1['summary'][analyzer]['uique'] = len([i for i in reports1 if i.analyzer == analyzer])
+            
+            if analyzer in statistics2['summary'].keys():
+                statistics2['summary'][analyzer]['uique'] = len([i for i in reports2 if i.analyzer == analyzer])
 
         def clang_tidy_diag_distribution(reports):
             kinds = {}
@@ -330,33 +359,68 @@ def main(args):
             return sorted(kinds.items(), key=lambda item: item[1], reverse=True)
         
         kinds1 = clang_tidy_diag_distribution(reports1)
-        statistics1['summary']['clang-tidy distribution'] = { kind[0]: kind[1] for kind in kinds1}
+        statistics1['summary']['clang-tidy distribution'] = { kind[0]: kind[1] for kind in kinds1 }
         kinds2 = clang_tidy_diag_distribution(reports2)
-        statistics2['summary']['clang-tidy distribution'] = { kind[0]: kind[1] for kind in kinds2}
+        statistics2['summary']['clang-tidy distribution'] = { kind[0]: kind[1] for kind in kinds2 }
 
-        dir1 = repo_info.workspace
-        dir2 = repo_info2.workspace
-
-        diff_json = diff_reports(reports1, reports2, dir1, dir2)
-        with open(os.path.join(repo_info.workspace, "reports_diff.json"), 'w') as f:
-            json.dump(diff_json, f, indent=3)
 
         def new_reports(all_reports: set, baseline_reports:set, output_file):
             new_reports = all_reports.difference(baseline_reports)
             logger.info(f"Find {len(new_reports)} new reports in {output_file}")
             with open(output_file, 'w') as f:
                 json.dump([i.__to_json__() for i in new_reports], f, indent=3)
-            return len(new_reports)
+            return new_reports
 
-        new_reports_num1 = new_reports(reports1, versions_and_reports1[baseline_version1], os.path.join(repo_info.workspace, 'new_reports.json'))
-        new_reports_num2 = new_reports(reports2, versions_and_reports2[baseline_version2], os.path.join(repo_info2.workspace, 'new_reports.json'))
-        statistics1['summary']['new'] = new_reports_num1
-        statistics2['summary']['new'] = new_reports_num2
+        new_reports1 = new_reports(reports1, versions_and_reports1[baseline_version1], os.path.join(repo_info.workspace, 'new_reports.json'))
+        new_reports2 = new_reports(reports2, versions_and_reports2[baseline_version2], os.path.join(repo_info2.workspace, 'new_reports.json'))
+        statistics1['summary']['new'] = len(new_reports1)
+        statistics2['summary']['new'] = len(new_reports2)
+
+        dir1 = repo_info.workspace
+        dir2 = repo_info2.workspace
+        diff_json = diff_reports(new_reports1, new_reports2, dir1, dir2)
+        with open(os.path.join(repo_info.workspace, "reports_diff.json"), 'w') as f:
+            json.dump(diff_json, f, indent=3)
+            
+        statistics1['summary']['diff'] = 0
+        statistics2['summary']['diff'] = 0
+        for key in diff_json.keys():
+            if key == repo_info.workspace:
+                statistics1['summary']['diff'] = len(diff_json[key])
+                statistics1['summary']['diff reports'] = diff_json[key]
+            elif key == repo_info2.workspace:
+                statistics2['summary']['diff'] = len(diff_json[key])
+                statistics2['summary']['diff reports'] = diff_json[key]
 
         with open(os.path.join(repo_info.workspace, 'merged_reports.json'), 'w') as f1, \
             open(os.path.join(repo_info2.workspace, 'merged_reports.json'), 'w') as f2:
             json.dump(statistics1, f1, indent=3)
             json.dump(statistics2, f2, indent=3)
+
+        repo_summary[opts.workspace1] = statistics1['summary']
+        repo_summary[opts.workspace2] = statistics2['summary']
+        total_summary.append(repo_summary)
+
+        def get_new_num_each_analayzer(new_reports, summary):
+            for analyzer in analyzers:
+                if f'new {analyzer}' not in summary:
+                    summary[f'new {analyzer}'] = 0
+                summary[f'new {analyzer}'] += len([i for i in new_reports if i.analyzer == analyzer])
+
+        total_summary[0][opts.workspace1]['total reports'] += statistics1['summary']['total']
+        total_summary[0][opts.workspace1]['unique reports'] += statistics1['summary']['unique']
+        total_summary[0][opts.workspace1]['new reports'] += statistics1['summary']['new']
+        total_summary[0][opts.workspace1]['diff reports'] += statistics1['summary']['diff']
+        get_new_num_each_analayzer(new_reports1, total_summary[0][opts.workspace1])
+
+        total_summary[0][opts.workspace2]['total reports'] += statistics2['summary']['total']
+        total_summary[0][opts.workspace2]['unique reports'] += statistics2['summary']['unique']
+        total_summary[0][opts.workspace2]['new reports'] += statistics2['summary']['new']
+        total_summary[0][opts.workspace2]['diff reports'] += statistics2['summary']['diff']
+        get_new_num_each_analayzer(new_reports2, total_summary[0][opts.workspace2])
+
+    with open(os.path.join('repos', opts.workspace1 + '_and_' + opts.workspace2 + '.json'), 'w') as f:
+        json.dump(total_summary, f, indent=4)
 
 if __name__ == "__main__":
     main(sys.argv[1:])
