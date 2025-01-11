@@ -312,7 +312,7 @@ int main () {
   - -r      244.457 s          0.380 s
 ## 优化diff
 - 目前的方案是使用多线程为每个文件执行一次`diff`，但是从上面的数据可以看到，`FFmpeg`的效果并不好，因为文件数目多的情况下，为每个文件开一个进程执行diff的开销也很高，并且对diff结果的处理是在多线程下进行的，这部分主要是CPU密集型任务，多线程效果并不好。
-- 尝试直接将每个文件的diff结果写入到对应文件中，而不是将其解析并保存下来，因为IncAnalyzer并不需要这部分信息，`collectIncInfo`时才需要。修改之后的效果：
+- 尝试直接将每个文件的diff结果写入到对应文件中，而不是将其解析并保存下来，因为IceBear并不需要这部分信息，`collectIncInfo`时才需要。修改之后的效果：
   -      grpc(1316/1724)   FFmpeg(11/2048)
   - j24     21.680 s           7.351 s
   - -r      244.457 s          0.380 s
@@ -359,7 +359,7 @@ int main () {
 - 不只用文件名作为索引，而是`file + output`作为索引，但是`panda`生成预处理文件没有考虑这种情况。因此还是采用第1种方案。
 
 ## collectIncInfo时间开销分析
-- 经过测试，22w行的预处理后文件`.../home/xiaoyu/cmake-analyzer/IncAnalyzer/repos/grpc/grpc/src/core/resolver/xds/xds_resolver.cc.ii`:
+- 经过测试，22w行的预处理后文件`/repos/grpc/grpc/src/core/resolver/xds/xds_resolver.cc.ii`:
   - 使用`collectIncInfo`进行处理时，只输出`CallGraph`需要`9.880s`,`CallGraph`的规模为10w行；
   - 将所有行标记为change，输出cf文件需要`10.034s`(包括生成CG)，因此主要的时间开销在于**生成CG**，CF文件的规模为3.6w行。
 - 思考：实际上CSA分析过程种也需要生成CG，也就是说，整个执行流程生成了两次CG，并且生成CG的开销不小。能否将这两次生成CG的过程合并？

@@ -56,25 +56,6 @@ bool IncInfoCollectASTVisitor::VisitDecl(Decl *D) {
             // return false;
         }
     }
-
-    // Record Affected Nodes
-    if (isa<TypedefDecl, FieldDecl, VarDecl, FunctionDecl>(D)) {
-        if (!AN.count(D) && DLM.isChangedDecl(D)) {
-            AN.insert(D);
-            auto *FirstDecl = D->getCanonicalDecl();
-            // All relevant decls should be added to AN.
-            for (auto *curr = FirstDecl; curr != nullptr; curr = curr->getNextDeclInContext()) {
-                AN.insert(D);    
-                // // Function definition should be added to AN.
-                // if (auto *FD = llvm::dyn_cast<FunctionDecl>(D)) {
-                //     auto *Definition = FD->getDefinition();
-                //     if (Definition) {
-                //         AN.insert(Definition);
-                //     }
-                // }
-            }
-        }
-    }
     
     if (isa<RecordDecl>(D)) {
         return true;
@@ -112,6 +93,25 @@ bool IncInfoCollectASTVisitor::TraverseDecl(Decl *D) {
         // D maybe nullptr when VisitTemplateTemplateParmDecl.
         return true;
     }
+    // Record Affected Nodes
+    if (isa<TypedefDecl, FieldDecl, VarDecl, FunctionDecl>(D)) {
+        if (!AN.count(D) && DLM.isChangedDecl(D)) {
+            AN.insert(D);
+            auto *FirstDecl = D->getCanonicalDecl();
+            // All relevant decls should be added to AN.
+            for (auto *curr = FirstDecl; curr != nullptr; curr = curr->getNextDeclInContext()) {
+                AN.insert(D);    
+                // // Function definition should be added to AN.
+                // if (auto *FD = llvm::dyn_cast<FunctionDecl>(D)) {
+                //     auto *Definition = FD->getDefinition();
+                //     if (Definition) {
+                //         AN.insert(Definition);
+                //     }
+                // }
+            }
+        }
+    }
+    
     bool isFunctionDecl = isa<FunctionDecl>(D);
     if (isFunctionDecl) {
         if (!CG.getNode(D)) {

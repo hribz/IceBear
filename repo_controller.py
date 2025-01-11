@@ -40,7 +40,7 @@ class RepoInfo:
             self.workspace = f"{self.abs_repo_path}_workspace/{env.timestamp}_{env.analyze_opts.inc}"
         logger.TAG = self.repo_name
 
-def IncAnalyzerAction(Repo: UpdateConfigRepository, version_stamp, repo_info: RepoInfo, env: Environment) -> UpdateConfigRepository:
+def IceBearAction(Repo: UpdateConfigRepository, version_stamp, repo_info: RepoInfo, env: Environment) -> UpdateConfigRepository:
     if Repo is None:
         # Analysis first commit as baseline.
         Repo = UpdateConfigRepository(repo_info.repo_name, repo_info.abs_repo_path, env, build_root=f"{repo_info.abs_repo_path}_build", default_options=repo_info.default_options,
@@ -172,7 +172,7 @@ def main(args):
                 if opts.codechecker:
                     Repo = CodeCheckerAction(Repo, version_stamp, repo_info, env)
                 else:
-                    Repo = IncAnalyzerAction(Repo, version_stamp, repo_info, env)
+                    Repo = IceBearAction(Repo, version_stamp, repo_info, env)
             else:
                 status = STATUS.CHECK_FAILED
                 logger.error(f"[Checkout Commit] {repo_info.repo_name} checkout to {commit_sha} failed!")

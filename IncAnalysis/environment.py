@@ -134,27 +134,30 @@ class Environment:
 
 class ArgumentParser:
     def __init__(self):
-        self.parser = argparse.ArgumentParser(prog='IncAnalyzer', formatter_class=argparse.RawTextHelpFormatter)
-        self.parser.add_argument('--inc', type=str, dest='inc', choices=['noinc', 'file', 'func', 'inline'], default='file',
-                                 help='Incremental analysis mode: file, func, inline')
+        self.parser = argparse.ArgumentParser(prog='IceBear', formatter_class=argparse.RawTextHelpFormatter)
+        self.parser.add_argument('--inc', type=str, dest='inc', choices=['noinc', 'file', 'func'], default='file',
+                                 help='Incremental analysis mode: noinc, file, func')
         self.parser.add_argument('--verbose', action='store_true', dest='verbose', help='Record debug information.')
-        self.parser.add_argument('--analyze', type=str, dest='analyze', choices=['ctu', 'no-ctu'],
-                                 help='Execute Clang Static Analyzer.')
-        self.parser.add_argument('--clang', type=str, dest='clang', default=None, 
-                                 help='Customize the Clang compiler for CSA func level incremental analysis.(Clang++ will be specified automatically)')
+        self.parser.add_argument('--analyze', type=str, dest='analyze', choices=['ctu', 'no-ctu'], default='no-ctu',
+                                 help='Enable Clang Static Analyzer cross translation units analysis or not.')
         self.parser.add_argument('--cc', type=str, dest='cc', default='clang', help='Customize the C compiler for configure & build.')
         self.parser.add_argument('--cxx', type=str, dest='cxx', default='clang++', help='Customize the C++ compiler for configure & build.')
         self.parser.add_argument('-j', '--jobs', type=int, dest='jobs', default=1, help='Number of jobs can be executed in parallel.')
-        self.parser.add_argument('-d', '--udp', action='store_true', dest='udp', help='Use files in diff path to `diff`.')
+        # self.parser.add_argument('-d', '--udp', action='store_true', dest='udp', help='Use files in diff path to `diff`.')
         supported_analyzers = ['clangsa', 'clang-tidy', 'cppcheck']
         self.parser.add_argument('--analyzers', nargs='+', dest='analyzers', metavar='ANALYZER', required=False, choices=supported_analyzers,
                                default=None, help="Run analysis only with the analyzers specified. Currently supported analyzers "
                                     "are: " + ', '.join(supported_analyzers) + ".")
+        self.parser.add_argument('--clang', type=str, dest='clang', default=None, 
+                                 help='Customize the Clang compiler for CSA func level incremental analysis.')
         self.parser.add_argument('--cppcheck', type=str, dest='cppcheck', default=None, 
                                  help='Customize the Cppcheck path for func level incremental analysis.')
-        self.parser.add_argument('--csa-config', type=str, dest='csa_config', default=None, help='CSA config file.')
-        self.parser.add_argument('--clang-tidy-config', type=str, dest='clang_tidy_config', default=None, help='Clang-tidy config file.')
-        self.parser.add_argument('--cppcheck-config', type=str, dest='cppcheck_config', default=None, help='Cppcheck config file.')
+        self.parser.add_argument('--csa-config', type=str, dest='csa_config', default=None, 
+                                 help='CSA config file, an example is config/clangsa_config.json.')
+        self.parser.add_argument('--clang-tidy-config', type=str, dest='clang_tidy_config', default=None, 
+                                 help='Clang-tidy config file, an example is config/clang-tidy_config.json.')
+        self.parser.add_argument('--cppcheck-config', type=str, dest='cppcheck_config', default=None, 
+                                 help='Cppcheck config file, an example is config/cppcheck_config.json.')
         # self.parser.add_argument('--infer-config', type=str, dest='infer_config', default=None, help='Infer config file.')
     
     def parse_args(self, args):
