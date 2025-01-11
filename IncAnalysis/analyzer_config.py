@@ -85,7 +85,8 @@ class IPAKind(Enum):
     IPAK_DynamicDispatchBifurcate = auto()
 
 class CSAConfig(AnalyzerConfig):
-    def __init__(self, env: Environment, csa_workspace: Path, config_file: str=None, checker_file: str="config/clangsa_checkers.json"):
+    def __init__(self, env: Environment, csa_workspace: Path, config_file: str=None):
+        checker_file = str(env.PWD / "config/clangsa_checkers.json")
         super().__init__(env, csa_workspace, checker_file, config_file)
         self.compilers = {
             'c': env.CLANG,
@@ -190,7 +191,8 @@ class CSAConfig(AnalyzerConfig):
         return self.args
         
 class ClangTidyConfig(AnalyzerConfig):
-    def __init__(self, env: Environment, clang_tidy_workspace: Path, config_file: str=None, checker_file: str="config/clang-tidy_checkers.json"):
+    def __init__(self, env: Environment, clang_tidy_workspace: Path, config_file: str=None):
+        checker_file = str(env.PWD / "config/clang-tidy_checkers.json")
         super().__init__(env, clang_tidy_workspace, checker_file, config_file)
 
         self.clang_tidy = env.clang_tidy
@@ -220,7 +222,8 @@ class ClangTidyConfig(AnalyzerConfig):
 
 
 class CppCheckConfig(AnalyzerConfig):
-    def __init__(self, env: Environment, cppcheck_workspace: Path, config_file: str=None, checker_file: str="config/cppcheck_checkers.json"):
+    def __init__(self, env: Environment, cppcheck_workspace: Path, config_file: str=None):
+        checker_file = str(env.PWD / "config/cppcheck_checkers.json")
         super().__init__(env, cppcheck_workspace, checker_file, config_file)
 
         self.cppcheck = env.cppcheck

@@ -241,7 +241,9 @@ class MultiConfigRepository(Repository):
 class UpdateConfigRepository(Repository):
     def __init__(self, name, src_path, env: Environment, default_options: List[str] = [], workspace=None,
                  build_root = None, version_stamp=None, default_build_type: str="cmake", can_skip_configure: bool = True,
-                 out_of_tree=True, configure_scripts=None, build_script=None, cmakefile_path=None):
+                 out_of_tree=True, configure_scripts=None, build_script=None, cmakefile_path=None, cdb=None, need_build=True,
+                 need_configure=True):
+        logger.start_log(env.timestamp, workspace + '/logs')
         super().__init__(name, src_path, env, build_root, default_build_type)
         self.default_config = Configuration(self.name, self.src_path, self.env, default_options, 
                                             build_path=self.build_root if out_of_tree else self.src_path, # Only build in one dir.
@@ -250,7 +252,9 @@ class UpdateConfigRepository(Repository):
                                             build_type=self.default_build_type,
                                             configure_scripts=configure_scripts,
                                             build_script=build_script,
-                                            cmakefile_path=cmakefile_path)
+                                            cmakefile_path=cmakefile_path,
+                                            cdb=cdb, need_build=need_build,
+                                            need_configure=need_configure)
         self.default_config.update_mode = True
         self.can_skip_configure = can_skip_configure
         self.has_init: bool = False # Baseline has been initialized.

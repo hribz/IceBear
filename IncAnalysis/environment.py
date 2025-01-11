@@ -14,7 +14,7 @@ class IncrementalMode(Enum):
     InlineLevel = auto()
 
 class Environment:
-    def __init__(self, opts):
+    def __init__(self, opts, ice_bear_path):
         # Analysis Options
         self.analyze_opts = opts
         self.inc_mode = IncrementalMode.NoInc
@@ -27,15 +27,15 @@ class Environment:
         
         self.ctu = opts.analyze == 'ctu'
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        self.prepare_env_path()
+        self.prepare_env_path(ice_bear_path)
 
         self.env = dict(os.environ)
         self.env['CC'] = self.CC
         self.env['CXX'] = self.CXX
 
-    def prepare_env_path(self):
+    def prepare_env_path(self, ice_bear_path):
         # Environment path
-        self.PWD: Path = Path(".").absolute()
+        self.PWD: Path = Path(ice_bear_path).absolute()
         self.EXTRACT_II = str(self.PWD / 'build_rcg/clang_tool/collectIncInfo')
         self.PANDA = str(self.PWD / 'external/panda/panda')
         # Environment CC/CXX Compiler
@@ -90,11 +90,6 @@ class Environment:
 
         # 查找cmake命令的位置
         self.CMAKE_PATH = shutil.which('cmake')
-        if self.CMAKE_PATH:
-            logger.info(f'CMake found at: {self.CMAKE_PATH}')
-        else:
-            logger.error('CMake not found in the system path')
-            exit(1)
         self.DIFF_PATH = shutil.which('diff')
         if self.DIFF_PATH:
             logger.info(f'diff found at: {self.CMAKE_PATH}')
@@ -143,7 +138,7 @@ class ArgumentParser:
         self.parser.add_argument('--cc', type=str, dest='cc', default='clang', help='Customize the C compiler for configure & build.')
         self.parser.add_argument('--cxx', type=str, dest='cxx', default='clang++', help='Customize the C++ compiler for configure & build.')
         self.parser.add_argument('-j', '--jobs', type=int, dest='jobs', default=1, help='Number of jobs can be executed in parallel.')
-        # self.parser.add_argument('-d', '--udp', action='store_true', dest='udp', help='Use files in diff path to `diff`.')
+        self.parser.add_argument('-d', '--udp', action='store_true', dest='udp', help='Use files in diff path to `diff`.')
         supported_analyzers = ['clangsa', 'clang-tidy', 'cppcheck']
         self.parser.add_argument('--analyzers', nargs='+', dest='analyzers', metavar='ANALYZER', required=False, choices=supported_analyzers,
                                default=None, help="Run analysis only with the analyzers specified. Currently supported analyzers "

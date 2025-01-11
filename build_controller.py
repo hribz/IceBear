@@ -61,7 +61,7 @@ def main(args):
     ]
 
     repo_list: List[MultiConfigRepository] = []
-    env = Environment(opts)
+    env = Environment(opts, os.path.dirname(os.path.abspath(__file__)))
 
     for repo in repo_info:
         repo_db = MultiConfigRepository(repo['name'], repo['src_path'], env, options_list=repo['options_list'])

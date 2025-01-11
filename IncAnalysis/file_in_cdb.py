@@ -137,7 +137,11 @@ class CallGraph:
         return ret
 
 class FileInCDB:
-    def __init__(self, parent, compile_command: CompileCommand):
+    def __init__(self, parent=None, compile_command: CompileCommand=None, cache_file=None):
+        if cache_file:
+            self.prep_file = cache_file
+            self.baseline_file = None
+            return
         # The Configuration instance
         from IncAnalysis.configuration import Configuration
         self.parent: Configuration = parent

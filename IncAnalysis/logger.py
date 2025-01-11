@@ -10,14 +10,32 @@ def ensure_dir(d, verbose=True):
         os.makedirs(d)
 
 class Logger(object):
-    def __init__(self, timestamp, TAG):
+    def __init__(self, TAG):
         self.TAG = TAG
         self.verbose = False
-        ensure_dir('logs')
         handler = {
-            logging.DEBUG: "logs/{}_debug.log".format(timestamp),
-            logging.INFO: "logs/{}_info.log".format(timestamp),
-            # logging.ERROR: "logs/{}_error.log".format(timestamp)
+            logging.DEBUG: sys.stderr,
+            logging.INFO: sys.stdout,
+        }
+        self.__loggers = {}
+        logLevels = handler.keys()
+        fmt = logging.Formatter('%(asctime)s [%(levelname)s]: %(message)s')
+        for level in logLevels:
+            logger = logging.getLogger(str(level))
+            logger.setLevel(level)
+            
+            sh = logging.StreamHandler(handler[level])
+            sh.setFormatter(fmt)
+            sh.setLevel(level)
+            logger.addHandler(sh)
+            self.__loggers.update({level: logger})
+        
+    def start_log(self, timestamp, workspace):
+        ensure_dir(workspace)
+        handler = {
+            logging.DEBUG: "{}/debug.log".format(workspace),
+            logging.INFO: "{}/info.log".format(workspace),
+            # logging.ERROR: "{}/{}_error.log".format(timestamp)
         }
         self.__loggers = {}
         logLevels = handler.keys()
@@ -31,12 +49,9 @@ class Logger(object):
             fh.setFormatter(fmt)
             fh.setLevel(level)
 
-            sh = logging.StreamHandler()
-            sh.setFormatter(fmt)
-            sh.setLevel(level)
             logger.addHandler(fh)
-            logger.addHandler(sh)
             self.__loggers.update({level: logger})
+
     def info(self, message):
         self.__loggers[logging.INFO].info(f"[{self.TAG}]" + message)
     def debug(self, message):
@@ -44,4 +59,4 @@ class Logger(object):
     def error(self, message):
         self.__loggers[logging.DEBUG].error(f"[{self.TAG}]" + message)
 
-logger = Logger(datetime.now().strftime('%Y%m%d_%H%M%S'), '')
+logger = Logger('Prepare Env')

@@ -124,7 +124,7 @@ def CodeCheckerAction(Repo: UpdateConfigRepository, version_stamp, repo_info: Re
 def main(args):
     parser = RepoParser()
     opts = parser.parse_args(args)
-    env = Environment(opts)
+    env = Environment(opts, os.path.dirname(os.path.abspath(__file__)))
     repos = 'repos/repos.json'
     benchmark = 'repos/benchmark.json'
 

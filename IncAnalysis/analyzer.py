@@ -96,7 +96,6 @@ class CSA(Analyzer):
         analyzer_cmd = [compiler] + file.compile_command.arguments + ['-Qunused-arguments']
         analyzer_cmd.extend(['--analyze', '-o', str(file.parent.csa_output_path)])
         analyzer_cmd.extend(self.analyzer_config.analyze_args())
-        makedir(os.path.dirname(file.csa_file))
         # Add file specific args.
         if self.analyzer_config.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             if file.cf_num == 0 or file.rf_num == 0:
@@ -105,6 +104,7 @@ class CSA(Analyzer):
             if file.parent.incrementable and file.has_rf:
                 analyzer_cmd.extend(['-Xanalyzer', f'-analyze-function-file={file.get_file_path(FileKind.RF)}'])
             if self.analyzer_config.inc_mode == IncrementalMode.InlineLevel:
+                makedir(os.path.dirname(file.csa_file))
                 analyzer_cmd.extend(['-Xanalyzer', f'-analyzer-dump-fsum={file.get_file_path(FileKind.FS)}'])
         return analyzer_cmd
 

@@ -117,7 +117,7 @@ def main(args):
     if not opts.workspace1 or not opts.workspace2:
         print("Please specify workspace1 and workspace2.")
         exit(1)
-    env = Environment(opts)
+    env = Environment(opts, os.path.dirname(os.path.abspath(__file__)))
     repos = 'repos/benchmark.json'
     total_summary = [{
         opts.workspace1: {

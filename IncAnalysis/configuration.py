@@ -166,11 +166,12 @@ class Configuration:
 
     def __init__(self, name, src_path, env, options: List[str], version_stamp, build_path=None, workspace_path=None,
                  baseline=None, update_mode:bool=False, build_type: BuildType=BuildType.CMAKE, build_script = None, configure_scripts = None, 
-                 cmakefile_path = None):
+                 cmakefile_path=None, cdb=None, need_build=True, need_configure=True):
         self.name = name
         self.src_path = src_path
         self.env = env
         self.version_stamp = version_stamp
+        self.cdb = cdb
         logger.TAG = f"{self.name}/{self.version_stamp}"
         # Record all files' latest version in repo history.
         self.global_file_dict: Dict[str, FileInCDB] = {}
@@ -191,6 +192,8 @@ class Configuration:
 
         # configure may need multiple scripts.
         self.build_type = build_type
+        self.need_build = need_build
+        self.need_configure = need_configure
         self.build_info = BuildInfo(self.src_path, self.build_path, build_type, 
                                     options, env, build_script, configure_scripts, cmakefile_path)
         
@@ -243,7 +246,10 @@ class Configuration:
             self.compile_database = self.build_path / 'build_commands.json'
         else:
             self.compile_database = self.build_path / 'compile_commands.json'
+        if self.cdb:
+            self.compile_database = Path(self.cdb)
         # Preprocess & diff Path.
+        self.cache_file = self.workspace / 'preprocess' / 'cache.txt'
         self.preprocess_path = self.workspace / 'preprocess' / self.version_stamp
         self.compile_commands_used_by_pre = self.preprocess_path / 'compile_commands_used_by_pre.json'
         self.preprocess_compile_database = self.preprocess_path / 'preprocess_compile_commands.json'
@@ -285,10 +291,14 @@ class Configuration:
 
     def process_this_config(self, can_skip_configure: bool, has_init: bool):
         # 1. configure & build
-        self.clean_and_configure(can_skip_configure, has_init)
-        self.build()
+        has_init = self.read_cache()
+        if self.need_configure:
+            self.clean_and_configure(can_skip_configure, has_init)
+        
+        if self.need_build:
+            self.build()
         if not self.prepare_file_list():
-            logger.info(f"[Process Config] {self.version_stamp} prepare file list failed.")
+            logger.info(f"[Process Config] prepare file list failed.")
             return False
         
         # Record real runtime and CPU time for tasks 
@@ -334,6 +344,20 @@ class Configuration:
         self.reports_statistics()
 
         return True
+    
+    def read_cache(self):
+        if os.path.exists(self.cache_file):
+            with open(self.cache_file, 'r') as f:
+                for line in f.readlines():
+                    line = line.strip()
+                    if len(line) == 0:
+                        continue
+                    (file, cache_file) = line.split(' ')
+                    self.global_file_dict[file] = FileInCDB(cache_file=cache_file)
+            logger.info("[Read Cache] Read cache successfully.")
+            return True
+        logger.info("[Read Cache] No cache, do full analysis.")
+        return False
 
     def prepare_file_list(self):
         # Don't invoke this function after `configure & build` automatically,
@@ -363,6 +387,7 @@ class Configuration:
                     else:
                         self.file_list_index[compile_command.file] = len(self.file_list)
                         self.file_list.append(file_in_cdb)
+        makedir(self.preprocess_path)
         with open(self.compile_commands_used_by_analyzers, 'w') as f:
             cdb = []
             for file_in_cdb in self.file_list:
@@ -372,6 +397,11 @@ class Configuration:
                 # Remove duplicate file in compile database.
                 cdb.append(file_in_cdb.compile_command.restore_to_json())
             json.dump(cdb, f, indent=4)
+
+        # update cache
+        with open(self.cache_file, 'w') as f:
+            for file_name, file_in_cdb in self.global_file_dict.items():
+                f.write(f"{file_name} {file_in_cdb.prep_file}\n")
 
         return True
 
@@ -411,8 +441,8 @@ class Configuration:
         start_time = time.time()
         # remake_dir(self.build_path, "[Config Build DIR exists]")
         makedir(self.build_path, "[Config Build DIR exists]")
-        if self.build_type == BuildType.CMAKE:
-            self.create_cmake_api_file()
+        # if self.build_type == BuildType.CMAKE:
+        #     self.create_cmake_api_file()
         if self.build_info.configure_scripts:
             configure_scripts = self.build_info.configure_scripts
         else:
@@ -433,11 +463,6 @@ class Configuration:
                 break
         self.session_times['configure'] = time.time() - start_time
         os.chdir(self.env.PWD)
-        with open(self.workspace / 'options.json', 'w') as f:
-            tmp_json_data = {"options": []}
-            for option in self.build_info.options:
-                tmp_json_data['options'].append(option.obj_to_json())
-            json.dump(tmp_json_data, f, indent=4)
     
     def build(self):
         start_time = time.time()
@@ -524,7 +549,6 @@ class Configuration:
             with open(self.preprocess_compile_database, 'w') as f:
                 json.dump(cdb, f, indent=4)
             logger.info(f"[Preprocess Files Success] {preprocess_script}")
-            logger.debug(f"[Preprocess Files Success] stderr: {process.stderr}")
         except subprocess.CalledProcessError as e:
             self.session_times['preprocess_repo'] = SessionStatus.Failed
             logger.error(f"[Preprocess Files Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
@@ -722,6 +746,8 @@ class Configuration:
         # We just need to diff files in compile database.
         process_file_list(FileInCDB.diff_with_baseline, self.file_list, self.env.analyze_opts.jobs)
         for file in self.file_list:
+            if file.baseline_file is not None:
+                file.baseline_file.clean_files()
             if file.is_changed():
                 self.diff_file_list.append(file)
         if self.status == 'DIFF':

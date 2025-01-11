@@ -20,5 +20,5 @@ $ make
 
 ## Usage
 ```bash
-IncAnalyer 
+IceBear 
 ```
