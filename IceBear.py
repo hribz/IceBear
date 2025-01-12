@@ -6,6 +6,7 @@ from IncAnalysis.environment import Environment, ArgumentParser
 from IncAnalysis.repository import UpdateConfigRepository
 from IncAnalysis.logger import logger
 from IncAnalysis.utils import makedir
+from IncAnalysis.reports_postprocess import postprocess_workspace
 
 class RepoParser(ArgumentParser):
     def __init__(self):
@@ -21,7 +22,6 @@ class RepoParser(ArgumentParser):
                                  default='./compile_commands.json')
         self.parser.add_argument('-bp', '--build-dir', type=str, dest='build_path', default='.',
                                  help='The directory to build the project.')
-        
 
 def main(argv):
     parser = RepoParser()
@@ -55,7 +55,8 @@ def main(argv):
                                   version_stamp=env.timestamp,
                                   default_build_type="unknown"
                                   )
-    Repo.process_one_config()
+    Repo.process_one_config(summary_path="logs", reports_statistics=False)
+    postprocess_workspace(workspace=workspace, this_version=env.timestamp)
 
 if __name__ == '__main__':
     main(sys.argv[1:])

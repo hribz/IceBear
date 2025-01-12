@@ -176,7 +176,7 @@ class CppCheck(Analyzer):
         analyzer_cmd = [self.analyzer_config.cppcheck, f"--project={config.compile_commands_used_by_analyzers}", f"-j{config.env.analyze_opts.jobs}"]
         analyzer_cmd.append(f"--showtime=file-total")
         analyzer_cmd.append(f"--cppcheck-build-dir={config.cppcheck_build_path}")
-        analyzer_cmd.append(f"--plist-output={config.cppcheck_output_path}")
+        # analyzer_cmd.append(f"--plist-output={config.cppcheck_output_path}")
         result_extname = ".json" if self.analyzer_config.Sarif else ".xml"
         analyzer_cmd.append(f"--output-file={config.cppcheck_output_path}/result{result_extname}")
         if self.analyzer_config.inc_mode.value >= IncrementalMode.FuncitonLevel.value:

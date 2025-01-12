@@ -13,7 +13,6 @@ import time
 import multiprocessing as mp
 from functools import partial
 
-from data_struct.reply import Reply
 from IncAnalysis.logger import logger
 from IncAnalysis.utils import * 
 from IncAnalysis.analyzer_config import *
@@ -155,10 +154,8 @@ class Configuration:
     args: List[str]
     src_path: Path
     build_path: Path
-    reply_path: Path
     workspace: Path
     compile_database: Path
-    reply_database: List[Reply]
     diff_file_list: List[FileInCDB]
     diff_origin_file_list: List[str]
     incrementable: bool
@@ -203,7 +200,6 @@ class Configuration:
         makedir(str(self.workspace))
         self.update_workspace_path()
 
-        self.reply_database = []
         self.diff_file_list = []
         self.status = 'WAIT'
         self.incrementable = False
@@ -238,9 +234,6 @@ class Configuration:
             self.analyzers.append(analyzer)
 
     def update_workspace_path(self):
-        self.cmake_api_path = self.build_path / '.cmake/api/v1'
-        self.query_path = self.cmake_api_path / 'query'
-        self.reply_path = self.cmake_api_path / 'reply'
         # Compile database.
         if self.build_type == BuildType.CMAKE:
             self.compile_database = self.build_path / 'build_commands.json'
@@ -341,8 +334,6 @@ class Configuration:
         self.analyze_cpu_time_user = (end_cpu_time.user - start_cpu_time.user)
         self.analyze_cpu_time_sys = (end_cpu_time.system - start_cpu_time.system)
 
-        self.reports_statistics()
-
         return True
     
     def read_cache(self):
@@ -416,15 +407,6 @@ class Configuration:
 
     def get_file_path(self, kind: FileKind, file_path: str) -> str:
         return self.get_file(file_path).get_file_path(kind)
-
-    def create_cmake_api_file(self):
-        if self.cmake_api_path.exists():
-            shutil.rmtree(self.cmake_api_path)
-        os.makedirs(self.query_path)
-        query_list = ['codemodel-v2', 'cache-v2', 'cmakeFiles-v1']
-        for query in query_list:
-            with open(self.query_path / query, 'w') as f:
-                f.write('')
     
     def clean_build(self):
         makedir(self.build_path)
@@ -441,8 +423,6 @@ class Configuration:
         start_time = time.time()
         # remake_dir(self.build_path, "[Config Build DIR exists]")
         makedir(self.build_path, "[Config Build DIR exists]")
-        # if self.build_type == BuildType.CMAKE:
-        #     self.create_cmake_api_file()
         if self.build_info.configure_scripts:
             configure_scripts = self.build_info.configure_scripts
         else:
@@ -456,7 +436,6 @@ class Configuration:
             try:
                 process = run(configure_script, shell=True, capture_output=True, text=True, check=True)
                 logger.info(f"[Repo Config Success] {process.stdout}")
-                # self.reply_database.append(Reply(self.reply_path, logger))
             except subprocess.CalledProcessError as e:
                 self.session_times['configure'] = SessionStatus.Failed
                 logger.error(f"[Repo Config Failed] stdout: {e.stdout}\n stderr: {e.stderr}")

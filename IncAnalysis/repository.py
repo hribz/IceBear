@@ -263,13 +263,15 @@ class UpdateConfigRepository(Repository):
     def update_version(self, version_stamp):
         self.default_config.update_version(version_stamp)
 
-    def process_one_config(self):
+    def process_one_config(self, summary_path=None, reports_statistics=True):
         if not self.default_config.process_this_config(self.can_skip_configure, self.has_init):
             logger.error("Process failed.")
             return
+        if reports_statistics:
+            self.default_config.reports_statistics()
         self.append_session_summary()
-        self.summary_to_csv()
-        self.summary_to_csv_specific()
+        self.summary_to_csv(summary_path)
+        self.summary_to_csv_specific(summary_path)
         self.file_status_to_csv()
         self.has_init = True
     
@@ -282,22 +284,24 @@ class UpdateConfigRepository(Repository):
         ret += str(self.default_config)
         self.session_summaries += ret
     
-    def summary_csv_path(self, specific = False):
+    def summary_csv_path(self, specific = False, summary_path=None):
         ret = str(self.default_config.workspace / f'{os.path.basename(self.name)}_{self.env.analyze_opts.inc}_{self.env.timestamp}')
+        if summary_path:
+            ret = str(self.default_config.workspace / summary_path / f'{os.path.basename(self.name)}_{self.env.analyze_opts.inc}_{self.env.timestamp}')
         ret += ("_specific.csv") if specific else (".csv")
         return ret
 
-    def summary_to_csv_specific(self):
+    def summary_to_csv_specific(self, summary_path):
         headers, config_data = self.summary_one_config_specific(self.default_config)
         data = []
         data.append(config_data)
-        add_to_csv(headers, data, self.summary_csv_path(specific=True), not self.has_init)
+        add_to_csv(headers, data, self.summary_csv_path(specific=True, summary_path=summary_path), not self.has_init)
     
-    def summary_to_csv(self):
+    def summary_to_csv(self, summary_path=None):
         headers, config_data = self.summary_one_config(self.default_config)
         data = []
         data.append(config_data)
-        add_to_csv(headers, data, self.summary_csv_path(specific=False), not self.has_init)
+        add_to_csv(headers, data, self.summary_csv_path(specific=False, summary_path=summary_path), not self.has_init)
     
     def file_status_to_csv(self):
         config = self.default_config
