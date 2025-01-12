@@ -35,7 +35,7 @@ def dict_hash(diagnostic: dict, encoding='utf-8'):
     sha256.update(json.dumps(diagnostic, sort_keys=True).encode(encoding))
     return sha256.hexdigest()
 
-analyzers = ['csa', 'clang-tidy', 'cppcheck']
+analyzers = ['clang-tidy', 'cppcheck', 'csa']
 
 def get_statistics_from_workspace(workspace):
     analyzers_floder = [os.path.join(workspace, analyzer) for analyzer in list_dir(workspace, analyzers)]

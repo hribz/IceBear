@@ -187,10 +187,11 @@ class CppCheck(Analyzer):
         analyzer_cmd.extend(self.analyzer_config.analyze_args())
 
         cppcheck_script = commands_to_shell_script(analyzer_cmd)
+        logger.info(f"[Cppcheck Analyzing] ......")
         logger.debug(f"[{__class__.__name__} Analyze Script] {cppcheck_script}")
         process = run(analyzer_cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=config.cppcheck_output_path)
         logger.info(f"[{__class__.__name__} Stdout] {process.stdout}")
-        logger.info(f"[{__class__.__name__} Stderr] {process.stderr}")
+        # logger.info(f"[{__class__.__name__} Stderr] {process.stderr}")
         if process.returncode == 0:
             logger.info(f"[{__class__.__name__} Analyze Success]")
         else:

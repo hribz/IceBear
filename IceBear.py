@@ -15,13 +15,13 @@ class RepoParser(ArgumentParser):
                                  help='The directory of the project that need to be analyzed.')
         self.parser.add_argument('--build', type=str, dest='build', default=None,
                                  help='The command used to build the project.')
+        self.parser.add_argument('-bd', '--build-dir', type=str, dest='build_dir', default=".",
+                                 help='The directory to build the project.')
         self.parser.add_argument('-o', '--output', type=str, dest='output', default='./ice-bear-output',
                                  help='Store analysis results to directory.')
         self.parser.add_argument('-f', '--compilation-database', type=str, dest='cdb',
                                  help='Customize the input compilation database',
                                  default=None)
-        self.parser.add_argument('-bp', '--build-dir', type=str, dest='build_path', default=".",
-                                 help='The directory to build the project.')
 
 def main(argv):
     parser = RepoParser()
@@ -38,9 +38,9 @@ def main(argv):
     makedir(workspace)
 
     build_command = opts.build
-    build_root = opts.build_path
+    build_root = opts.build_dir
     if build_root:
-        build_root = os.path.abspath(opts.build_path)
+        build_root = os.path.abspath(opts.build_dir)
     if build_command is None and not os.path.exists(opts.cdb):
         logger.info(f"Please make sure compilation database file {opts.cdb} exists.")
         exit(1)

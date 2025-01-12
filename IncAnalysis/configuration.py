@@ -327,6 +327,7 @@ class Configuration:
         start_cpu_time = os.times()
 
         self.analyze()
+        self.output_analysis_time()
 
         end_real_time = time.time()
         end_cpu_time = os.times()
@@ -804,6 +805,17 @@ class Configuration:
             if file.csa_analyze_time != 'Unknown':
                 self.total_csa_analyze_time += float(file.csa_analyze_time)
         return self.total_csa_analyze_time
+
+    def output_analysis_time(self):
+        if self.incrementable:
+            logger.info(f"[Number of incremental build files] {len(self.file_list)}")
+            logger.info(f"[Number of analyzed files] {len(self.diff_file_list)}")
+        else:
+            logger.info(f"[Number of analyzed files] {len(self.file_list)}")
+
+        for analyzer in self.analyzers:
+            analysis_time = round(self.session_times[analyzer.__class__.__name__], 3)
+            logger.info(f"[{analyzer.__class__.__name__} time] {analysis_time} s")
 
     def get_session_times(self):
         ret = "{\n"
