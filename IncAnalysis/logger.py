@@ -3,6 +3,10 @@ import sys
 import logging
 from datetime import datetime
 
+def remake_file(file):
+    if os.path.isfile(file) and os.path.exists(file):
+        os.remove(file)
+
 def ensure_dir(d, verbose=True):
     if not os.path.exists(d):
         if verbose:
@@ -32,9 +36,13 @@ class Logger(object):
         
     def start_log(self, timestamp, workspace):
         ensure_dir(workspace)
+        debug_file = "{}/debug.log".format(workspace)
+        info_file = "{}/info.log".format(workspace)
+        remake_file(debug_file)
+        remake_file(info_file)
         handler = {
-            logging.DEBUG: "{}/debug.log".format(workspace),
-            logging.INFO: "{}/info.log".format(workspace),
+            logging.DEBUG: debug_file,
+            logging.INFO: info_file,
             # logging.ERROR: "{}/{}_error.log".format(timestamp)
         }
         self.__loggers = {}
@@ -55,8 +63,10 @@ class Logger(object):
     def info(self, message):
         self.__loggers[logging.INFO].info(f"[{self.TAG}]" + message)
     def debug(self, message):
+        if not self.verbose:
+            return
         self.__loggers[logging.DEBUG].debug(f"[{self.TAG}]" + message)
     def error(self, message):
-        self.__loggers[logging.DEBUG].error(f"[{self.TAG}]" + message)
+        self.__loggers[logging.INFO].error(f"[{self.TAG}]" + message)
 
 logger = Logger('Prepare Env')

@@ -27,6 +27,7 @@ class Environment:
         
         self.ctu = opts.analyze == 'ctu'
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        logger.verbose = opts.verbose
         self.prepare_env_path(ice_bear_path)
 
         self.env = dict(os.environ)

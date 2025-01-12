@@ -2,6 +2,9 @@
 `IceBear` is a C/C++ static analysis tools incremental scheduler. Support static analysis tools as follow: [CSA(Clang Static Analyzer)](https://clang-analyzer.llvm.org/), [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/), [CppCheck](https://cppcheck.sourceforge.io/).
 `IceBear` can incrementally schedule these tools, with all tools supporting file-level incremental scheduling, and `CSA, CppCheck` supporting function-level incremental analysis (need install our modified version).
 
+## Overview
+![Overview](assets/Build%20System.drawio.svg)
+
 ## Installation
 ### CSA & Cppcheck
 `IceBear` is an analysis tools scheduler, so it's neccessary that the tools you want to use is available in your environment.
@@ -15,7 +18,7 @@ If you want to enable function-level incremental scheduling, please install our 
 ### IceBear
 ```bash
 # Dependencies
-$ sudo apt-get install clang-19 clang-tidy bear cmake
+$ sudo apt-get install clang-19 clang-tidy bear cmake z3
 
 # Build icebear.
 $ git clone https://github.com/hribz/IceBear.git
@@ -30,5 +33,5 @@ $ mv icebear ~/.local/bin/
 
 ```bash
 cd path/to/project
-icebear --repo /path/to/project --build 'make -j16' -o ice-bear-output -j 16 --inc func --clang path/to/clang --cppcheck path/to/cppcheck
+icebear --repo /path/to/project --build 'make -j16' -o path/to/ice-bear-output -j 16 --inc func --clang path/to/clang --cppcheck path/to/cppcheck
 ```

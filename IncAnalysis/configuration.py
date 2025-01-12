@@ -179,7 +179,7 @@ class Configuration:
         self.merged_files = 0
         self.abnormal_file_list: List[FileInCDB] = []
         if build_path is None:
-            self.build_path = self.src_path / 'build/build_0'
+            self.build_path = self.src_path
         else:
             tmp_path = Path(build_path)
             if tmp_path.is_absolute():
@@ -236,9 +236,9 @@ class Configuration:
     def update_workspace_path(self):
         # Compile database.
         if self.build_type == BuildType.CMAKE:
-            self.compile_database = self.build_path / 'build_commands.json'
+            self.compile_database = self.workspace / 'build_commands.json'
         else:
-            self.compile_database = self.build_path / 'compile_commands.json'
+            self.compile_database = self.workspace / 'compile_commands.json'
         if self.cdb:
             self.compile_database = Path(self.cdb)
         # Preprocess & diff Path.

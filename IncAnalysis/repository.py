@@ -266,7 +266,7 @@ class UpdateConfigRepository(Repository):
     def process_one_config(self, summary_path=None, reports_statistics=True):
         if not self.default_config.process_this_config(self.can_skip_configure, self.has_init):
             logger.error("Process failed.")
-            return
+            return False
         if reports_statistics:
             self.default_config.reports_statistics()
         self.append_session_summary()
@@ -274,6 +274,7 @@ class UpdateConfigRepository(Repository):
         self.summary_to_csv_specific(summary_path)
         self.file_status_to_csv()
         self.has_init = True
+        return True
     
     def only_clean_and_configure(self):
         self.default_config.clean_and_configure(self.can_skip_configure, self.has_init)

@@ -22,14 +22,6 @@ def list_dir(directory: str, filt_set: set=None):
     else:
         return dir_list
 
-def collect_reports(analyzer_output_path: str):
-    commit_to_reports = {}
-    sub_dirs = list_dir(analyzer_output_path)
-    for dir in sub_dirs:
-        reports = list_files(os.path.join(analyzer_output_path, dir))
-        commit_to_reports[dir] = reports
-    return commit_to_reports
-
 def all_reports(commit_to_reports) -> set:
     total_reports = set()
     for dir in commit_to_reports.keys():
@@ -51,7 +43,6 @@ def get_statistics_from_workspace(workspace):
     statistics = {
         "summary": {
             "total": 0,
-            "unique": 0,
             "new": 0
         }
     }
@@ -76,7 +67,7 @@ def get_statistics_from_workspace(workspace):
         analyzer_to_class = {
             'csa': "CSA", "clang-tidy": "ClangTidy", "cppcheck": "CppCheck"
         }
-        versions = list_dir(reports_path)
+        versions = sorted(list_dir(reports_path))
         statistics['summary'][analyzer_name] = {
             "total": 0
         }
@@ -176,7 +167,7 @@ class Report:
             "specific info": self.specific_info
         }
 
-def versions_and_reports(statistics: list) -> dict:
+def get_versions_and_reports(statistics: list) -> dict:
     versions_and_reports = {}
     first_version = None
     for analyzer in analyzers:
@@ -208,7 +199,7 @@ def versions_and_reports(statistics: list) -> dict:
 def postprocess_workspace(workspace, this_version):
     statistics = get_statistics_from_workspace(workspace=workspace)
     
-    versions_and_reports, baseline_version = versions_and_reports(statistics)
+    versions_and_reports, baseline_version = get_versions_and_reports(statistics)
 
     def old_and_now_reports_from_json(versions_and_reports: dict, this_version) -> set:
         old_reports = set()
@@ -222,10 +213,6 @@ def postprocess_workspace(workspace, this_version):
     
     old_reports, now_reports = old_and_now_reports_from_json(versions_and_reports, this_version)
     reports = old_reports.union(now_reports)
-    statistics['summary']['unique'] = len(reports)
-    for analyzer in analyzers:
-        if analyzer in statistics['summary'].keys():
-            statistics['summary'][analyzer]['uique'] = len([i for i in reports if i.analyzer == analyzer])
 
     def clang_tidy_diag_distribution(reports):
         kinds = {}
@@ -241,14 +228,19 @@ def postprocess_workspace(workspace, this_version):
     kinds = clang_tidy_diag_distribution(reports)
     statistics['summary']['clang-tidy distribution'] = { kind[0]: kind[1] for kind in kinds }
     
-    def new_reports(old_reports: set, now_reports:set, output_file):
+    def new_reports(old_reports: set, now_reports:set, output_file, now_file):
         new_reports = now_reports.difference(old_reports)
         logger.info(f"Find {len(new_reports)} new reports in {output_file}")
         with open(output_file, 'w') as f:
             json.dump([i.__to_json__() for i in new_reports], f, indent=3)
+
+        with open(now_file, 'w') as f:
+            json.dump([i.__to_json__() for i in now_reports], f, indent=3)
         return new_reports
 
-    new_reports1 = new_reports(old_reports, now_reports, os.path.join(workspace, 'new_reports.json'))
+    new_reports1 = new_reports(old_reports, now_reports
+                               , os.path.join(workspace, 'new_reports.json')
+                               , os.path.join(workspace, 'reports.json'))
     statistics['summary']['new'] = len(new_reports1)
 
     with open(os.path.join(workspace, 'all_reports.json'), 'w') as f:

@@ -19,8 +19,8 @@ class RepoParser(ArgumentParser):
                                  help='Store analysis results to directory.')
         self.parser.add_argument('-f', '--compilation-database', type=str, dest='cdb',
                                  help='Customize the input compilation database',
-                                 default='./compile_commands.json')
-        self.parser.add_argument('-bp', '--build-dir', type=str, dest='build_path', default='.',
+                                 default=None)
+        self.parser.add_argument('-bp', '--build-dir', type=str, dest='build_path', default=".",
                                  help='The directory to build the project.')
 
 def main(argv):
@@ -38,11 +38,16 @@ def main(argv):
     makedir(workspace)
 
     build_command = opts.build
-    build_root = os.path.abspath(opts.build_path)
+    build_root = opts.build_path
+    if build_root:
+        build_root = os.path.abspath(opts.build_path)
     if build_command is None and not os.path.exists(opts.cdb):
         logger.info(f"Please make sure compilation database file {opts.cdb} exists.")
         exit(1)
-    cdb = os.path.abspath(opts.cdb)
+
+    cdb = opts.cdb
+    if opts.cdb is not None and os.path.exists(opts.cdb):
+        cdb = os.path.abspath(opts.cdb)
 
     Repo = UpdateConfigRepository(os.path.basename(repo), repo, env, 
                                   workspace=workspace,
@@ -55,8 +60,9 @@ def main(argv):
                                   version_stamp=env.timestamp,
                                   default_build_type="unknown"
                                   )
-    Repo.process_one_config(summary_path="logs", reports_statistics=False)
-    postprocess_workspace(workspace=workspace, this_version=env.timestamp)
+    success = Repo.process_one_config(summary_path="logs", reports_statistics=False)
+    if success:
+        postprocess_workspace(workspace=workspace, this_version=env.timestamp)
 
 if __name__ == '__main__':
     main(sys.argv[1:])
