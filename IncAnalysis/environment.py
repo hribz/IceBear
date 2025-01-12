@@ -36,7 +36,7 @@ class Environment:
     def prepare_env_path(self, ice_bear_path):
         # Environment path
         self.PWD: Path = Path(ice_bear_path).absolute()
-        self.EXTRACT_II = str(self.PWD / 'build_rcg/clang_tool/collectIncInfo')
+        self.EXTRACT_II = str(self.PWD / 'build/clang_tool/collectIncInfo')
         self.PANDA = str(self.PWD / 'external/panda/panda')
         # Environment CC/CXX Compiler
 

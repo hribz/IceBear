@@ -23,3 +23,5 @@ functions.txt
 *.fixit
 *.anr
 *.cpprf
+*.egg-info
+icebear

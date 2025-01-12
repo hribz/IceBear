@@ -230,6 +230,7 @@ class CppCheckConfig(AnalyzerConfig):
         if not os.path.exists(env.cppcheck):
             logger.error(f"Cppcheck need command `cppcheck` exists in environment.")
             exit(1)
+        self.inc_level_check()        
 
         if not config_file:
             self.json_config = cppcheck_default_config.copy()
@@ -237,6 +238,31 @@ class CppCheckConfig(AnalyzerConfig):
         self.MaxCTUDepth = 2
         self.Sarif = True # Generate sarif format result file defaultly.
         self.parse_json_config()
+
+    def inc_level_check(self):
+        # func/inline-level incremental mode need to build custom Cppcheck from 'cppcheck-ica'.
+        if self.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+            cppcheck = self.cppcheck
+            result = subprocess.check_output([cppcheck, '--help'], universal_newlines=True, encoding="utf-8")
+            
+            func_level_enable = False
+            inline_level_enable = False
+
+            for line in result.splitlines():
+                line = line.strip()
+                if line.startswith('-analyze-function-file'):
+                    func_level_enable = True
+                if line.startswith('-analyzer-dump-fsum'):
+                    inline_level_enable = True
+            
+            if self.inc_mode == IncrementalMode.FuncitonLevel and not func_level_enable:
+                logger.error(f"[Inc Level Check] Please use customized clang build from llvm-project-ica,"
+                             " and make sure there is `-analyze-function-file` in `clang -cc1 -help`'s output.")
+                exit(1)
+            if self.inc_mode == IncrementalMode.InlineLevel and not inline_level_enable:
+                logger.error(f"[Inc Level Check] Please use customized clang build from llvm-project-ica,"
+                             " and make sure there are `-analyze-function-file` and `-analyzer-dump-fsum` in `clang -cc1 -help`'s output.")
+                exit(1)
 
     def parse_json_config(self):
         if self.json_checkers is not None:
