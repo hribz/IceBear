@@ -15,7 +15,7 @@ class RepoParser(ArgumentParser):
                                  help='The directory of the project that need to be analyzed.')
         self.parser.add_argument('--build', type=str, dest='build', default=None,
                                  help='The command used to build the project.')
-        self.parser.add_argument('-bd', '--build-dir', type=str, dest='build_dir', default=".",
+        self.parser.add_argument('--build-dir', type=str, dest='build_dir', default=".",
                                  help='The directory to build the project.')
         self.parser.add_argument('-o', '--output', type=str, dest='output', default='./ice-bear-output',
                                  help='Store analysis results to directory.')

@@ -21,7 +21,8 @@ def run_cmake_build(llvm_dir, jobs):
         if llvm_dir:
             cmake_command.extend(['-DLLVM_DIR=' + llvm_dir])
         
-        print("Running CMake configuration...")
+        cmake_script = " ".join(cmake_command)
+        print(f"Running CMake: {cmake_script}")
         subprocess.check_call(cmake_command)
 
         # 运行 CMake 构建
