@@ -20,13 +20,3 @@ target_link_libraries(collectIncInfo PRIVATE
   clangEdit
   clangLex
 )
-
-# add_executable(extractCG ExtractCG.cpp)
-# target_link_libraries(extractCG
-#   LLVM
-#   clangTooling
-#   clangBasic
-#   clangASTMatchers
-#   clangAST
-#   clangIndex
-# )
