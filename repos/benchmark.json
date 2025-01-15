@@ -3,19 +3,22 @@
         "project": "c-ares/c-ares",
         "build_type": "cmake",
         "config_options": [],
-        "branch": "main"
+        "branch": "main",
+        "shallow": "613c263de57c489dbae6e45f9eed76a7a2490ff5"
     },
     {
         "project": "protocolbuffers/protobuf",
         "build_type": "cmake",
         "config_options": [],
-        "branch": "main"
+        "branch": "main",
+        "shallow": "ec58a34824cf920e459f706e7ac2f34418b5e5e4"
     },
     {
         "project": "tesseract-ocr/tesseract",
         "build_type": "cmake",
         "config_options": [],
-        "branch": "main"
+        "branch": "main",
+        "shallow": "f657ec2213cc7349dcb9b5fb6c1cd036c1c74813"
     },
     {
         "project": "vim/vim",
@@ -25,7 +28,8 @@
         "config_options": [],
         "branch": "master",
         "out_of_tree": false,
-        "language": "C"
+        "language": "C",
+        "shallow": "89a107efd141d5a1fed850af80a74900077666cf"
     },
     {
         "project": "redis/redis",
@@ -33,7 +37,8 @@
         "config_options": [],
         "branch": "unstable",
         "out_of_tree": false,
-        "language": "C"
+        "language": "C",
+        "shallow": "64a40b20d906f019a32fcb227c938768079dd9ed"
     },
     {
         "project": "openssl/openssl",
@@ -44,7 +49,8 @@
         "build_script": "make -j24",
         "branch": "master",
         "out_of_tree": false,
-        "language": "C"
+        "language": "C",
+        "shallow": "b85e6f534906f0bf9114386d227e481d2336a0ff"
     },
     {
         "project": "FFmpeg/FFmpeg",
@@ -54,7 +60,8 @@
         ],
         "branch": "master",
         "out_of_tree": false,
-        "language": "C"
+        "language": "C",
+        "shallow": "954d55c2a4244b366ae97d09546ba8ce2534892b"
     },
     {
         "project": "bitcoin/bitcoin",
@@ -62,32 +69,15 @@
         "config_options": [
         ],
         "branch": "master",
-        "language": "C++"
+        "language": "C++",
+        "shallow": "fc7b21484703da606c5c69b23daee8c39506d90c"
     },
     {
         "project": "grpc/grpc",
         "build_type": "cmake",
         "config_options": [],
         "branch": "master",
-        "language": "C++"
-    },
-    {
-        "project": "opencv/opencv",
-        "build_type": "cmake",
-        "config_options": [],
-        "branch": "master",
-        "language": "C++"
-    },
-    {
-        "project": "llvm/llvm-project",
-        "build_type": "cmake",
-        "config_options": [
-            "LLVM_ENABLE_PROJECTS=clang;clang-tools-extra", "LLVM_ENABLE_Z3_SOLVER=ON",
-            "LLVM_USE_SPLIT_DWARF=ON", "LLVM_OPTIMIZED_TABLEGEN=ON",
-            "LLVM_ENABLE_BINDINGS=OFF", "CLANG_ENABLE_ARCMT=OFF", "LLVM_TARGETS_TO_BUILD=X86"
-        ],
-        "cmakefile_path": "llvm",
-        "branch": "main",
-        "language": "C++"
+        "language": "C++",
+        "shallow": "9b77138b71e04bb127ec1fb3ae280bca33c59ae1"
     }
 ]

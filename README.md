@@ -2,6 +2,22 @@
 *IceBear* is a scheduler for C/C++ static analysis tools, supports static analyzers as follow: [CSA(Clang Static Analyzer)](https://clang-analyzer.llvm.org/), [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/), [CppCheck](https://cppcheck.sourceforge.io/).
 *IceBear* can incrementally schedule these tools, with all tools supporting *file-level* incremental scheduling, and *CSA, CppCheck* supporting *function-level* incremental analysis (need install our modified version).
 
+## Docker Image
+### Prerequisites
+- Docker
+
+### For Usage
+This is a simple version for 
+
+### For Expriments
+The experiments in Section 3 require building 8 C/C++ projects and involve setting up a relatively complex environment with various dependencies.
+To facilitate the reproduction of the experimental results, we recommend using the Docker image we provide.
+
+```
+docker pull hribz/icebear-fse-expriments
+docker run -it hribz/icebear-fse-expriments
+```
+
 ## Installation
 *IceBear* is an analysis tools scheduler, so it's neccessary that the tools you want to use is available in your environment.
 
@@ -24,14 +40,16 @@ You need to install:
 - clang-19
 - bear 3.x
 - cmake >= 3.10
+- git
 
 Follow these commands to install *IncBear*:
 ```bash
-$ git clone https://github.com/hribz/IceBear.git
-$ cd IceBear
-$ python build.py -j8
+git clone https://github.com/hribz/IceBear.git
+cd IceBear
+pip install -r requirements.py
+python build.py -j8
 # Move icebear to any environment path.
-$ mv icebear ~/.local/bin/
+mv icebear ~/.local/bin/
 ```
 
 ## Usage

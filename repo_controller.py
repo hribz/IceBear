@@ -32,6 +32,7 @@ class RepoInfo:
         self.configure_scripts = get_if_exists(repo, "configure_scripts", None)
         self.build_script = get_if_exists(repo, "build_script", None)
         self.cmakefile_path = get_if_exists(repo, "cmakefile_path", None)
+        self.shallow = get_if_exists(repo, "shallow", None)
         
         self.abs_repo_path = str(self.repo_dir.absolute())
         if env.analyze_opts.codechecker:
@@ -157,7 +158,7 @@ def main(args):
             continue
 
         if Repo is None:
-            if not clone_project(repo_info.repo_name):
+            if not clone_project(repo_info.repo_name, repo_info.shallow):
                 status = STATUS.CLONE_FAILED
                 continue
             update_submodules(repo_info.repo_dir)

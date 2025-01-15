@@ -9,13 +9,13 @@ import requests
 from IncAnalysis.logger import logger
 from IncAnalysis.utils import makedir, remake_dir, Path
 
-ignore_repos = {'xbmc/xbmc', 'mirror/busybox', 'llvm/llvm-project', 'opencv/opencv', 'c-ares/c-ares'}
+ignore_repos = {}
 
 def get_repo_csv(csv_path: str) -> pd.DataFrame:
     commit_df = pd.read_csv(csv_path)
     return commit_df
 
-def clone_project(repo_name: str) -> bool:
+def clone_project(repo_name: str, shallow) -> bool:
     try:
         logger.info(f"[Clone Project] cloning repository {repo_name}")
         repo_dir = f"repos/{repo_name}"
@@ -26,7 +26,7 @@ def clone_project(repo_name: str) -> bool:
                 logger.info(f"[Clone Project] repository {repo_dir} already exists.")
                 return True
         remake_dir(Path(repo_dir))
-        Repo.clone_from(f"git@github.com:{repo_name}.git", repo_dir, multi_options=['--recurse-submodules'])
+        Repo.clone_from(f"https://github.com/{repo_name}.git", repo_dir, multi_options=['--recurse-submodules', f'--shallow-since={shallow}'])
         return True
     except Exception as e:
         # clone error, repository no longer exists
