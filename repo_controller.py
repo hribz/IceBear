@@ -39,7 +39,7 @@ class RepoInfo:
         if env.analyze_opts.codechecker:
             self.workspace = f"{self.abs_repo_path}_workspace/codechecker_{env.timestamp}"
         else:
-            self.workspace = f"{self.abs_repo_path}_workspace/{env.timestamp}_{env.analyze_opts.inc}"
+            self.workspace = f"{self.abs_repo_path}_workspace/{env.analyze_opts.inc}"
         logger.TAG = self.repo_name
 
 def IceBearAction(Repo: UpdateConfigRepository, version_stamp, repo_info: RepoInfo, env: Environment) -> UpdateConfigRepository:
@@ -151,7 +151,9 @@ def main(args):
     for repo in repo_json:
         os.chdir(env.PWD)
         repo_info = RepoInfo(repo, env)
-        
+        if os.path.exists(repo_info.workspace):
+            shutil.rmtree(repo_info.workspace)
+
         if opts.repo and opts.repo != repo_info.repo_name and opts.repo != os.path.basename(repo_info.repo_dir):
             continue
         if repo_info.repo_name in ignore_repos:
@@ -182,13 +184,19 @@ def main(args):
                 logger.error(f"[Checkout Commit] {repo_info.repo_name} checkout to {commit_sha} failed!")
         if Repo and not opts.codechecker:
             logger.info('---------------END SUMMARY-------------\n'+Repo.session_summaries)
-            postprocess_workspace(Repo.default_config.workspace, set(versions[1:]))
+            # Delete cache.
+            if os.path.exists(Repo.default_config.workspace / 'preprocess'):
+                shutil.rmtree(Repo.default_config.workspace / 'preprocess')
+            # Clean build.
+            Repo.default_config.clean_build()
 
             if not opts.repo:
                 headers, datas = read_csv(Repo.summary_csv_path(specific=False))
                 add_to_csv(headers, datas, result_file, init_csv)
                 headers, datas = read_csv(Repo.summary_csv_path(specific=True))
                 add_to_csv(headers, datas, result_file_specific, init_csv)
+            else:
+                postprocess_workspace(Repo.default_config.workspace, versions[1:], False)
 
             init_csv = False
             Repo = None

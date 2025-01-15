@@ -35,7 +35,7 @@ class Repository(ABC):
                 #    "prepare for inc(real)", "prepare for inc(user)", "prepare for inc(sys)", 
                    "prepare for CSA"]
         analyzers = [i.__class__.__name__ for i in config.analyzers]
-        reports = [f"{i.__class__.__name__} reports" for i in config.analyzers]
+        reports = [f"{i.__class__.__name__} reports" for i in config.analyzers if i.__class__.__name__ != 'ClangTidy']
         headers.extend(analyzers)
         headers.extend(["analyze"])
         # headers.extend(["analyze(real)", "analyze(cpu)", "analyze(sys)"])

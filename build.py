@@ -11,7 +11,7 @@ def run_cmake_build(llvm_dir, clang_dir, jobs, root_path):
     os.chdir(build_dir)
 
     try:
-        cmake_command = ['cmake', '..', '-DCMAKE_BUILD_TYPE=Release']
+        cmake_command = ['cmake', '..', '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON']
         if llvm_dir:
             cmake_command.extend(['-DLLVM_DIR=' + llvm_dir])
         if clang_dir:

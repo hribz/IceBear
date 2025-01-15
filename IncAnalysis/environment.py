@@ -94,6 +94,11 @@ class Environment:
         # 查找cmake命令的位置
         self.CMAKE_PATH = shutil.which('cmake')
         self.DIFF_PATH = shutil.which('diff')
+
+        def exit_if_inc():
+            if self.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+                exit(1)
+        
         if self.DIFF_PATH:
             logger.info(f'diff found at: {self.CMAKE_PATH}')
             # -b, -B: Try to ignore more space.
@@ -106,22 +111,22 @@ class Environment:
                                       "--new-group-format='%de,%dn %dE,%dN\n'", "--changed-group-format='%de,%dn %dE,%dN\n'"])
         else:
             logger.error('diff not found in the system path')
-            exit(1)
+            exit_if_inc()
         if self.EXTRACT_II:
             logger.info(f'Inc info extractor found at: {self.EXTRACT_II}')
         else:
             logger.error('Please build inc info extractor firstly') 
-            exit(1)
+            exit_if_inc()
         if os.path.exists(self.CLANG):
             logger.info(f'Use clang={self.CLANG}')
         else:
             logger.error(f'Please ensure that {self.CLANG} exists in your environment')
-            exit(1)
+            exit_if_inc()
         if os.path.exists(self.CLANG_PLUS_PLUS):
             logger.info(f'Use clang++={self.CLANG_PLUS_PLUS}')
         else:
             logger.error(f'Please ensure that {self.CLANG_PLUS_PLUS} exists in your environment')
-            exit(1)
+            exit_if_inc()
         
         self.DEFAULT_PANDA_COMMANDS = [
             self.PANDA, 

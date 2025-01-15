@@ -88,7 +88,6 @@ class BuildInfo:
             cmakeFile = self.cmakefile_path / 'CMakeLists.txt'
             if not cmakeFile.exists():
                 print(f'Please make sure there is CMakeLists.txt in {self.cmakefile_path}')
-                exit(1)
             self.options.append(Option('CMAKE_EXPORT_COMPILE_COMMANDS=1'))
             self.options.append(Option('CMAKE_BUILD_TYPE=Release'))
             self.options.append(Option(f'CMAKE_C_COMPILER={self.env.CC}'))
@@ -231,7 +230,8 @@ class Configuration:
             else:
                 logger.error(f"Don't support {analyzer_name}.")
                 continue
-            self.analyzers.append(analyzer)
+            if analyzer.analyzer_config.ready_to_run:
+                self.analyzers.append(analyzer)
 
     def update_workspace_path(self):
         # Compile database.
@@ -286,7 +286,8 @@ class Configuration:
         # 1. configure & build
         has_init = self.read_cache()
         if self.need_configure:
-            self.clean_and_configure(can_skip_configure, has_init)
+            if self.build_type == BuildType.CMAKE or not (can_skip_configure and has_init):
+                self.configure()
         
         if self.need_build:
             self.build()
@@ -659,7 +660,11 @@ class Configuration:
             reports = []
             if analyzer.__class__.__name__ not in statistics:
                 statistics[analyzer.__class__.__name__] = []
-            self.session_times[f"{analyzer.__class__.__name__} reports"] = 0
+            # One clang-tidy fixit file contains multiple reports.
+            if analyzer.__class__.__name__ == ClangTidy.__name__:
+                self.session_times[f"ClangTidy files"] = 0
+            else:
+                self.session_times[f"{analyzer.__class__.__name__} reports"] = 0
             if isinstance(analyzer, CSA):
                 if not os.path.exists(self.csa_output_path):
                     continue
@@ -687,7 +692,10 @@ class Configuration:
                 'version': self.version_stamp,
                 'reports': reports
             })
-            self.session_times[f"{analyzer.__class__.__name__} reports"] = len(reports)
+            if analyzer.__class__.__name__ == ClangTidy.__name__:
+                self.session_times[f"ClangTidy files"] = len(reports)
+            else:
+                self.session_times[f"{analyzer.__class__.__name__} reports"] = len(reports)
 
         with open(self.reports_statistics_path, 'w') as f:
             json.dump(statistics, f, indent=4)
