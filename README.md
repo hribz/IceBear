@@ -13,9 +13,9 @@ It is recommended to use our [precompiled version](https://github.com/hribz/IceB
 ```bash
 cd /path/to/
 tar -zxvf cppcheck-ica.tar.gz
-tar -zxvf llvm-project-ica.tar.gz
-# The path to CSA is /path/to/LLVM-19.1.5-Linux/bin/clang
 # The path to cppcheck is /path/to/cppcheck-ica/bin/cppcheck
+tar -zxvf llvm-project-ica.tar.gz
+# The path to Clang is /path/to/LLVM-19.1.5-Linux/bin/clang
 ```
 Or build them from source code ([CSA](https://github.com/hribz/llvm-project-ica/tree/main) and [Cppcheck](https://github.com/hribz/cppcheck-ica/tree/2.16.ica)) by yourself.
 
@@ -27,11 +27,23 @@ You need to install:
 
 Follow these commands to install *IncBear*:
 ```bash
-$ git clone https://github.com/hribz/IceBear.git
-$ cd IceBear
-$ python build.py -j8
+git clone https://github.com/hribz/IceBear.git
+cd IceBear
+pip install -r requirements.py
+python build.py -j8
 # Move icebear to any environment path.
-$ mv icebear ~/.local/bin/
+mv icebear ~/.local/bin/
+```
+
+If `python build.py` output CMake error:
+
+> Could not find a package configuration file provided by "Clang"/"LLVM"
+
+You should specify `LLVM_DIR` and `Clang_DIR` mannually. 
+For example, use our modified version Clang.
+
+```bash
+python build.py -j8 --llvm-dir=/path/to/LLVM-19.1.5-Linux/lib/cmake/llvm --clang-dir=/path/to/LLVM-19.1.5-Linux/lib/cmake/clang
 ```
 
 ## Usage
