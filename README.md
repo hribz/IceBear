@@ -5,24 +5,36 @@
 ## Installation
 *IceBear* is an analysis tools scheduler, so it's neccessary that the tools you want to use is available in your environment.
 
-### CSA & Cppcheck
-If you want to enable *function-level* incremental scheduling, please install our modified version.
+If you want to enable *function-level* incremental scheduling, please install our modified version CSA and Cppcheck.
 
-It is recommended to use our [precompiled version](https://github.com/hribz/IceBear/releases/tag/v0.1) for the Linux x86 environment.
+### CSA
+It is recommended to use our [pre-built version CSA](https://github.com/hribz/IceBear/releases/tag/v0.1) for the Linux x86 environment, or build CSA from [source code](https://github.com/hribz/llvm-project-ica/tree/main) by yourself.
+
 
 ```bash
 cd /path/to/
-tar -zxvf cppcheck-ica.tar.gz
-# The path to cppcheck is /path/to/cppcheck-ica/bin/cppcheck
 tar -zxvf llvm-project-ica.tar.gz
-# The path to Clang is /path/to/LLVM-19.1.5-Linux/bin/clang
+# The path to CSA is /path/to/LLVM-19.1.5-Linux/bin/clang
 ```
-Or build them from source code ([CSA](https://github.com/hribz/llvm-project-ica/tree/main) and [Cppcheck](https://github.com/hribz/cppcheck-ica/tree/2.16.ica)) by yourself.
+
+### Cppcheck
+If you want to try *function-level* incremental [Cppcheck](https://github.com/hribz/cppcheck-ica/tree/2.16.ica), please build from source code as follows.
+
+```bash
+wget https://github.com/hribz/cppcheck-ica/archive/refs/heads/2.16.ica.zip
+unzip 2.16.ica.zip
+cd cppcheck-ica-2.16.ica
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/path/to/cppcheck-ica
+make -j16
+make install
+# The path to Cppcheck is /path/to/cppcheck-ica/bin/cppcheck
+```
 
 ### IceBear
 You need to install:
 - clang-19
-- bear 3.x
+- bear
 - cmake >= 3.10
 
 Follow these commands to install *IncBear*:
@@ -33,17 +45,6 @@ pip install -r requirements.py
 python build.py -j8
 # Move icebear to any environment path.
 mv icebear ~/.local/bin/
-```
-
-If `python build.py` output CMake error:
-
-> Could not find a package configuration file provided by "Clang"/"LLVM"
-
-You should specify `LLVM_DIR` and `Clang_DIR` mannually. 
-For example, use our modified version Clang.
-
-```bash
-python build.py -j8 --llvm-dir=/path/to/LLVM-19.1.5-Linux/lib/cmake/llvm --clang-dir=/path/to/LLVM-19.1.5-Linux/lib/cmake/clang
 ```
 
 ## Usage

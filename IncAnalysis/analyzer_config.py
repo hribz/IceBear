@@ -20,6 +20,7 @@ class AnalyzerConfig(ABC):
 
         self.workspace: Path = workspace
         self.args = None
+        self.ready_to_run = True
         if config_file is not None:
             self.init_from_file(config_file)
         if checker_file is not None:
@@ -47,7 +48,7 @@ csa_default_config = {
         "-analyzer-stats", # Output time cost.
     ],
     "CSAConfig": [
-        "crosscheck-with-z3=true",
+        "crosscheck-with-z3=false",
         "expand-macros=true",
         "unroll-loops=true",
         # "mode=deep",
@@ -94,7 +95,7 @@ class CSAConfig(AnalyzerConfig):
         }
         if not os.path.exists(env.CLANG) or not os.path.exists(env.CLANG_PLUS_PLUS):
             logger.error(f"CSA need command `clang/clang++` exists in environment.")
-            exit(1)
+            self.ready_to_run = False
         self.inc_level_check()
 
         if not config_file:
@@ -125,11 +126,11 @@ class CSAConfig(AnalyzerConfig):
             if self.inc_mode == IncrementalMode.FuncitonLevel and not func_level_enable:
                 logger.error(f"[CSA Inc Level Check] Please use customized clang build from llvm-project-ica,"
                              " and make sure there is `-analyze-function-file` in `clang -cc1 -help`'s output.")
-                exit(1)
+                self.ready_to_run = False
             if self.inc_mode == IncrementalMode.InlineLevel and not inline_level_enable:
                 logger.error(f"[CSA Inc Level Check] Please use customized clang build from llvm-project-ica,"
                              " and make sure there are `-analyze-function-file` and `-analyzer-dump-fsum` in `clang -cc1 -help`'s output.")
-                exit(1)
+                self.ready_to_run = False
 
     def parse_json_config(self):
         self.csa_options = self.json_config.get("CSAOptions")
@@ -199,7 +200,7 @@ class ClangTidyConfig(AnalyzerConfig):
         self.diagtool = env.diagtool
         if not os.path.exists(env.clang_tidy):
             logger.error(f"Clang-tidy need command `clang-tidy` exists in environment.")
-            exit(1)
+            self.ready_to_run = False
 
         if not config_file:
             self.json_config = clang_tidy_default_config.copy()
@@ -229,7 +230,7 @@ class CppCheckConfig(AnalyzerConfig):
         self.cppcheck = env.cppcheck
         if not os.path.exists(env.cppcheck):
             logger.error(f"Cppcheck need command `cppcheck` exists in environment.")
-            exit(1)
+            self.ready_to_run = False
         self.inc_level_check()        
 
         if not config_file:
@@ -255,7 +256,7 @@ class CppCheckConfig(AnalyzerConfig):
             if self.inc_mode == IncrementalMode.FuncitonLevel and not func_level_enable:
                 logger.error(f"[Cppcheck Inc Level Check] Please use customized cppcheck build from cppcheck-ica,"
                              " and make sure there is `--analyze-function-file` in `cppcheck --help`'s output.")
-                exit(1)
+                self.ready_to_run = False
 
     def parse_json_config(self):
         if self.json_checkers is not None:
@@ -300,7 +301,7 @@ class InferConfig(AnalyzerConfig):
         self.infer = env.infer
         if not os.path.exists(env.infer):
             logger.error(f"infer need command `infer` exists in environment.")
-            exit(1)
+            self.ready_to_run = False
 
         if not config_file:
             self.json_config = infer_default_config.copy()

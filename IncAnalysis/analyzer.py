@@ -99,7 +99,7 @@ class CSA(Analyzer):
         # Add file specific args.
         if self.analyzer_config.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             if file.cf_num == 0 or file.rf_num == 0:
-                logger.info(f"[{__class__.__name__} No Functions] Don't need to analyze {file.file_name}")
+                logger.debug(f"[{__class__.__name__} No Functions] Don't need to analyze {file.file_name}")
                 return None
             if file.parent.incrementable and file.has_rf:
                 analyzer_cmd.extend(['-Xanalyzer', f'-analyze-function-file={file.get_file_path(FileKind.RF)}'])

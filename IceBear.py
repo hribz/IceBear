@@ -41,8 +41,11 @@ def main(argv):
     build_root = opts.build_dir
     if build_root:
         build_root = os.path.abspath(opts.build_dir)
-    if build_command is None and not os.path.exists(opts.cdb):
-        logger.info(f"Please make sure compilation database file {opts.cdb} exists.")
+    if build_command is None and (opts.cdb is None or not os.path.exists(opts.cdb)):
+        if opts.cdb is None:
+            logger.info(f"Please specify compilation database if your don't build through icebear.")
+        else:
+            logger.info(f"Please make sure compilation database file {opts.cdb} exists.")
         exit(1)
 
     cdb = opts.cdb
@@ -62,7 +65,7 @@ def main(argv):
                                   )
     success = Repo.process_one_config(summary_path="logs", reports_statistics=False)
     if success:
-        postprocess_workspace(workspace=workspace, this_version=env.timestamp)
+        postprocess_workspace(workspace=workspace, this_versions=set(env.timestamp))
 
 if __name__ == '__main__':
     main(sys.argv[1:])
