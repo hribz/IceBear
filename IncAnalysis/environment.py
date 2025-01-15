@@ -1,9 +1,11 @@
 import os
 from pathlib import Path
+import re
 import shutil
 import argparse
 from enum import Enum, auto
 from datetime import datetime
+import subprocess
 
 from IncAnalysis.logger import logger
 
@@ -127,6 +129,21 @@ class Environment:
             '--cc', self.CLANG, 
             '--cxx', self.CLANG_PLUS_PLUS
         ]
+
+        self.bear = shutil.which("bear")
+        if not os.path.exists(self.bear):
+            logger.error("Please ensure that bear exists in your envrionment")
+        
+        def get_bear_version(bear):
+            try:
+                result = subprocess.run([bear, "--version"], capture_output=True, text=True, check=True)
+                match = re.match(r'bear (\d+)\.', result.stdout)
+                if match:
+                    return int(match.group(1))
+                return 2
+            except (subprocess.CalledProcessError, OSError):
+                return 2
+        self.bear_version = get_bear_version(self.bear)
 
 class ArgumentParser:
     def __init__(self):

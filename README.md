@@ -38,7 +38,7 @@ Or build them from source code ([CSA](https://github.com/hribz/llvm-project-ica/
 ### IceBear
 You need to install:
 - clang-19
-- bear 3.x
+- bear
 - cmake >= 3.10
 - git
 

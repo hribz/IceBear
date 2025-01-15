@@ -94,8 +94,8 @@ class BuildInfo:
             self.options.append(Option(f'CMAKE_C_COMPILER={self.env.CC}'))
             self.options.append(Option(f'CMAKE_CXX_COMPILER={self.env.CXX}'))
             commands = [self.env.CMAKE_PATH]
-            commands.append(f"-S {str(self.cmakefile_path)}")
-            commands.append(f"-B {str(self.build_path)}")
+            commands.extend(["-S", str(self.cmakefile_path)])
+            commands.extend(["-B", str(self.build_path)])
             for option in self.options:
                 commands.append(f"-D{option.name}={option.value}")
         elif self.build_type == BuildType.CONFIGURE:
@@ -450,11 +450,10 @@ class Configuration:
         # Some projects need to `configure & build` in source tree. 
         # CMake will not be influenced by path.
         os.chdir(self.build_path)
-        commands = ['bear', '--output', f'{self.compile_database}']
-        # Update bear version, these parameters have been removed.
-        # commands.extend(['--use-cc', f'{self.env.CC}'])
-        # commands.extend(['--use-c++', f'{self.env.CXX}'])
-        commands.append('--')
+        if self.env.bear_version == 2:
+            commands = [self.env.bear, '--cdb', str(self.compile_database)]
+        else:
+            commands = [self.env.bear, '--output', str(self.compile_database), '--']
         if self.build_info.build_script:
             commands.append(self.build_info.build_script)
         else:

@@ -14,7 +14,6 @@ def list_files(directory: str):
 
 def list_dir(directory: str, filt_set: set=None):
     if not os.path.exists(directory):
-        logger.info(f"{directory} does not exist.")
         return []
     dir_list = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
     if filt_set:
@@ -67,7 +66,18 @@ def get_statistics_from_workspace(workspace):
         analyzer_to_class = {
             'csa': "CSA", "clang-tidy": "ClangTidy", "cppcheck": "CppCheck"
         }
-        versions = sorted(list_dir(reports_path))
+        
+        def get_versions(workspace, analyzer):
+            origin_statistics_file = os.path.join(workspace, 'reports_statistics.json')
+            if os.path.exists(origin_statistics_file):
+                with open(origin_statistics_file, 'r') as f:
+                    info = json.load(f)
+                    return [i['version'] for i in info[analyzer]]
+            return None
+
+        versions = get_versions(workspace, analyzer_to_class[analyzer_name])
+        if versions is None:
+            versions = sorted(list_dir(reports_path))
         statistics['summary'][analyzer_name] = {
             "total": 0
         }
@@ -196,22 +206,23 @@ def get_versions_and_reports(statistics: list) -> dict:
             versions_and_reports[version] = versions_and_reports[version].union(reports)
     return versions_and_reports, first_version
 
-def postprocess_workspace(workspace, this_version):
+def postprocess_workspace(workspace, this_versions, output_news=True):
+    logger.info("[Postprocessing Reports]")
     statistics = get_statistics_from_workspace(workspace=workspace)
     
     versions_and_reports, baseline_version = get_versions_and_reports(statistics)
 
-    def old_and_now_reports_from_json(versions_and_reports: dict, this_version) -> set:
+    def old_and_now_reports_from_json(versions_and_reports: dict, this_versions) -> set:
         old_reports = set()
         now_reports = set()
         for version, val in versions_and_reports.items():
-            if version == this_version:
+            if version in this_versions:
                 now_reports = now_reports.union(val)
             else:
                 old_reports = old_reports.union(val)
         return old_reports, now_reports
     
-    old_reports, now_reports = old_and_now_reports_from_json(versions_and_reports, this_version)
+    old_reports, now_reports = old_and_now_reports_from_json(versions_and_reports, this_versions)
     reports = old_reports.union(now_reports)
 
     def clang_tidy_diag_distribution(reports):
@@ -230,7 +241,6 @@ def postprocess_workspace(workspace, this_version):
     
     def new_reports(old_reports: set, now_reports:set, output_file, now_file):
         new_reports = now_reports.difference(old_reports)
-        logger.info(f"Find {len(new_reports)} new reports in {output_file}")
         with open(output_file, 'w') as f:
             json.dump([i.__to_json__() for i in new_reports], f, indent=3)
 
@@ -238,10 +248,11 @@ def postprocess_workspace(workspace, this_version):
             json.dump([i.__to_json__() for i in now_reports], f, indent=3)
         return new_reports
 
-    new_reports1 = new_reports(old_reports, now_reports
-                               , os.path.join(workspace, 'new_reports.json')
-                               , os.path.join(workspace, 'reports.json'))
-    statistics['summary']['new'] = len(new_reports1)
+    if output_news:
+        new_reports1 = new_reports(old_reports, now_reports
+                                , os.path.join(workspace, 'new_reports.json')
+                                , os.path.join(workspace, 'reports.json'))
+        statistics['summary']['new'] = len(new_reports1)
 
     with open(os.path.join(workspace, 'all_reports.json'), 'w') as f:
         json.dump(statistics, f, indent=3)

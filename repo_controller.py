@@ -8,13 +8,14 @@ from IncAnalysis.utils import *
 from IncAnalysis.environment import *
 from IncAnalysis.logger import logger
 from IncAnalysis.utils import add_to_csv
+from IncAnalysis.reports_postprocess import postprocess_workspace
 from git_utils import *
 
 class RepoParser(ArgumentParser):
     def __init__(self):
         super().__init__()
         self.parser.add_argument('--repo', type=str, dest='repo', help='Only analyse specific repos.')
-        self.parser.add_argument('--daily', type=int, default=10, dest='daily', help='Analyse n daily commits.')
+        self.parser.add_argument('--daily', type=int, default=5, dest='daily', help='Analyse n daily commits.')
         self.parser.add_argument('--amount', type=int, default=5, dest='amount', help='Amount delta between two commits.')
         self.parser.add_argument('--codechecker', action='store_true', dest='codechecker', help='Use CodeChecker as scheduler.')
 
@@ -158,18 +159,20 @@ def main(args):
             continue
 
         if Repo is None:
-            if not clone_project(repo_info.repo_name, repo_info.shallow):
+            if not clone_project(repo_info.repo_name):
                 status = STATUS.CLONE_FAILED
                 continue
             update_submodules(repo_info.repo_dir)
 
-        commits = get_recent_n_daily_commits(repo_info.repo_dir, opts.daily, repo_info.branch, opts.amount) if opts.daily>0 else [commit['hash'] for commit in repo['commits']]
+        commits = get_recent_n_daily_commits(repo_info.repo_dir, opts.daily, repo_info.branch, opts.amount, repo_info.shallow) if opts.daily>0 else [commit['hash'] for commit in repo['commits']]
         for commit_sha in commits:
             status = STATUS.NORMAL
+            versions = []
             if checkout_target_commit(repo_info.abs_repo_path, commit_sha):
                 logger.info(f"[Git Checkout] checkout {repo_info.repo_name} to {commit_sha}")
                 commit_date = get_head_commit_date(repo_info.repo_dir)
                 version_stamp = f"{commit_date}_{commit_sha[:6]}"
+                versions.append(version_stamp)
                 if opts.codechecker:
                     Repo = CodeCheckerAction(Repo, version_stamp, repo_info, env)
                 else:
@@ -177,21 +180,15 @@ def main(args):
             else:
                 status = STATUS.CHECK_FAILED
                 logger.error(f"[Checkout Commit] {repo_info.repo_name} checkout to {commit_sha} failed!")
-        if Repo and not opts.codechecker and not opts.repo:
+        if Repo and not opts.codechecker:
             logger.info('---------------END SUMMARY-------------\n'+Repo.session_summaries)
-            headers, datas = read_csv(Repo.summary_csv_path(specific=False))
-            add_to_csv(headers, datas, result_file, init_csv)
-            headers, datas = read_csv(Repo.summary_csv_path(specific=True))
-            add_to_csv(headers, datas, result_file_specific, init_csv)
+            postprocess_workspace(Repo.default_config.workspace, set(versions[1:]))
 
-            if os.path.exists(reports_file):
-                all_reports = json.load(open(reports_file, 'r'))
-            else:
-                all_reports = {}
-            repo_reports = json.load(open(Repo.default_config.workspace / 'reports_statistics.json', 'r'))
-            with open(reports_file, 'w') as f:
-                all_reports[Repo.name] = repo_reports
-                json.dump(all_reports, f, indent=4)
+            if not opts.repo:
+                headers, datas = read_csv(Repo.summary_csv_path(specific=False))
+                add_to_csv(headers, datas, result_file, init_csv)
+                headers, datas = read_csv(Repo.summary_csv_path(specific=True))
+                add_to_csv(headers, datas, result_file_specific, init_csv)
 
             init_csv = False
             Repo = None

@@ -15,7 +15,7 @@ def get_repo_csv(csv_path: str) -> pd.DataFrame:
     commit_df = pd.read_csv(csv_path)
     return commit_df
 
-def clone_project(repo_name: str, shallow) -> bool:
+def clone_project(repo_name: str) -> bool:
     try:
         logger.info(f"[Clone Project] cloning repository {repo_name}")
         repo_dir = f"repos/{repo_name}"
@@ -26,7 +26,7 @@ def clone_project(repo_name: str, shallow) -> bool:
                 logger.info(f"[Clone Project] repository {repo_dir} already exists.")
                 return True
         remake_dir(Path(repo_dir))
-        Repo.clone_from(f"https://github.com/{repo_name}.git", repo_dir, multi_options=['--recurse-submodules', f'--shallow-since={shallow}'])
+        Repo.clone_from(f"https://github.com/{repo_name}.git", repo_dir, multi_options=['--recurse-submodules'])
         return True
     except Exception as e:
         # clone error, repository no longer exists
@@ -75,7 +75,7 @@ def get_local_repo_commit_parents(repo_dir: str, commit: str) -> list:
     # return parent commits
     return [commit.hexsha for commit in repo.head.commit.parents]
 
-def get_recent_n_daily_commits(repo_dir: str, n: int, branch, amount):
+def get_recent_n_daily_commits(repo_dir: str, n: int, branch, amount, shallow):
     assert n>=0
     assert os.path.isabs(repo_dir)
     repo = Repo(repo_dir)
@@ -86,13 +86,13 @@ def get_recent_n_daily_commits(repo_dir: str, n: int, branch, amount):
     later_commit_date = None
     daily_commits = []
     amount_delta = 0
-    if not checkout_target_commit(repo_dir, branch):
-        logger.error(f"Checkout {branch} failed.")
+    if not checkout_target_commit(repo_dir, shallow):
+        logger.error(f"Checkout {shallow} failed.")
         exit(1)
     else:
-        logger.info(f"Checkout {branch} success.")
+        logger.info(f"Checkout {shallow} success.")
 
-    for commit in repo.iter_commits(branch):
+    for commit in repo.iter_commits(shallow):
         commit_date = datetime.fromtimestamp(commit.committed_date).date()
         amount_delta += 1
         if later_commit is None:
