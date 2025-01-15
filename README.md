@@ -3,37 +3,70 @@
 *IceBear* can incrementally schedule these tools, with all tools supporting *file-level* incremental scheduling, and *CSA, CppCheck* supporting *function-level* incremental analysis (need install our modified version).
 
 ## Docker Image
+We recommend using Docker container to quickly start *IceBear*.
+
 ### Prerequisites
 - Docker
 
 ### For Usage
-This is a simple version for 
+This is a base version, which only includes the dependencies required for IceBear, and contains a small C project [c-ares](https://github.com/c-ares/c-ares).
 
-### For Expriments
-The experiments in Section 3 require building 8 C/C++ projects and involve setting up a relatively complex environment with various dependencies.
-To facilitate the reproduction of the experimental results, we recommend using the Docker image we provide.
+Use follow commands to analyze this demo project across 5 versions by *IceBear*. 
+The results can be found in `repos/c-ares/c-ares_workspace/func`.
 
+```bash
+docker pull ghcr.io/hribz/icebear/icebear-fse:v0.1
+docker run --rm -it ghcr.io/hribz/icebear/icebear-fse:v0.1
+python repo_controller.py --inc=func -j16 --repo='c-ares'
 ```
-docker pull hribz/icebear-fse-expriments
-docker run -it hribz/icebear-fse-expriments
+
+### For Experiments
+The experiments in Section 3 require building 8 C/C++ projects and involve setting up a relatively complex environment with various dependencies.
+So this docker image will be larger, and the expriments may need lots of time (determined by your machine) and storage space.
+
+What's more, the origin data in submitted paper can be found in `repos/result/data_in_paper`.
+
+```bash
+docker pull ghcr.io/hribz/icebear/icebear-fse:exp
+docker run --rm -it ghcr.io/hribz/icebear/icebear-fse:exp
+# Incremental Build-based strategy.
+python repo_controller.py --inc=noinc -j16
+# IceBear strategy.
+python repo_controller.py --inc=func -j16
+# Compare reports.
+python reports_analysis.py
 ```
 
 ## Installation
+You can also install *IceBear* by yourself, which it's more complex than use Docker container.
+
 *IceBear* is an analysis tools scheduler, so it's neccessary that the tools you want to use is available in your environment.
 
-### CSA & Cppcheck
-If you want to enable *function-level* incremental scheduling, please install our modified version.
+If you want to enable *function-level* incremental scheduling, please install our modified version CSA and Cppcheck.
 
-It is recommended to use our [precompiled version](https://github.com/hribz/IceBear/releases/tag/v0.1) for the Linux x86 environment.
+### CSA
+It is recommended to use our [pre-built version CSA](https://github.com/hribz/IceBear/releases/tag/v0.1) for the Linux x86 environment, or build CSA from [source code](https://github.com/hribz/llvm-project-ica/tree/main) by yourself.
+
 
 ```bash
 cd /path/to/
-tar -zxvf cppcheck-ica.tar.gz
 tar -zxvf llvm-project-ica.tar.gz
 # The path to CSA is /path/to/LLVM-19.1.5-Linux/bin/clang
-# The path to cppcheck is /path/to/cppcheck-ica/bin/cppcheck
 ```
-Or build them from source code ([CSA](https://github.com/hribz/llvm-project-ica/tree/main) and [Cppcheck](https://github.com/hribz/cppcheck-ica/tree/2.16.ica)) by yourself.
+
+### Cppcheck
+If you want to try *function-level* incremental [Cppcheck](https://github.com/hribz/cppcheck-ica/tree/2.16.ica), please build from source code as follows.
+
+```bash
+wget https://github.com/hribz/cppcheck-ica/archive/refs/heads/2.16.ica.zip
+unzip 2.16.ica.zip
+cd cppcheck-ica-2.16.ica
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/path/to/cppcheck-ica
+make -j16
+make install
+# The path to Cppcheck is /path/to/cppcheck-ica/bin/cppcheck
+```
 
 ### IceBear
 You need to install:

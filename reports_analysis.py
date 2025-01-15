@@ -11,7 +11,6 @@ from IncAnalysis.environment import *
 from IncAnalysis.logger import logger
 from IncAnalysis.utils import add_to_csv
 from git_utils import *
-from matplotlib_venn import venn2
 
 def list_files(directory: str):
     if not os.path.exists(directory):
@@ -20,7 +19,7 @@ def list_files(directory: str):
 
 def list_dir(directory: str, filt_set: set=None):
     if not os.path.exists(directory):
-        logger.info(f"{directory} does not exist.")
+        logger.debug(f"{directory} does not exist.")
         return []
     dir_list = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
     if filt_set:
@@ -53,8 +52,8 @@ class RepoParser(ArgumentParser):
     def __init__(self):
         super().__init__()
         self.parser.add_argument('--repo', type=str, dest='repo', help='Only analyse specific repos.')
-        self.parser.add_argument('--workspace1', type=str, dest='workspace1', help='Result path1.')
-        self.parser.add_argument('--workspace2', type=str, dest='workspace2', help='Result path2.')
+        self.parser.add_argument('--workspace1', type=str, dest='workspace1', help='Result path1.', default='noinc')
+        self.parser.add_argument('--workspace2', type=str, dest='workspace2', help='Result path2.', default='func')
         self.parser.add_argument('--json1', type=str, dest='json1', help='Reports1 json statistics.')
         self.parser.add_argument('--json2', type=str, dest='json2', help='Reports2 json statistics.')
 
@@ -99,13 +98,13 @@ def diff_reports(reports1: set, reports2: set, dir1, dir2):
     diff = diff1.union(diff2)
     diff_json = {}
     if len(diff) == 0:
-        logger.info(f"Congratulations! There is no difference between reports in {dir1} and {dir2}")
+        logger.info(f"There is no difference between reports in {dir1} and {dir2}")
     else:
         if len(diff1) > 0:
-            logger.info(f"Sad! There are {len(diff1)} reports only in {dir1}:")
+            logger.info(f"There are {len(diff1)} reports only in {dir1}:")
             diff_json[dir1] = [i.__to_json__() for i in diff1]
         if len(diff2) > 0:
-            logger.info(f"Sad! There are {len(diff2)} reports only in {dir2}:")
+            logger.info(f"There are {len(diff2)} reports only in {dir2}:")
             diff_json[dir2] = [i.__to_json__() for i in diff2]
     return diff_json
 
@@ -151,13 +150,13 @@ def main(args):
         if opts.repo and opts.repo != repo_info.repo_name and opts.repo != os.path.basename(repo_info.repo_dir):
             continue
         if repo_info.repo_name in ignore_repos:
-            logger.info(f"{repo_info.repo_name} is in ignore repo list")
+            logger.debug(f"{repo_info.repo_name} is in ignore repo list")
             continue
         if not os.path.exists(repo_info.workspace):
-            logger.info(f"{repo_info.workspace} not exists")
+            logger.debug(f"{repo_info.workspace} not exists")
             continue
         if not os.path.exists(repo_info2.workspace):
-            logger.info(f"{repo_info2.workspace} not exists")
+            logger.debug(f"{repo_info2.workspace} not exists")
             continue
 
         def get_versions(workspace, analyzer):
