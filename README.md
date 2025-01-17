@@ -1,5 +1,7 @@
-# IceBear: A Fine-Grained Incremental Scheduler for Static Analyzers
-*IceBear* is a scheduler for C/C++ static analysis tools, supports static analyzers as follow: [CSA(Clang Static Analyzer)](https://clang-analyzer.llvm.org/), [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/), [CppCheck](https://cppcheck.sourceforge.io/).
+![logo](assets/logo.drawio.svg)
+
+# The IceBear Tool
+*IceBear* is a scheduler for C/C++ static analysis tools, built on [*Bear*](https://github.com/rizsotto/Bear) and [*Panda*](https://github.com/SQUARE-RG/panda), supports static analyzers as follow: [CSA(Clang Static Analyzer)](https://clang-analyzer.llvm.org/), [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/), [CppCheck](https://cppcheck.sourceforge.io/).
 *IceBear* can incrementally schedule these tools, with all tools supporting *file-level* incremental scheduling, and *CSA, CppCheck* supporting *function-level* incremental analysis (need install our modified version).
 
 ## Docker Image
