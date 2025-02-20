@@ -85,7 +85,7 @@ class CSAUtils:
                 encoding="utf-8",
                 errors="ignore")
         except (subprocess.CalledProcessError, OSError):
-            logger.debug("Failed to run '%s' command!", command)
+            logger.debug("Failed to run '%s' command!" % command)
             return []
 
         try:
@@ -136,28 +136,6 @@ class ClangTidyUtils:
         checker_description = ClangTidyUtils.get_analyzer_checkers(clang_tidy, diagtool)
         checkers_and_state = determine_checkers_state(checker_description, json_checkers)
         return ClangTidyUtils.get_checker_list(checkers_and_state, checker_description)
-
-    @staticmethod
-    def parse_checkers(tidy_output):
-        """
-        Parse clang tidy checkers list.
-        Skip clang static analyzer checkers.
-        Store them to checkers.
-        """
-        checkers = []
-        pattern = re.compile(r'^\S+$')
-        for line in tidy_output.splitlines():
-            line = line.strip()
-            if line.startswith('Enabled checks:') or line == '':
-                continue
-
-            if line.startswith('clang-analyzer-'):
-                continue
-
-            match = pattern.match(line)
-            if match:
-                checkers.append((match.group(0), ''))
-        return checkers
     
     @staticmethod
     def get_warnings(diagtool_bin):
@@ -179,7 +157,7 @@ class ClangTidyUtils:
             logger.error("'diagtool' encountered an error while retrieving the "
                     "checker list. If you are using a custom compiled clang, "
                     "you may have forgotten to build the 'diagtool' target "
-                    "alongside 'clang' and 'clang-tidy'! Error message: %s",
+                    "alongside 'clang' and 'clang-tidy'! Error message: %s" %
                     exc.output)
 
             raise
@@ -305,7 +283,7 @@ class ClangTidyUtils:
             if warning_name is not None:
                 # -W and clang-diagnostic- are added as compiler warnings.
                 if warning_type == CheckerType.COMPILER:
-                    logger.warning("As of CodeChecker v6.22, the following usage"
+                    logger.debug("As of CodeChecker v6.22, the following usage"
                                 f"of '{checker_name}' compiler warning as a "
                                 "checker name is deprecated, please use "
                                 f"'clang-diagnostic-{checker_name[1:]}' "
@@ -372,6 +350,8 @@ class CppCheckUtils:
         tree = ET.ElementTree(ET.fromstring(cppcheck_output))
         root = tree.getroot()
         errors = root.find('errors')
+        if errors is None:
+            return checkers
         for error in errors.findall('error'):
             name = error.attrib.get('id')
             if name:
@@ -470,7 +450,7 @@ class CppCheckUtils:
                 # The below check will add the next item in the
                 # analyzer_options list if the parameter is specified with a
                 # space, as that should be actual path to the include.
-                if interesting_option.match(analyzer_option).span() == (0, 2):
+                if interesting_option.match(analyzer_option).span() == (0, 2): # type: ignore
                     params.extend(
                         [analyzer_options[i+1]]
                     )

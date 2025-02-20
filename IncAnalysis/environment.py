@@ -50,7 +50,18 @@ class Environment:
             self.CLANG = shutil.which(self.analyze_opts.clang)
         else:
             self.CLANG = shutil.which('clang')
-        clang_bin = os.path.dirname(self.CLANG)
+        
+        def exit_if_inc():
+            if self.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+                exit(1)
+            
+        if self.CLANG is None or not os.path.exists(self.CLANG):
+            logger.error(f'Please ensure that {self.CLANG} exists in your environment')
+            exit_if_inc()
+        
+        assert self.CLANG is not None
+        logger.info(f'Use clang={self.CLANG}')
+        clang_bin = os.path.dirname(self.CLANG) # type: ignore
         self.CLANG_PLUS_PLUS = os.path.join(clang_bin, 'clang++')
         self.clang_tidy = os.path.join(clang_bin, 'clang-tidy')
         self.diagtool = os.path.join(clang_bin, 'diagtool')
@@ -63,7 +74,7 @@ class Environment:
         self.analyzers = ['clangsa']
         if os.path.exists(self.clang_tidy):
             self.analyzers.append('clang-tidy')
-        if os.path.exists(self.cppcheck):
+        if self.cppcheck and os.path.exists(self.cppcheck):
             self.analyzers.append('cppcheck')
         # Don't support infer.
         # if os.path.exists(self.infer):
@@ -94,10 +105,6 @@ class Environment:
         # 查找cmake命令的位置
         self.CMAKE_PATH = shutil.which('cmake')
         self.DIFF_PATH = shutil.which('diff')
-
-        def exit_if_inc():
-            if self.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
-                exit(1)
         
         if self.DIFF_PATH:
             logger.info(f'diff found at: {self.CMAKE_PATH}')
@@ -117,16 +124,6 @@ class Environment:
         else:
             logger.error('Please build inc info extractor firstly') 
             exit_if_inc()
-        if os.path.exists(self.CLANG):
-            logger.info(f'Use clang={self.CLANG}')
-        else:
-            logger.error(f'Please ensure that {self.CLANG} exists in your environment')
-            exit_if_inc()
-        if os.path.exists(self.CLANG_PLUS_PLUS):
-            logger.info(f'Use clang++={self.CLANG_PLUS_PLUS}')
-        else:
-            logger.error(f'Please ensure that {self.CLANG_PLUS_PLUS} exists in your environment')
-            exit_if_inc()
         
         self.DEFAULT_PANDA_COMMANDS = [
             self.PANDA, 
@@ -136,7 +133,7 @@ class Environment:
         ]
 
         self.bear = shutil.which("bear")
-        if not os.path.exists(self.bear):
+        if self.bear is None or not os.path.exists(self.bear):
             logger.error("Please ensure that bear exists in your envrionment")
         
         def get_bear_version(bear):

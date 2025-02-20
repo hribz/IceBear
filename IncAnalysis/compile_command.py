@@ -4,18 +4,15 @@ import os
 from IncAnalysis.logger import logger
 
 class CompileCommand:
-    def __init__(self, ccmd=None):
-        self.compiler = None
-        self.file = None
+    def __init__(self, ccmd):
         self.directory = None
-        self.arguments = None
-        self.language = None
-        if ccmd:
-            if 'command' in ccmd:
-                self.origin_cmd = ccmd['command']
-            else:
-                self.origin_cmd = " ".join(ccmd['arguments'])
-            self.parse(ccmd)
+        self.language = 'Unknown'
+
+        if 'command' in ccmd:
+            self.origin_cmd = ccmd['command']
+        else:
+            self.origin_cmd = " ".join(ccmd['arguments'])
+        self.parse(ccmd)
 
     def __str__(self):
         return json.dumps(

@@ -1,7 +1,7 @@
 import os
 from subprocess import CompletedProcess, run
 import subprocess
-from typing import List, Dict
+from typing import List, Dict, Optional
 from enum import Enum, auto
 import hashlib
 
@@ -41,7 +41,11 @@ class FileStatus(Enum):
     UNCHANGED = auto()
     CHANGED = auto()
     NEW = auto()
-    DIFF_FAILED = auto() # Fail to get diff info, just consider it as new.     
+    DIFF_FAILED = auto() # Fail to get diff info, just consider it as new.
+
+    @staticmethod
+    def abnormal_status(status):
+        return status == FileStatus.UNKNOWN or status == FileStatus.UNEXIST
 
 class DiffResult:
     def __init__(self, file, baseline_file):
@@ -114,11 +118,11 @@ class CallGraph:
             return self.fname_to_cg_node[fname]
         return None
 
-    def get_or_insert_node(self, fname: str):
+    def get_or_insert_node(self, fname: str) -> CallGraphNode:
         assert fname
         if fname not in self.fname_to_cg_node:
             self.fname_to_cg_node[fname] = CallGraphNode(fname)
-        return self.fname_to_cg_node.get(fname)
+        return self.fname_to_cg_node[fname]
 
     def add_node(self, caller, callee=None):
         caller_node = self.get_or_insert_node(caller)
@@ -137,11 +141,12 @@ class CallGraph:
         return ret
 
 class FileInCDB:
-    def __init__(self, parent=None, compile_command: CompileCommand=None, cache_file=None):
+    def __init__(self, parent, compile_command: Optional[CompileCommand], cache_file=None):
         if cache_file:
-            self.prep_file = cache_file
+            self.prep_file: str = cache_file
             self.baseline_file = None
             return
+        assert compile_command is not None
         # The Configuration instance
         from IncAnalysis.configuration import Configuration
         self.parent: Configuration = parent
@@ -173,19 +178,16 @@ class FileInCDB:
             logger.error(f"[Create FileInCDB] Encounter unknown extname when parse {self.file_name}")
 
         if extname:
-            self.prep_file: str = str(self.parent.preprocess_path) + self.file_name + extname
-            self.diff_file: str = str(self.parent.diff_path) + self.file_name + extname
+            self.prep_file = str(self.parent.preprocess_path) + self.file_name + extname
+            self.diff_file = str(self.parent.diff_path) + self.file_name + extname
             self.diff_info_file = str(self.parent.preprocess_path) + self.file_name + '.txt'
         else:
-            self.prep_file = None
-            self.diff_file = None
-            self.diff_info_file = None
             self.status = FileStatus.UNKNOWN
             return
         if not os.path.exists(self.file_name):
             self.status = FileStatus.UNEXIST
             return
-        self.baseline_file: FileInCDB = None
+        self.baseline_file: Optional[FileInCDB] = None
         if self.parent.update_mode:
             old_file = self.parent.global_file_dict.get(self.file_name)
             if old_file is not None:
@@ -210,7 +212,7 @@ class FileInCDB:
                     # logger.debug(f"[FileInCDB Init] Find new file {self.file_name}")
     
     def clean_files(self):
-        if self.prep_file:
+        if hasattr(self, "prep_file"):
             remove_file(self.prep_file)
 
     def is_new(self):
@@ -223,27 +225,13 @@ class FileInCDB:
         assert self.status != FileStatus.NEW
         return self.baseline_file
 
-    def get_file_path(self, kind: FileKind=None):
-        if not kind:
-            return self.file_name
+    def get_file_path(self, kind: FileKind):
         if kind == FileKind.DIFF:
             return (self.diff_file)
         elif kind == FileKind.AST:
             return (self.csa_file) + '.ast'
         elif kind == FileKind.EFM:
             return (self.csa_file) + '.extdef'
-        elif kind == FileKind.CG:
-            if not self.prep_file:
-                return None
-            return (self.prep_file) + '.cg'
-        elif kind == FileKind.CF:
-            if not self.prep_file:
-                return None
-            return (self.prep_file) + '.cf'
-        elif kind == FileKind.INCSUM:
-            return (self.prep_file) + '.ics'
-        elif kind == FileKind.RF:
-            return (self.prep_file) + '.rf'
         elif kind == FileKind.FS:
             return (self.csa_file) + '.fs'
         elif kind == FileKind.TM:
@@ -255,12 +243,21 @@ class FileInCDB:
             return str((self.parent.cppcheck_output_path)) + '/' + self.sha256
         elif kind == FileKind.INFER:
             return str((self.parent.infer_output_path)) + '/' + self.sha256
+        elif kind == FileKind.CG:
+            return (self.prep_file) + '.cg'
+        elif kind == FileKind.CF:
+            return (self.prep_file) + '.cf'
+        elif kind == FileKind.INCSUM:
+            return (self.prep_file) + '.ics'
+        elif kind == FileKind.RF:
+            return (self.prep_file) + '.rf'
         elif kind == FileKind.ANR:
             return (self.prep_file) + '.anr'
         elif kind == FileKind.CPPRF:
             return (self.prep_file) + '.cpprf'
         else:
             logger.error(f"[Get File Path] Unknown file kind {kind}")
+            return ""
 
     def diff_with_baseline(self) -> bool:
         if self.baseline_file is None:
@@ -343,7 +340,7 @@ class FileInCDB:
                     self.indirect_call_num = int(val)
         return True
 
-    def parse_cg_file(self) -> CallGraph:
+    def parse_cg_file(self) -> Optional[CallGraph]:
         # .cg file format: 
         # caller
         # [
@@ -376,7 +373,7 @@ class FileInCDB:
         self.cg_node_num = len(call_graph.fname_to_cg_node.keys())
         return call_graph
 
-    def parse_cf_file(self) -> list:
+    def parse_cf_file(self) -> Optional[list]:
         cf_file = self.get_file_path(FileKind.CF)
         if not cf_file or not os.path.exists(cf_file):
             logger.error(f"[Parse CF File] It's seems no functions changed, check if {cf_file} exists.")
@@ -390,14 +387,14 @@ class FileInCDB:
         self.cf_num = len(functions_changed)
         return functions_changed
     
-    def parse_baseline_fs_file(self) -> Dict[str, FunctionSummary]:
+    def parse_baseline_fs_file(self) -> Optional[Dict[str, FunctionSummary]]:
         # .fs file format
         # func_name
         # TotalBasicBlocks,InlineChecked,MayInline,TimesInlined
         if self.baseline_file is None:
             return None
         fs_file = self.baseline_file.get_file_path(FileKind.FS)
-        if not os.path.exists(fs_file):
+        if fs_file is None or not os.path.exists(fs_file):
             logger.error(f"[Parse FS File] Function Summary file {fs_file} doesn't exist.")
             return None
         function_summaries: Dict = {}
@@ -472,7 +469,7 @@ class FileInCDB:
             return
         
         # Step 3:Parse function summaries.
-        baseline_fs: Dict[FunctionSummary] = self.parse_baseline_fs_file()
+        baseline_fs: Optional[Dict[str, FunctionSummary]] = self.parse_baseline_fs_file()
         if baseline_fs is None:
             return
 
@@ -509,7 +506,7 @@ class FileInCDB:
                 if node.should_reanalyze:
                     continue
                 call_graph.mark_as_reanalye(node)
-                fs_in_baseline: FunctionSummary = baseline_fs.get(node.fname)
+                fs_in_baseline: Optional[FunctionSummary] = baseline_fs.get(node.fname)
                 if fs_in_baseline is not None:
                     if not fs_in_baseline.ok_to_ignore():
                         worklist.extend(node.callers)

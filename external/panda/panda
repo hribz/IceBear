@@ -572,14 +572,14 @@ def ClangToolAction(opts, ccdb, action):
             cwd=ccdb.directory) as p:
         if action.stdout:
             outstream = 'stdout'
-            content = p.stdout.read().decode('utf-8')
+            content = p.stdout.read().decode('utf-8') # type: ignore
         if action.stderr:
             outstream = 'stderr'
-            content = p.stderr.read().decode('utf-8')
+            content = p.stderr.read().decode('utf-8') # type: ignore
         ret = p.wait()
     if content is not None:
         output = action.getOutputName(opts.output, ccdb)
-        log('!: Write ' + outstream + ' output to file ' + output)
+        log('!: Write ' + outstream + ' output to file ' + output) # type: ignore
         mkdir(os.path.dirname(output))
         with open(output, 'w') as fout:
             fout.write(content)
@@ -627,7 +627,7 @@ def GenerateInvocationListAction(opts, cdb):
 
     resourceDir = '-resource-dir='
     with proc.Popen(['clang', '-print-resource-dir'], stdout=proc.PIPE) as p:
-        resourceDir += p.stdout.read().decode('utf-8').strip()
+        resourceDir += p.stdout.read().decode('utf-8').strip() # type: ignore
 
     mkdir(os.path.dirname(output))
     with open(output, 'w') as fout:

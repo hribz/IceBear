@@ -29,7 +29,7 @@ class Analyzer(ABC):
         pass
 
     def analyze_all_files(self):
-        makedir(self.analyzer_config.workspace)
+        makedir(str(self.analyzer_config.workspace))
         ret = True
         
         # with mp.Pool(self.analyzer_config.env.analyze_opts.jobs) as p:
@@ -68,8 +68,8 @@ class Analyzer(ABC):
         if isinstance(self, CSA):
             if process.stderr:
                 for line in process.stderr.splitlines():
-                    if line.startswith("  Total Execution Time"):
-                        file.csa_analyze_time = (line.split(' ')[5])
+                    if line.startswith("  Total Execution Time"): # type: ignore
+                        file.csa_analyze_time = (line.split(' ')[5]) # type: ignore
                         break
         return process.stat, file.file_name
 
@@ -114,6 +114,7 @@ class CSA(Analyzer):
 class ClangTidy(Analyzer):
     def __init__(self, analyzer_config: ClangTidyConfig, file_list: List[FileInCDB]):
         super().__init__(analyzer_config, file_list)
+        self.analyzer_config: ClangTidyConfig
 
     def generate_analyzer_cmd(self, file):
         analyzer_cmd = [self.analyzer_config.clang_tidy]
@@ -153,6 +154,7 @@ class ClangTidy(Analyzer):
 class CppCheck(Analyzer):
     def __init__(self, analyzer_config: CppCheckConfig, file_list: List[FileInCDB]):
         super().__init__(analyzer_config, file_list)
+        self.analyzer_config: CppCheckConfig
         self.cppcheck = 'cppcheck'
 
     def merge_all_cppcheckrf(self, output_file):
@@ -171,8 +173,8 @@ class CppCheck(Analyzer):
             logger.debug(f"[{__class__.__name__}] No file need to analyze.")
             return True
         config = self.file_list[0].parent
-        makedir(config.cppcheck_build_path)
-        makedir(config.cppcheck_output_path)
+        makedir(str(config.cppcheck_build_path))
+        makedir(str(config.cppcheck_output_path))
         analyzer_cmd = [self.analyzer_config.cppcheck, f"--project={config.compile_commands_used_by_analyzers}", f"-j{config.env.analyze_opts.jobs}"]
         analyzer_cmd.append(f"--showtime=file-total")
         analyzer_cmd.append(f"--cppcheck-build-dir={config.cppcheck_build_path}")
@@ -218,6 +220,7 @@ class CppCheck(Analyzer):
 class Infer(Analyzer):
     def __init__(self, analyzer_config: InferConfig, file_list: List[FileInCDB]):
         super().__init__(analyzer_config, file_list)
+        self.analyzer_config: InferConfig
         self.infer = 'infer'
 
     def analyze_all_files(self):

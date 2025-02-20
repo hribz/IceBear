@@ -2,7 +2,7 @@ from pathlib import Path
 import subprocess
 import shutil
 import threading
-from typing import List, Dict
+from typing import List, Dict, Optional, Union
 from subprocess import CompletedProcess, run
 import json
 import argparse
@@ -59,8 +59,8 @@ class BuildType(Enum):
             return BuildType.UNKNOWN
 
 class BuildInfo:
-    def __init__(self, src_path, build_path, build_type: BuildType, options: List[str], env: Environment, build_script: str=None, 
-                 configure_scripts: List[str]=None, cmakefile_path: str=None):
+    def __init__(self, src_path, build_path, build_type: BuildType, options: List[str], env: Environment, build_script: Optional[str]=None, 
+                 configure_scripts: Optional[List[str]]=None, cmakefile_path: Optional[str]=None):
         self.src_path = src_path
         self.build_path = build_path
         self.build_type = build_type
@@ -142,10 +142,6 @@ class BuildInfo:
     def obj_to_json(self):
         return {"build_type": self.build_type.name, "build_script": self.build_script, "configure_scripts": self.configure_scripts}
 
-    @staticmethod
-    def json_to_obj(json_data):
-        return BuildInfo(json_data['build_type'], json_data['build_script'], json_data['configure_scripts'])
-
 class Configuration:
     env: Environment
     name: str
@@ -193,9 +189,11 @@ class Configuration:
         self.build_info = BuildInfo(self.src_path, self.build_path, build_type, 
                                     options, env, build_script, configure_scripts, cmakefile_path)
         
-        self.workspace = Path(workspace_path)
         if workspace_path is None:
             self.workspace = self.build_path / 'workspace_for_cdb'
+        else:
+            self.workspace = Path(workspace_path)
+
         makedir(str(self.workspace))
         self.update_workspace_path()
 
@@ -220,13 +218,13 @@ class Configuration:
         for analyzer_name in analyzers:
             analyzer = None
             if analyzer_name == 'clangsa':
-                analyzer = CSA(CSAConfig(self.env, self.csa_path, self.env.analyze_opts.csa_config), None)
+                analyzer = CSA(CSAConfig(self.env, self.csa_path, self.env.analyze_opts.csa_config), [])
             elif analyzer_name == 'clang-tidy':
                 self.enable_clangtidy = True
-                analyzer = ClangTidy(ClangTidyConfig(self.env, self.clang_tidy_path, self.env.analyze_opts.clang_tidy_config), None)
+                analyzer = ClangTidy(ClangTidyConfig(self.env, self.clang_tidy_path, self.env.analyze_opts.clang_tidy_config), [])
             elif analyzer_name == 'cppcheck':
                 self.enable_cppcheck = True
-                analyzer = CppCheck(CppCheckConfig(self.env, self.cppcheck_path, self.env.analyze_opts.cppcheck_config), None)
+                analyzer = CppCheck(CppCheckConfig(self.env, self.cppcheck_path, self.env.analyze_opts.cppcheck_config), [])
             else:
                 logger.error(f"Don't support {analyzer_name}.")
                 continue
@@ -345,7 +343,7 @@ class Configuration:
                     if len(line) == 0:
                         continue
                     (file, cache_file) = line.split(' ')
-                    self.global_file_dict[file] = FileInCDB(cache_file=cache_file)
+                    self.global_file_dict[file] = FileInCDB(None, None, cache_file=cache_file)
             logger.info("[Read Cache] Read cache successfully.")
             return True
         logger.info("[Read Cache] No cache, do full analysis.")
@@ -366,6 +364,8 @@ class Configuration:
             cdb = json.load(f)
             for (idx, ccdb) in enumerate(cdb):
                 compile_command = CompileCommand(ccdb)
+                if compile_command.file is None:
+                    continue
                 file_in_cdb = FileInCDB(self, compile_command)
                 if file_in_cdb.status == FileStatus.UNKNOWN or file_in_cdb.status == FileStatus.UNEXIST:
                     self.abnormal_file_list.append(file_in_cdb)
@@ -397,7 +397,7 @@ class Configuration:
 
         return True
 
-    def get_file(self, file_path: str, report=True) -> FileInCDB:
+    def get_file(self, file_path: str, report=True) -> Optional[FileInCDB]:
         idx = self.file_list_index.get(file_path, None)
         # Don't use `if not idx:`, because idx maybe 0.
         if idx is None:
@@ -406,11 +406,14 @@ class Configuration:
             return None
         return self.file_list[idx]
 
-    def get_file_path(self, kind: FileKind, file_path: str) -> str:
-        return self.get_file(file_path).get_file_path(kind)
+    def get_file_path(self, kind: FileKind, file_path: str) -> Optional[str]:
+        file = self.get_file(file_path)
+        if file is None:
+            return None
+        return file.get_file_path(kind)
     
     def clean_build(self):
-        makedir(self.build_path)
+        makedir((self.build_path))
         clean_script = f"make -C {self.build_path} clean"
         os.chdir(self.build_path)
         try:
@@ -423,7 +426,7 @@ class Configuration:
     def configure(self):
         start_time = time.time()
         # remake_dir(self.build_path, "[Config Build DIR exists]")
-        makedir(self.build_path, "[Config Build DIR exists]")
+        makedir((self.build_path), "[Config Build DIR exists]")
         if self.build_info.configure_scripts:
             configure_scripts = self.build_info.configure_scripts
         else:
@@ -446,7 +449,7 @@ class Configuration:
     
     def build(self):
         start_time = time.time()
-        makedir(self.build_path, "[Config Build DIR exists]")
+        makedir((self.build_path), "[Config Build DIR exists]")
         # Some projects need to `configure & build` in source tree. 
         # CMake will not be influenced by path.
         os.chdir(self.build_path)
@@ -616,7 +619,9 @@ class Configuration:
                             if self.global_efm[usr].is_changed():
                                 fout.write('%s %s\n' % (usr, self.global_efm[usr].get_file_path(FileKind.AST)))
                             else:
-                                fout.write('%s %s\n' % (usr, self.global_efm[usr].get_baseline_file().get_file_path(FileKind.AST)))
+                                baseline_file = self.global_efm[usr].get_baseline_file()
+                                assert baseline_file, f"Can not find baseline file for {self.global_efm[usr].file_name}"
+                                fout.write('%s %s\n' % (usr, baseline_file.get_file_path(FileKind.AST)))
             
             if self.update_mode:
                 GenerateFinalExternalFunctionMapIncrementally(self.env.analyze_opts, self.diff_file_list, None)
@@ -627,7 +632,9 @@ class Configuration:
                 for line in f.readlines():
                     usr, path = parse_efm(line)
                     if usr and path:
-                        self.global_efm[usr] = self.get_file(get_origin_file_name(path, str(self.csa_path), ['.ast']))
+                        ast_file = self.get_file(get_origin_file_name(path, str(self.csa_path), ['.ast']))
+                        if ast_file:
+                            self.global_efm[usr] = ast_file
         self.session_times['merge_efm'] = time.time() - start_time
 
     def analyze(self):
@@ -851,7 +858,7 @@ class Configuration:
         total_csa_time = 0.0
         for file in self.file_list:
             # file, status, analyze time, cg nodes num, cf num, rf num, baseline fs num
-            data = [file.file_name, str(file.status)]
+            data: List[Union[str, int]] = [file.file_name, str(file.status)]
             # if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value and file.is_changed():
             #     # Parse CG maybe skipped if it's new file or no function changed.
             #     # Or just because inc_mode < function level.

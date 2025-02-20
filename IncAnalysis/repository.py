@@ -26,7 +26,7 @@ class Repository(ABC):
         self.build_root = build_root if build_root is not None else str(self.src_path / 'build')
 
     @abstractmethod
-    def process_one_config(self, config: Configuration=None):
+    def process_one_config(self, config: Configuration):
         pass
     
 
@@ -127,7 +127,7 @@ class Repository(ABC):
         pass
 
 class MultiConfigRepository(Repository):
-    def __init__(self, name, src_path, env: Environment, default_options: List[str] = [], options_list:List[List[str]]=None, 
+    def __init__(self, name, src_path, env: Environment, default_options: List[str] = [], options_list=None, 
                  build_root = None, version_stamp=None, default_build_type: str="cmake"):
         super().__init__(name, src_path, env, build_root, default_build_type)
         self.default_config = Configuration(self.name, self.src_path, self.env, default_options, version_stamp="build_0",
@@ -137,7 +137,7 @@ class MultiConfigRepository(Repository):
         if options_list:
             for idx, options in enumerate(options_list):
                 self.configurations.append(
-                    Configuration(self.name, self.src_path, self.env, options, build_path=f'{self.build_root}/build_{idx + 1}', baseline=self.default_config)
+                    Configuration(self.name, self.src_path, self.env, options, version_stamp=None, build_path=f'{self.build_root}/build_{idx + 1}', baseline=self.default_config)
                 )
 
     def add_configuration(self, options, build_dir_name=None):
@@ -206,7 +206,7 @@ class MultiConfigRepository(Repository):
             Configuration.analyze
         ]
         if self.env.inc_mode.value < IncrementalMode.FuncitonLevel.value:
-            analyze_sessions[0] = None
+            analyze_sessions[0] = None # type: ignore
         self.process_every_config(analyze_sessions)
     
     def session_summary(self):
@@ -239,7 +239,7 @@ class MultiConfigRepository(Repository):
             add_to_csv(headers, data, str(config.workspace / f'file_status_{self.env.timestamp}.csv'))
 
 class UpdateConfigRepository(Repository):
-    def __init__(self, name, src_path, env: Environment, default_options: List[str] = [], workspace=None,
+    def __init__(self, name, src_path, env: Environment, workspace, default_options: List[str] = [], 
                  build_root = None, version_stamp=None, default_build_type: str="cmake", can_skip_configure: bool = True,
                  out_of_tree=True, configure_scripts=None, build_script=None, cmakefile_path=None, cdb=None, need_build=True,
                  need_configure=True):

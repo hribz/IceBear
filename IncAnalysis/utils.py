@@ -10,7 +10,7 @@ import concurrent.futures
 
 from IncAnalysis.logger import logger
 
-def makedir(path: str, debug_TAG=None):
+def makedir(path, debug_TAG=None):
     if not os.path.exists(path):
         try:
             os.makedirs(path)
@@ -57,7 +57,7 @@ def replace_loc_info(pair):
     except Exception as e:
         print(f"Error processing {src}: {e}")
 
-def get_origin_file_name(file:str, prefix: List[str], extnames: List[str]):
+def get_origin_file_name(file:str, prefix: str, extnames: List[str]):
     file = file[len(prefix):]
     for ext in extnames:
         if file.endswith(ext):
