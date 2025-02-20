@@ -3,12 +3,13 @@ import json
 from abc import ABC, abstractmethod
 import os
 from pathlib import Path
+from typing import Optional
 
 from IncAnalysis.environment import Environment, IncrementalMode
 from IncAnalysis.analyzer_utils import *
 
 class AnalyzerConfig(ABC):
-    def __init__(self, env: Environment, workspace: Path, checker_file: str = None, config_file: str = None):
+    def __init__(self, env: Environment, workspace: Path, checker_file: Optional[str] = None, config_file: Optional[str] = None):
         super().__init__()
         self.json_config = {}
         self.json_checkers = None
@@ -86,14 +87,14 @@ class IPAKind(Enum):
     IPAK_DynamicDispatchBifurcate = auto()
 
 class CSAConfig(AnalyzerConfig):
-    def __init__(self, env: Environment, csa_workspace: Path, config_file: str=None):
+    def __init__(self, env: Environment, csa_workspace: Path, config_file: Optional[str]=None):
         checker_file = str(env.PWD / "config/clangsa_checkers.json")
         super().__init__(env, csa_workspace, checker_file, config_file)
         self.compilers = {
             'c': env.CLANG,
             'c++': env.CLANG_PLUS_PLUS
         }
-        if not os.path.exists(env.CLANG) or not os.path.exists(env.CLANG_PLUS_PLUS):
+        if not os.path.exists(env.CLANG) or not os.path.exists(env.CLANG_PLUS_PLUS): # type: ignore
             logger.error(f"CSA need command `clang/clang++` exists in environment.")
             self.ready_to_run = False
         self.inc_level_check()
@@ -133,7 +134,7 @@ class CSAConfig(AnalyzerConfig):
                 self.ready_to_run = False
 
     def parse_json_config(self):
-        self.csa_options = self.json_config.get("CSAOptions")
+        self.csa_options = self.json_config["CSAOptions"]
         if self.csa_options:
             for cmd in self.csa_options:
                 cmd = cmd.split()
@@ -141,7 +142,7 @@ class CSAConfig(AnalyzerConfig):
                     self.AnalyzeAll = True
         else:
             self.csa_options = []
-        self.csa_config = self.json_config.get("CSAConfig")
+        self.csa_config = self.json_config["CSAConfig"]
         if self.csa_config:
             for cmd in self.csa_config:
                 cmd_pair = cmd.split("=")
@@ -192,7 +193,7 @@ class CSAConfig(AnalyzerConfig):
         return self.args
         
 class ClangTidyConfig(AnalyzerConfig):
-    def __init__(self, env: Environment, clang_tidy_workspace: Path, config_file: str=None):
+    def __init__(self, env: Environment, clang_tidy_workspace: Path, config_file: Optional[str]=None):
         checker_file = str(env.PWD / "config/clang-tidy_checkers.json")
         super().__init__(env, clang_tidy_workspace, checker_file, config_file)
 
@@ -223,12 +224,12 @@ class ClangTidyConfig(AnalyzerConfig):
 
 
 class CppCheckConfig(AnalyzerConfig):
-    def __init__(self, env: Environment, cppcheck_workspace: Path, config_file: str=None):
+    def __init__(self, env: Environment, cppcheck_workspace: Path, config_file: Optional[str]=None):
         checker_file = str(env.PWD / "config/cppcheck_checkers.json")
         super().__init__(env, cppcheck_workspace, checker_file, config_file)
 
         self.cppcheck = env.cppcheck
-        if not os.path.exists(env.cppcheck):
+        if env.cppcheck is None or not os.path.exists(env.cppcheck):
             logger.error(f"Cppcheck need command `cppcheck` exists in environment.")
             self.ready_to_run = False
         self.inc_level_check()        
@@ -244,6 +245,8 @@ class CppCheckConfig(AnalyzerConfig):
         # func/inline-level incremental mode need to build custom Cppcheck from 'cppcheck-ica'.
         if self.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             cppcheck = self.cppcheck
+            if cppcheck is None:
+                return
             result = subprocess.check_output([cppcheck, '--help'], universal_newlines=True, encoding="utf-8")
             
             func_level_enable = False
@@ -295,11 +298,11 @@ class CppCheckConfig(AnalyzerConfig):
         return self.args
     
 class InferConfig(AnalyzerConfig):
-    def __init__(self, env: Environment, infer_workspace: Path, config_file: str=None, checker_file: str="config/infer_checkers.json"):
+    def __init__(self, env: Environment, infer_workspace: Path, config_file: Optional[str]=None, checker_file: str="config/infer_checkers.json"):
         super().__init__(env, infer_workspace, checker_file, config_file)
 
         self.infer = env.infer
-        if not os.path.exists(env.infer):
+        if env.infer is None or not os.path.exists(env.infer):
             logger.error(f"infer need command `infer` exists in environment.")
             self.ready_to_run = False
 

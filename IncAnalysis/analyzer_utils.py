@@ -85,7 +85,7 @@ class CSAUtils:
                 encoding="utf-8",
                 errors="ignore")
         except (subprocess.CalledProcessError, OSError):
-            logger.debug("Failed to run '%s' command!", command)
+            logger.debug("Failed to run '%s' command!" % command)
             return []
 
         try:

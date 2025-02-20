@@ -36,5 +36,3 @@ class Process:
         except Exception as e:
             self.stat = Process.Stat.unknown
             self.exception = e
-            self.stderr = e.stdout
-            self.stdout = e.stderr

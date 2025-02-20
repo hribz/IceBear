@@ -12,7 +12,7 @@ def list_files(directory: str):
         return []
     return [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
 
-def list_dir(directory: str, filt_set: set=None):
+def list_dir(directory: str, filt_set=None):
     if not os.path.exists(directory):
         return []
     dir_list = [f for f in os.listdir(directory) if os.path.isdir(os.path.join(directory, f))]
@@ -46,7 +46,7 @@ def get_statistics_from_workspace(workspace):
         }
     }
     for k in analyzers:
-        statistics[k] = []
+        statistics[k] = [] # type: ignore
     baseline_reports_number = 0
 
     for analyzer in analyzers_floder:
@@ -78,7 +78,7 @@ def get_statistics_from_workspace(workspace):
         versions = get_versions(workspace, analyzer_to_class[analyzer_name])
         if versions is None:
             versions = sorted(list_dir(reports_path))
-        statistics['summary'][analyzer_name] = {
+        statistics['summary'][analyzer_name] = { # type: ignore
             "total": 0
         }
 
@@ -139,12 +139,12 @@ def get_statistics_from_workspace(workspace):
                     key_set = {'bug_type', 'qualifier', 'severity', 'category', 'procedure', 'file', 'key', 'bug_type_hum'}
                     reports = [{k: v for k, v in result.items() if k in key_set} for result in infer_result]
             
-            statistics[analyzer_name].append({
+            statistics[analyzer_name].append({ # type: ignore
                 'version': version,
                 'reports': reports
             })
-            statistics['summary'][analyzer_name]['total'] += len(reports)
-            statistics['summary'][analyzer_name][version] = len(reports)
+            statistics['summary'][analyzer_name]['total'] += len(reports) # type: ignore
+            statistics['summary'][analyzer_name][version] = len(reports) # type: ignore
             statistics['summary']['total'] += len(reports)
 
             if analyzer_baseline_number is None:
@@ -177,7 +177,7 @@ class Report:
             "specific info": self.specific_info
         }
 
-def get_versions_and_reports(statistics: list) -> dict:
+def get_versions_and_reports(statistics):
     versions_and_reports = {}
     first_version = None
     for analyzer in analyzers:
@@ -212,7 +212,7 @@ def postprocess_workspace(workspace, this_versions, output_news=True):
     
     versions_and_reports, baseline_version = get_versions_and_reports(statistics)
 
-    def old_and_now_reports_from_json(versions_and_reports: dict, this_versions) -> set:
+    def old_and_now_reports_from_json(versions_and_reports: dict, this_versions):
         old_reports = set()
         now_reports = set()
         for version, val in versions_and_reports.items():
@@ -237,7 +237,7 @@ def postprocess_workspace(workspace, this_versions, output_news=True):
         return sorted(kinds.items(), key=lambda item: item[1], reverse=True)
     
     kinds = clang_tidy_diag_distribution(reports)
-    statistics['summary']['clang-tidy distribution'] = { kind[0]: kind[1] for kind in kinds }
+    statistics['summary']['clang-tidy distribution'] = { kind[0]: kind[1] for kind in kinds } # type: ignore
     
     def new_reports(old_reports: set, now_reports:set, output_file, now_file):
         new_reports = now_reports.difference(old_reports)
