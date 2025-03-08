@@ -22,6 +22,12 @@ class RepoParser(ArgumentParser):
         self.parser.add_argument('-f', '--compilation-database', type=str, dest='cdb',
                                  help='Customize the input compilation database',
                                  default=None)
+        self.parser.add_argument('-c', '--cache', type=str, dest='cache', 
+                                 help='Cache file path')
+        self.parser.add_argument('--preprocess-only', dest='prep_only', action='store_true', 
+                                 help='Only preprocess and diff')
+        self.parser.add_argument('--not-update-cache', dest='not_update_cache', action='store_true',
+                                 help='Do not record or update cache')
 
 def main(argv):
     parser = RepoParser()
@@ -52,6 +58,11 @@ def main(argv):
     if opts.cdb is not None and os.path.exists(opts.cdb):
         cdb = os.path.abspath(opts.cdb)
 
+    if opts.cache is None:
+        version_stamp = env.timestamp
+    else:
+        version_stamp = 'version'
+
     Repo = UpdateConfigRepository(os.path.basename(repo), repo, env, 
                                   workspace=workspace,
                                   configure_scripts=[],
@@ -60,11 +71,11 @@ def main(argv):
                                   cdb=cdb,
                                   need_build=build_command is not None,
                                   need_configure=False,
-                                  version_stamp=env.timestamp,
+                                  version_stamp=version_stamp,
                                   default_build_type="unknown"
-                                  )
+                                )
     success = Repo.process_one_config(summary_path="logs", reports_statistics=False)
-    if success:
+    if success and opts.cache is None:
         postprocess_workspace(workspace=workspace, this_versions=set(env.timestamp))
 
 if __name__ == '__main__':

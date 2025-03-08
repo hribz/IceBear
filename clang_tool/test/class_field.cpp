@@ -23,6 +23,8 @@ int const ONE = 10;
 
 int main() {
     *(ptr) = 0;
+    int a = 0;
+    a=1;
     1 / s1.b;
     Example ex(5);
     ex.getValue() = 10;  // 可以通过getValue修改成员变量

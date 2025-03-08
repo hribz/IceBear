@@ -58,11 +58,13 @@ class Analyzer(ABC):
             # ClangTidy commands are too long to be printed.
             logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {script}")
         if process.stat == Process.Stat.ok:
+            stat = Process.Stat.ok
             logger.debug(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
             if self.analyzer_config.verbose:
                 logger.debug(f"[{self.get_analyzer_name()} Analyze Output]\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         else:
-            logger.error(f"[{self.get_analyzer_name()} Analyze {str(process.stat)}]\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+            stat = (process.stat)[0]
+            logger.error(f"[{self.get_analyzer_name()} Analyze {stat}]\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         
         # Record time cost.
         if isinstance(self, CSA):
@@ -71,7 +73,7 @@ class Analyzer(ABC):
                     if line.startswith("  Total Execution Time"): # type: ignore
                         file.csa_analyze_time = (line.split(' ')[5]) # type: ignore
                         break
-        return process.stat, file.file_name
+        return stat, file.file_name
 
     @staticmethod
     def __str_to_analyzer_class__(analyzer_name: str):
@@ -94,7 +96,9 @@ class CSA(Analyzer):
     def generate_analyzer_cmd(self, file: FileInCDB):
         compiler = self.analyzer_config.compilers[file.compile_command.language]
         analyzer_cmd = [compiler] + file.compile_command.arguments + ['-Qunused-arguments']
-        analyzer_cmd.extend(['--analyze', '-o', str(file.parent.csa_output_path)])
+        output_path = str(file.parent.csa_output_path / file.file_name[1:])
+        makedir(output_path)
+        analyzer_cmd.extend(['--analyze', '-o', output_path])
         analyzer_cmd.extend(self.analyzer_config.analyze_args())
         # Add file specific args.
         if self.analyzer_config.inc_mode.value >= IncrementalMode.FuncitonLevel.value:

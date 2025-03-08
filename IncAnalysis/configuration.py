@@ -240,7 +240,10 @@ class Configuration:
         if self.cdb:
             self.compile_database = Path(self.cdb)
         # Preprocess & diff Path.
-        self.cache_file = self.workspace / 'preprocess' / 'cache.txt'
+        if self.env.analyze_opts.cache:
+            self.cache_file = self.env.analyze_opts.cache
+        else:
+            self.cache_file = self.workspace / 'preprocess' / 'cache.txt'
         self.preprocess_path = self.workspace / 'preprocess' / self.version_stamp
         self.compile_commands_used_by_pre = self.preprocess_path / 'compile_commands_used_by_pre.json'
         self.preprocess_compile_database = self.preprocess_path / 'preprocess_compile_commands.json'
@@ -301,6 +304,8 @@ class Configuration:
         if self.env.inc_mode != IncrementalMode.NoInc:
             self.preprocess_repo()
             self.diff_with_other(self.baseline, not has_init)
+        if self.env.analyze_opts.prep_only:
+            return True
         # 3. extract inc info
         if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             self.extract_inc_info(has_init)
@@ -390,6 +395,8 @@ class Configuration:
                 cdb.append(file_in_cdb.compile_command.restore_to_json())
             json.dump(cdb, f, indent=4)
 
+        if self.env.analyze_opts.not_update_cache:
+            return True
         # update cache
         with open(self.cache_file, 'w') as f:
             for file_name, file_in_cdb in self.global_file_dict.items():
@@ -530,6 +537,7 @@ class Configuration:
                 })
             with open(self.preprocess_compile_database, 'w') as f:
                 json.dump(cdb, f, indent=4)
+            logger.debug(f"[Preprocess Files Success]\nstdout:\n{process.stdout}stderr:\n{process.stderr}")
             logger.info(f"[Preprocess Files Success] {preprocess_script}")
         except subprocess.CalledProcessError as e:
             self.session_times['preprocess_repo'] = SessionStatus.Failed
@@ -733,7 +741,9 @@ class Configuration:
         process_file_list(FileInCDB.diff_with_baseline, self.file_list, self.env.analyze_opts.jobs)
         for file in self.file_list:
             if file.baseline_file is not None:
-                file.baseline_file.clean_files()
+                if not self.env.analyze_opts.verbose:
+                    # Don't clean files under debug mode.
+                    file.baseline_file.clean_files()
             if file.is_changed():
                 self.diff_file_list.append(file)
         if self.status == 'DIFF':

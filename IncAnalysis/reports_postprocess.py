@@ -117,9 +117,12 @@ def get_statistics_from_workspace(workspace):
                         }
                 reports = list(unique_reports.values())
             elif analyzer.endswith('cppcheck'):
-                if not os.path.exists(os.path.join(output_path, 'result.json')):
+                result_file = os.path.join(output_path, 'result.json')
+                if not os.path.exists(result_file):
                     continue
-                with open(os.path.join(output_path, 'result.json'), 'r') as f:
+                if os.path.getsize(result_file) == 0:
+                    continue
+                with open(result_file, 'r') as f:
                     cppcheck_result = json.load(f)
                     results = cppcheck_result["runs"][0]["results"]
                     for result in results:

@@ -46,6 +46,8 @@ csa_default_config = {
         # "-analyzer-opt-analyze-headers",
         # "-analyzer-inline-max-stack-depth=5",
         # "-analyzer-inlining-mode=noredundancy",
+        "-analyzer-note-analysis-entry-points",
+        "-analyzer-disable-checker=deadcode",
         "-analyzer-stats", # Output time cost.
     ],
     "CSAConfig": [
@@ -134,14 +136,21 @@ class CSAConfig(AnalyzerConfig):
                 self.ready_to_run = False
 
     def parse_json_config(self):
-        self.csa_options = self.json_config["CSAOptions"]
-        if self.csa_options:
-            for cmd in self.csa_options:
+        self.csa_options = []
+        # checker options place before CSAOptions, to make sure
+        # -analyzer-disable-checker comes into effect.
+        if self.json_checkers is not None:
+            enable_checkers = CSAUtils.get_enable_checkers(self.compilers['c'], self.json_checkers)
+            self.csa_options.extend(['-analyzer-checker=' + ','.join(enable_checkers)])
+
+        json_config = self.json_config.get("CSAOptions")
+        if json_config:
+            for cmd in self.json_config:
                 cmd = cmd.split()
                 if cmd == "-analyzer-opt-analyze-headers":
                     self.AnalyzeAll = True
-        else:
-            self.csa_options = []
+            self.csa_options.extend(json_config)
+
         self.csa_config = self.json_config["CSAConfig"]
         if self.csa_config:
             for cmd in self.csa_config:
@@ -167,10 +176,6 @@ class CSAConfig(AnalyzerConfig):
         
         self.csa_options.append('-analyzer-output=html')
         # self.csa_options.append('-analyzer-disable-checker=deadcode')
-
-        if self.json_checkers is not None:
-            enable_checkers = CSAUtils.get_enable_checkers(self.compilers['c'], self.json_checkers)
-            self.csa_options.extend(['-analyzer-checker=' + ','.join(enable_checkers)])
 
         if self.ctu:
             self.csa_config.extend([

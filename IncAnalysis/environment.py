@@ -128,8 +128,8 @@ class Environment:
         self.DEFAULT_PANDA_COMMANDS = [
             self.PANDA, 
             '-j', str(self.analyze_opts.jobs), '--print-execution-time',
-            '--cc', self.CLANG, 
-            '--cxx', self.CLANG_PLUS_PLUS
+            '--cc', self.CC, 
+            '--cxx', self.CXX
         ]
 
         self.bear = shutil.which("bear")

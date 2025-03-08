@@ -267,6 +267,9 @@ class UpdateConfigRepository(Repository):
         if not self.default_config.process_this_config(self.can_skip_configure, self.has_init):
             logger.error("Process failed.")
             return False
+        if self.env.analyze_opts.prep_only:
+            logger.info("Only preprocess and diff files.")
+            return False
         if reports_statistics:
             self.default_config.reports_statistics()
         self.append_session_summary()

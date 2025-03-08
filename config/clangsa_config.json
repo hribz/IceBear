@@ -3,7 +3,8 @@
         "-analyzer-disable-all-checks",
         "-analyzer-opt-analyze-headers",
         "-analyzer-inline-max-stack-depth=5",
-        "-analyzer-inlining-mode=noredundancy"
+        "-analyzer-inlining-mode=noredundancy",
+        "-analyzer-disable-checker=deadcode"
     ],
     "CSAConfig": [
         "mode=deep",
