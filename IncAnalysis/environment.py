@@ -36,6 +36,11 @@ class Environment:
         self.env['CC'] = self.CC
         self.env['CXX'] = self.CXX
 
+    def check_conflict(self):
+        if self.analyze_opts.file_identifier != 'file' and self.ctu:
+            logger.error(f"[Option Conflict] File identidier must be \'file\' if turn on ctu analysis.")
+            exit(1)
+
     def prepare_env_path(self, ice_bear_path):
         # Environment path
         self.PWD: Path = Path(ice_bear_path).absolute()
@@ -174,6 +179,8 @@ class ArgumentParser:
         self.parser.add_argument('--cppcheck-config', type=str, dest='cppcheck_config', default=None, 
                                  help='Cppcheck config file, an example is config/cppcheck_config.json.')
         # self.parser.add_argument('--infer-config', type=str, dest='infer_config', default=None, help='Infer config file.')
+        self.parser.add_argument('--file-identifier', type=str, dest='file_identifier', choices=['file', 'target'], default='file name', 
+                                 help='Identify analysis unit by file or target.')
     
     def parse_args(self, args):
         return self.parser.parse_args(args)

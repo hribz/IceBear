@@ -41,7 +41,8 @@ class FileStatus(Enum):
     UNCHANGED = auto()
     CHANGED = auto()
     NEW = auto()
-    DIFF_FAILED = auto() # Fail to get diff info, just consider it as new.
+    PREPROCESS_FAILED = auto() # Fail to preprocess file, just consider it as new.
+    DIFF_FAILED = auto()       # Fail to get diff info, just consider it as new.
 
     @staticmethod
     def abnormal_status(status):
@@ -151,9 +152,10 @@ class FileInCDB:
         from IncAnalysis.configuration import Configuration
         self.parent: Configuration = parent
         self.file_name: str = compile_command.file
-        self.sha256 = get_sha256_hash(self.file_name)
+        self.identifier: str = compile_command.identifier
+        self.sha256 = get_sha256_hash(self.identifier)
         self.status = FileStatus.NEW
-        self.csa_file: str = str(self.parent.csa_path) + self.file_name
+        self.csa_file: str = str(self.parent.csa_path) + self.identifier
         self.compile_command: CompileCommand = compile_command
         self.efm: Dict[str, str] = {}
 
@@ -178,9 +180,9 @@ class FileInCDB:
             logger.error(f"[Create FileInCDB] Encounter unknown extname when parse {self.file_name}")
 
         if extname:
-            self.prep_file = str(self.parent.preprocess_path) + self.file_name + extname
-            self.diff_file = str(self.parent.diff_path) + self.file_name + extname
-            self.diff_info_file = str(self.parent.preprocess_path) + self.file_name + '.txt'
+            self.prep_file = str(self.parent.preprocess_path) + self.identifier + extname
+            self.diff_file = str(self.parent.diff_path) + self.identifier + extname
+            self.diff_info_file = str(self.parent.preprocess_path) + self.identifier + '.txt'
         else:
             self.status = FileStatus.UNKNOWN
             return
@@ -189,7 +191,7 @@ class FileInCDB:
             return
         self.baseline_file: Optional[FileInCDB] = None
         if self.parent.update_mode:
-            old_file = self.parent.global_file_dict.get(self.file_name)
+            old_file = self.parent.global_file_dict.get(self.identifier)
             if old_file is not None:
                 self.status = FileStatus.UNCHANGED
                 self.baseline_file = old_file
@@ -204,7 +206,7 @@ class FileInCDB:
         else:
             if self.parent.baseline != self.parent:
                 # Find baseline file.
-                self.baseline_file = self.parent.baseline.get_file(self.file_name, False)
+                self.baseline_file = self.parent.baseline.get_file(self.identifier, False)
                 if self.baseline_file:
                     self.status = FileStatus.UNCHANGED
                 else:
@@ -237,7 +239,7 @@ class FileInCDB:
         elif kind == FileKind.TM:
             return (self.csa_file) + '.time'
         elif kind == FileKind.FIX:
-            return str((self.parent.clang_tidy_output_path)) + '/' + os.path.basename(self.file_name) + "_clang-tidy_" + self.sha256 + ".yaml"
+            return str((self.parent.clang_tidy_output_path)) + '/' + os.path.basename(self.identifier) + "_clang-tidy_" + self.sha256 + ".yaml"
         elif kind == FileKind.CPPCHECK:
             # Cppcheck cannot specify output plist file, but the output plist directory.
             return str((self.parent.cppcheck_output_path)) + '/' + self.sha256
@@ -258,6 +260,23 @@ class FileInCDB:
         else:
             logger.error(f"[Get File Path] Unknown file kind {kind}")
             return ""
+
+    def preprocess_file(self) -> bool:
+        commands = [self.compile_command.compiler]
+        commands.extend(self.compile_command.arguments + ['-D__clang_analyzer__'])
+        commands.extend(['-E'])
+        commands.extend(['-o', f'{self.prep_file}'])
+        makedir(os.path.dirname(self.prep_file))
+
+        try:
+            logger.debug(f"[Preprocess Script] {commands_to_shell_script(commands)}")
+            process = run(commands_to_shell_script(commands), capture_output=True, text=True, check=True, shell=True, cwd=self.compile_command.directory)
+        except subprocess.CalledProcessError as e:
+            self.status = FileStatus.PREPROCESS_FAILED
+            logger.debug(f"[Preprocess Failed] {self.prep_file}\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}")
+            return False
+
+        return True
 
     def diff_with_baseline(self) -> bool:
         if self.baseline_file is None:
@@ -302,7 +321,7 @@ class FileInCDB:
             commands.extend(["--dump-anr"])
         # Cppcheck function-level incremental.
         if self.parent.enable_cppcheck:
-            commands.extend(['-file-path', self.file_name])
+            commands.extend(['-file-path', self.identifier])
             commands.extend(["-cppcheck-rf-file", self.get_file_path(FileKind.CPPRF)])
         commands += ['--', '-w'] + self.compile_command.arguments + ['-D__clang_analyzer__']
         ii_script = commands_to_shell_script(commands)

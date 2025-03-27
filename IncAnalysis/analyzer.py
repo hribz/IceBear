@@ -42,15 +42,15 @@ class Analyzer(ABC):
             futures = [executor.submit(self.analyze_one_file, file) for file in self.file_list]
 
             for idx, future in enumerate(concurrent.futures.as_completed(futures), start=1):
-                stat, file_name = future.result()  # 获取任务结果，如果有的话
-                logger.info(f"[{self.get_analyzer_name()} Analyze {idx}/{len(self.file_list)}] [{stat}] {file_name}")
+                stat, file_identifier = future.result()  # 获取任务结果，如果有的话
+                logger.info(f"[{self.get_analyzer_name()} Analyze {idx}/{len(self.file_list)}] [{stat}] {file_identifier}")
                 ret = ret and stat == Process.Stat.ok
         return ret
     
     def analyze_one_file(self, file: FileInCDB):
         analyzer_cmd = self.generate_analyzer_cmd(file)
         if analyzer_cmd is None:
-            return Process.Stat.skipped, file.file_name
+            return Process.Stat.skipped, file.identifier
         script = commands_to_shell_script(analyzer_cmd)
         
         process = Process(analyzer_cmd, file.compile_command.directory)
@@ -59,7 +59,7 @@ class Analyzer(ABC):
             logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {script}")
         if process.stat == Process.Stat.ok:
             stat = Process.Stat.ok
-            logger.debug(f"[{self.get_analyzer_name()} Analyze Success] {file.file_name}")
+            logger.debug(f"[{self.get_analyzer_name()} Analyze Success] {file.identifier}")
             if self.analyzer_config.verbose:
                 logger.debug(f"[{self.get_analyzer_name()} Analyze Output]\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         else:
@@ -73,7 +73,7 @@ class Analyzer(ABC):
                     if line.startswith("  Total Execution Time"): # type: ignore
                         file.csa_analyze_time = (line.split(' ')[5]) # type: ignore
                         break
-        return stat, file.file_name
+        return stat, file.identifier
 
     @staticmethod
     def __str_to_analyzer_class__(analyzer_name: str):
@@ -96,14 +96,14 @@ class CSA(Analyzer):
     def generate_analyzer_cmd(self, file: FileInCDB):
         compiler = self.analyzer_config.compilers[file.compile_command.language]
         analyzer_cmd = [compiler] + file.compile_command.arguments + ['-Qunused-arguments']
-        output_path = str(file.parent.csa_output_path / file.file_name[1:])
+        output_path = str(file.parent.csa_output_path / file.identifier[1:])
         makedir(output_path)
         analyzer_cmd.extend(['--analyze', '-o', output_path])
         analyzer_cmd.extend(self.analyzer_config.analyze_args())
         # Add file specific args.
         if self.analyzer_config.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
             if file.cf_num == 0 or file.rf_num == 0:
-                logger.debug(f"[{__class__.__name__} No Functions] Don't need to analyze {file.file_name}")
+                logger.debug(f"[{__class__.__name__} No Functions] Don't need to analyze {file.identifier}")
                 return None
             if file.parent.incrementable and file.has_rf:
                 analyzer_cmd.extend(['-Xanalyzer', f'-analyze-function-file={file.get_file_path(FileKind.RF)}'])

@@ -98,7 +98,7 @@ def add_to_csv(headers, data, csv_file, write_headers: bool = True):
         if data is not None:
             writer.writerows(data)
 
-def process_file_list(method, file_list, jobs):
+def process_file_list(method, file_list: List, jobs):
         # Can't use mutilprocessing, because every process has its own memory space.
         # with mp.Pool(self.env.analyze_opts.jobs) as p:
         #     p.starmap(virtualCall, [(file, method, False) for file in file_list])
@@ -116,9 +116,11 @@ def process_file_list(method, file_list, jobs):
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
             futures = [executor.submit(getattr(file, method.__name__)) for file in file_list]
 
-            for future in concurrent.futures.as_completed(futures):
+            for idx, future in enumerate(concurrent.futures.as_completed(futures)):
                 result = future.result()  # 获取任务结果，如果有的话
+                logger.info(f"[{method.__name__} {idx}/{len(file_list)}] [{result}] {file_list[idx].identifier}")
                 ret = ret and result
+        return ret
 
 def commands_to_shell_script(commands):
     assert(commands is not None)

@@ -368,29 +368,48 @@ class Configuration:
         with open(self.compile_database, 'r') as f:
             cdb = json.load(f)
             for (idx, ccdb) in enumerate(cdb):
-                compile_command = CompileCommand(ccdb)
-                if compile_command.file is None:
+                compile_command = CompileCommand(ccdb, self.env.analyze_opts.file_identifier == 'file')
+                if compile_command.identifier is None:
                     continue
+                if '-cc1' in compile_command.arguments:
+                    # Skip clang frontend compile command.
+                    continue
+
+                same_file_idx = self.file_list_index.get(compile_command.file)
+                this_file_idx = len(self.file_list)
+                if same_file_idx is not None:
+                    # There maybe same 'file' (different 'output') in compile_commands.json.
+                    if compile_command.file_as_identifier:
+                        # If file name used as identifier, only record latest compile command.
+                        this_file_idx = same_file_idx
+                        compile_command.identifier = compile_command.file
+                    else:
+                        # Otherwise, record 'output' as identifier.
+                        compile_command.identifier = compile_command.output
+                else:
+                    # This file is the first time to appear in compile_commands.json.
+                    # Use file name as identifier prior to target file (although `opts.file_identifier` is `target`).
+                    compile_command.identifier = compile_command.file
+
                 file_in_cdb = FileInCDB(self, compile_command)
                 if file_in_cdb.status == FileStatus.UNKNOWN or file_in_cdb.status == FileStatus.UNEXIST:
                     self.abnormal_file_list.append(file_in_cdb)
                 else:
-                    same_file_idx = self.file_list_index.get(compile_command.file)
-                    if same_file_idx is not None:
-                        # There maybe same file(different output) in one compile_commands.json,
-                        # we only record latest compile command. 
-                        self.file_list[same_file_idx] = file_in_cdb
-                        self.merged_files += 1
-                    else:
-                        self.file_list_index[compile_command.file] = len(self.file_list)
+                    if this_file_idx == len(self.file_list):
                         self.file_list.append(file_in_cdb)
+                    else:
+                        self.file_list[this_file_idx] = file_in_cdb
+                    self.file_list_index[file_in_cdb.identifier] = this_file_idx
+                    if this_file_idx == same_file_idx:
+                        self.merged_files += 1
+
         makedir(self.preprocess_path)
         with open(self.compile_commands_used_by_analyzers, 'w') as f:
             cdb = []
             for file_in_cdb in self.file_list:
                 # Update global_file_dict after file_list has been initialzed,
                 # make sure there is no duplicate file name.
-                self.global_file_dict[file_in_cdb.file_name] = file_in_cdb
+                self.global_file_dict[file_in_cdb.identifier] = file_in_cdb
                 # Remove duplicate file in compile database.
                 cdb.append(file_in_cdb.compile_command.restore_to_json())
             json.dump(cdb, f, indent=4)
@@ -399,8 +418,8 @@ class Configuration:
             return True
         # update cache
         with open(self.cache_file, 'w') as f:
-            for file_name, file_in_cdb in self.global_file_dict.items():
-                f.write(f"{file_name} {file_in_cdb.prep_file}\n")
+            for identifier, file_in_cdb in self.global_file_dict.items():
+                f.write(f"{identifier} {file_in_cdb.prep_file}\n")
 
         return True
 
@@ -493,8 +512,9 @@ class Configuration:
             prep_arguments = file.compile_command.arguments + ['-D__clang_analyzer__']
             cdb.append({
                 "directory": file.compile_command.directory,
-                "command": " ".join([file.compile_command.compiler] + prep_arguments),
-                "file": file.file_name
+                "command": commands_to_shell_script([file.compile_command.compiler] + prep_arguments),
+                "file": file.file_name,
+                "output": file.compile_command.output
             })
         pre_cdb = open(self.compile_commands_used_by_pre, 'w')
         json.dump(cdb, pre_cdb, indent=4)
@@ -517,9 +537,9 @@ class Configuration:
         if self.env.analyze_opts.verbose:
             commands.extend(['--verbose'])
         preprocess_script = commands_to_shell_script(commands)
-        logger.debug("[Preprocess Files Script] " + preprocess_script)
         try:
-            process = run(preprocess_script, shell=True, capture_output=True, text=True, check=True)
+            # process = run(preprocess_script, shell=True, capture_output=True, text=True, check=True)
+            preprocess_result = process_file_list(FileInCDB.preprocess_file, self.file_list, self.env.analyze_opts.jobs)
             self.status = 'PREPROCESSED'
             self.session_times['preprocess_repo'] = time.time() - start_time
             cdb = []
@@ -532,13 +552,17 @@ class Configuration:
                 prep_arguments = file.compile_command.arguments + ['-D__clang_analyzer__']
                 cdb.append({
                     "directory": file.compile_command.directory,
-                    "command": " ".join([file.compile_command.compiler] + prep_arguments),
+                    "command": commands_to_shell_script([file.compile_command.compiler] + prep_arguments),
                     "file": file.prep_file
                 })
             with open(self.preprocess_compile_database, 'w') as f:
                 json.dump(cdb, f, indent=4)
-            logger.debug(f"[Preprocess Files Success]\nstdout:\n{process.stdout}stderr:\n{process.stderr}")
-            logger.info(f"[Preprocess Files Success] {preprocess_script}")
+            if preprocess_result:
+                logger.debug(f"[Preprocess Files Success]")
+            else:
+                # Don't stop tasks although some file preprocess failed.
+                # self.session_times['preprocess_repo'] = SessionStatus.Failed
+                logger.debug(f"[Preprocess Files Failed]")
         except subprocess.CalledProcessError as e:
             self.session_times['preprocess_repo'] = SessionStatus.Failed
             logger.error(f"[Preprocess Files Failed] stdout: {e.stdout}\n stderr: {e.stderr}")
@@ -606,6 +630,7 @@ class Configuration:
                         for line in f.readlines():
                             usr, path = parse_efm(line)
                             if usr and path:
+                                # File identifier should be file name.
                                 path_file = self.get_file(get_origin_file_name(path, str(self.baseline.csa_path), ['.ast']))
                                 if path_file:
                                     self.global_efm[usr] = path_file
@@ -640,6 +665,7 @@ class Configuration:
                 for line in f.readlines():
                     usr, path = parse_efm(line)
                     if usr and path:
+                        # File identifier should be file name.
                         ast_file = self.get_file(get_origin_file_name(path, str(self.csa_path), ['.ast']))
                         if ast_file:
                             self.global_efm[usr] = ast_file
@@ -868,7 +894,7 @@ class Configuration:
         total_csa_time = 0.0
         for file in self.file_list:
             # file, status, analyze time, cg nodes num, cf num, rf num, baseline fs num
-            data: List[Union[str, int]] = [file.file_name, str(file.status)]
+            data: List[Union[str, int]] = [file.identifier, str(file.status)]
             # if self.env.inc_mode.value >= IncrementalMode.FuncitonLevel.value and file.is_changed():
             #     # Parse CG maybe skipped if it's new file or no function changed.
             #     # Or just because inc_mode < function level.

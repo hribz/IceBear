@@ -4,9 +4,10 @@ import os
 from IncAnalysis.logger import logger
 
 class CompileCommand:
-    def __init__(self, ccmd):
+    def __init__(self, ccmd, file_as_identifier=True):
         self.directory = None
         self.language = 'Unknown'
+        self.file_as_identifier = file_as_identifier
 
         if 'command' in ccmd:
             self.origin_cmd = ccmd['command']
@@ -42,6 +43,11 @@ class CompileCommand:
         self.directory = os.path.abspath(ccmd['directory'])
         self.file = os.path.abspath(os.path.join(
             self.directory, ccmd['file']))
+        self.identifier = self.file
+        self.output = ccmd.get('output')
+        if self.output:
+            self.output = os.path.abspath(os.path.join(
+                self.directory, ccmd['output']))
 
         # File type: clang::driver::types::lookupTypeForExtension
         extname = os.path.splitext(self.file)[1][1:]
@@ -82,8 +88,12 @@ class CompileCommand:
                 continue
             if arguments[i] in prune2:
                 i += 1
+                if not self.output:
+                    self.output = os.path.abspath(os.path.join(self.directory, arguments[i]))
                 continue
             if arguments[i][:3] == '-o=':
+                if not self.output:
+                    self.output = os.path.abspath(os.path.join(self.directory, arguments[i][3:]))
                 continue
             if arguments[i][:2] in prunes2:
                 continue
