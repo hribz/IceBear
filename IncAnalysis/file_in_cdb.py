@@ -165,9 +165,12 @@ class FileInCDB:
         # self.call_graph: CallGraph = None
         self.cg_node_num = 'Skip'
         self.has_cg = False # File has .cg.
-        self.indirect_call_num = 0
         self.rf_num = 'All'
         self.has_rf = False # Propagate reanalyze attribute(if needed) successfully.
+        self.affected_virtual_functions = 0
+        self.affected_vf_indirect_calls = 0
+        self.function_pointer_types = 0
+        self.affected_fp_indirect_calls = 0
         self.basline_fs_num = 'Skip'
         self.baseline_has_fs = False # Analysis finished successfully.
         self.csa_analyze_time = "Unknown"
@@ -355,8 +358,14 @@ class FileInCDB:
                     self.has_rf = True
                 elif tag == 'cg nodes':
                     self.cg_node_num = int(val)
-                elif tag == 'indirect call':
-                    self.indirect_call_num = int(val)
+                elif tag == 'affected virtual functions':
+                    self.affected_virtual_functions = int(val)
+                elif tag == 'affected vf indirect calls':
+                    self.affected_vf_indirect_calls = int(val)
+                elif tag == 'function pointer types':
+                    self.function_pointer_types = int(val)
+                elif tag == 'affected fp indirect calls':
+                    self.affected_fp_indirect_calls = int(val)
         return True
 
     def parse_cg_file(self) -> Optional[CallGraph]:

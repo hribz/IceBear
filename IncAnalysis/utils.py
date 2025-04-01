@@ -118,7 +118,7 @@ def process_file_list(method, file_list: List, jobs):
 
             for idx, future in enumerate(concurrent.futures.as_completed(futures)):
                 result = future.result()  # 获取任务结果，如果有的话
-                logger.info(f"[{method.__name__} {idx}/{len(file_list)}] [{result}] {file_list[idx].identifier}")
+                logger.info(f"[{method.__name__} {idx+1}/{len(file_list)}] [{result}] {file_list[idx].identifier}")
                 ret = ret and result
         return ret
 

@@ -10,7 +10,9 @@
 #include <clang/AST/Expr.h>
 #include <clang/AST/ExprCXX.h>
 #include <clang/AST/Stmt.h>
+#include <clang/AST/Type.h>
 #include <clang/Basic/LLVM.h>
+#include <llvm/ADT/DenseMapInfo.h>
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Support/Error.h>
@@ -19,6 +21,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "clang/AST/ParentMapContext.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/Analysis/AnalysisDeclContext.h"
 #include "clang/Frontend/CompilerInstance.h"
@@ -73,17 +76,36 @@ private:
   std::vector<const Decl *> FoundedDecls;
 };
 
+namespace llvm {
+template <> struct DenseMapInfo<clang::QualType> {
+  static inline clang::QualType getEmptyKey() {
+    return clang::QualType::getFromOpaquePtr(
+        reinterpret_cast<void *>(~static_cast<uintptr_t>(0)));
+  }
+  static inline clang::QualType getTombstoneKey() {
+    return clang::QualType::getFromOpaquePtr(
+        reinterpret_cast<void *>(~static_cast<uintptr_t>(1)));
+  }
+  static unsigned getHashValue(clang::QualType Val) {
+    return DenseMapInfo<void *>::getHashValue(Val.getAsOpaquePtr());
+  }
+  static bool isEqual(clang::QualType LHS, clang::QualType RHS) {
+    return LHS == RHS; // 直接使用 QualType 的判等操作符
+  }
+};
+} // namespace llvm
+
 class IncInfoCollectASTVisitor
     : public RecursiveASTVisitor<IncInfoCollectASTVisitor> {
 public:
   explicit IncInfoCollectASTVisitor(ASTContext *Context, DiffLineManager &dlm,
                                     ReverseCallGraph &CG,
                                     llvm::DenseSet<const Decl *> &FuncsChanged,
-                                    llvm::DenseSet<const Decl *> &ICC,
+                                    llvm::DenseSet<const Decl *> &AffectedVFs,
                                     llvm::DenseSet<const Decl *> &AffectedNodes,
                                     const IncOptions &incOpt)
       : Context(Context), DLM(dlm), CG(CG), FunctionsChanged(FuncsChanged),
-        ICChanged(ICC), AN(AffectedNodes), IncOpt(incOpt) {}
+        AffectedVFs(AffectedVFs), AN(AffectedNodes), IncOpt(incOpt) {}
 
   bool isGlobalConstant(const Decl *D);
 
@@ -124,10 +146,13 @@ public:
   // functions/methods need to reanalyze. Such as GlobalConstant and
   // class/struct change.
   llvm::DenseSet<const Decl *> TaintDecls;
-  llvm::DenseSet<const Decl *> &FunctionsChanged;
-  llvm::DenseSet<const Decl *> &ICChanged;
-  llvm::DenseSet<const Decl *> FPChanged;
-  llvm::DenseSet<const Decl *> &AN;
+  llvm::DenseSet<const Decl *> &FunctionsChanged; // Changed functions.
+  llvm::DenseSet<const Decl *> &AffectedVFs;      // Affected virtual functions.
+  llvm::DenseSet<QualType> TypesMayUsedByFP; // Affected function types maybe
+                                             // used by function pointer call.
+  llvm::DenseSet<const Decl *> &AN;          // Affected Nodes.
+  unsigned int AffectedIndirectCallByVF = 0;
+  unsigned int AffectedIndirectCallByFP = 0;
   DiffLineManager &DLM;
   ReverseCallGraph &CG;
   DeclRefFinder DRFinder;

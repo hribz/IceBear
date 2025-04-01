@@ -1,4 +1,5 @@
-//===- ReverseCallGraph.cpp - AST-based Call graph -------------------------------===//
+//===- ReverseCallGraph.cpp - AST-based Call graph
+//-------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -49,7 +50,8 @@ class CGBuilder : public StmtVisitor<CGBuilder> {
   ReverseCallGraphNode *CallerNode;
 
 public:
-  CGBuilder(ReverseCallGraph *g, ReverseCallGraphNode *N) : G(g), CallerNode(N) {}
+  CGBuilder(ReverseCallGraph *g, ReverseCallGraphNode *N)
+      : G(g), CallerNode(N) {}
 
   void VisitStmt(Stmt *S) { VisitChildren(S); }
 
@@ -102,14 +104,10 @@ public:
   }
 
   // Include the evaluation of the default argument.
-  void VisitCXXDefaultArgExpr(CXXDefaultArgExpr *E) {
-    Visit(E->getExpr());
-  }
+  void VisitCXXDefaultArgExpr(CXXDefaultArgExpr *E) { Visit(E->getExpr()); }
 
   // Include the evaluation of the default initializers in a class.
-  void VisitCXXDefaultInitExpr(CXXDefaultInitExpr *E) {
-    Visit(E->getExpr());
-  }
+  void VisitCXXDefaultInitExpr(CXXDefaultInitExpr *E) { Visit(E->getExpr()); }
 
   // Adds may-call edges for the ObjC message sends.
   void VisitObjCMessageExpr(ObjCMessageExpr *ME) {
@@ -147,9 +145,7 @@ void ReverseCallGraph::addNodesForBlocks(DeclContext *D) {
       addNodesForBlocks(DC);
 }
 
-ReverseCallGraph::ReverseCallGraph() {
-  Root = getOrInsertNode(nullptr);
-}
+ReverseCallGraph::ReverseCallGraph() { Root = getOrInsertNode(nullptr); }
 
 ReverseCallGraph::~ReverseCallGraph() = default;
 
@@ -176,7 +172,7 @@ bool ReverseCallGraph::includeCalleeInGraph(const Decl *D) {
   return true;
 }
 
-void ReverseCallGraph::addNodeForDecl(Decl* D, bool IsGlobal) {
+void ReverseCallGraph::addNodeForDecl(Decl *D, bool IsGlobal) {
   assert(D);
 
   // Allocate a new node, mark it as root, and process its calls.
@@ -197,7 +193,8 @@ void ReverseCallGraph::addNodeForDecl(Decl* D, bool IsGlobal) {
 
 ReverseCallGraphNode *ReverseCallGraph::getNode(const Decl *F) const {
   FunctionMapTy::const_iterator I = FunctionMap.find(F);
-  if (I == FunctionMap.end()) return nullptr;
+  if (I == FunctionMap.end())
+    return nullptr;
   return I->second.get();
 }
 
@@ -223,7 +220,9 @@ void ReverseCallGraph::print(raw_ostream &OS) const {
   // sure the output is deterministic.
   llvm::ReversePostOrderTraversal<const ReverseCallGraph *> RPOT(this);
   for (llvm::ReversePostOrderTraversal<const ReverseCallGraph *>::rpo_iterator
-         I = RPOT.begin(), E = RPOT.end(); I != E; ++I) {
+           I = RPOT.begin(),
+           E = RPOT.end();
+       I != E; ++I) {
     const ReverseCallGraphNode *N = *I;
 
     OS << "  Function: ";
@@ -233,11 +232,11 @@ void ReverseCallGraph::print(raw_ostream &OS) const {
       N->print(OS);
 
     OS << " calls: ";
-    for (ReverseCallGraphNode::const_iterator CI = N->begin(),
-                                       CE = N->end(); CI != CE; ++CI) {
+    for (ReverseCallGraphNode::const_iterator CI = N->begin(), CE = N->end();
+         CI != CE; ++CI) {
       assert(*CI != Root && "No one can call the root node.");
       (*CI)->print(OS);
-      
+
       OS << " ";
     }
     OS << '\n';
@@ -245,9 +244,7 @@ void ReverseCallGraph::print(raw_ostream &OS) const {
   OS.flush();
 }
 
-LLVM_DUMP_METHOD void ReverseCallGraph::dump() const {
-  print(llvm::errs());
-}
+LLVM_DUMP_METHOD void ReverseCallGraph::dump() const { print(llvm::errs()); }
 
 void ReverseCallGraph::viewGraph() const {
   llvm::ViewGraph(this, "ReverseCallGraph");
@@ -255,7 +252,7 @@ void ReverseCallGraph::viewGraph() const {
 
 void ReverseCallGraphNode::print(raw_ostream &os) const {
   if (const NamedDecl *ND = dyn_cast_or_null<NamedDecl>(FD))
-      return ND->printQualifiedName(os);
+    return ND->printQualifiedName(os);
   os << "< >";
 }
 
@@ -266,8 +263,8 @@ LLVM_DUMP_METHOD void ReverseCallGraphNode::dump() const {
 namespace llvm {
 
 template <>
-struct DOTGraphTraits<const ReverseCallGraph*> : public DefaultDOTGraphTraits {
-  DOTGraphTraits (bool isSimple = false) : DefaultDOTGraphTraits(isSimple) {}
+struct DOTGraphTraits<const ReverseCallGraph *> : public DefaultDOTGraphTraits {
+  DOTGraphTraits(bool isSimple = false) : DefaultDOTGraphTraits(isSimple) {}
 
   static std::string getNodeLabel(const ReverseCallGraphNode *Node,
                                   const ReverseCallGraph *CG) {

@@ -823,12 +823,19 @@ class Configuration:
                 self.reanalyze_function_num += file.rf_num
         return self.reanalyze_function_num
     
-    def get_indirect_call_num(self):
-        self.indirect_call_num = 0
+    def get_affected_vf_indirect_calls_num(self):
+        self.affected_vf_indirect_calls = 0
         for file in self.diff_file_list:
-            if file.indirect_call_num and isinstance(file.indirect_call_num, int):
-                self.indirect_call_num += file.indirect_call_num
-        return self.indirect_call_num
+            if file.affected_vf_indirect_calls and isinstance(file.affected_vf_indirect_calls, int):
+                self.affected_vf_indirect_calls += file.affected_vf_indirect_calls
+        return self.affected_vf_indirect_calls
+    
+    def get_affected_fp_indirect_calls_num(self):
+        self.affected_fp_indirect_calls = 0
+        for file in self.diff_file_list:
+            if file.affected_fp_indirect_calls and isinstance(file.affected_fp_indirect_calls, int):
+                self.affected_fp_indirect_calls += file.affected_fp_indirect_calls
+        return self.affected_fp_indirect_calls
 
     def get_total_cg_nodes_num(self):
         self.total_cg_nodes = 0
@@ -881,7 +888,8 @@ class Configuration:
         return ret
 
     def file_status(self):
-        headers = ['file', 'status', 'csa analyze time(s)', 'cg nodes', 'changed functions', 'reanalyze functions', 'indirect call']
+        headers = ['file', 'status', 'csa analyze time(s)', 'cg nodes', 'changed functions', 'reanalyze functions', 
+                   'affected virtual functions', 'affected vf indirect calls', 'function pointer types', 'affected fp indirect calls']
         datas = []
         unexists_number, unknown_number = 0, 0
         for ab_file in self.abnormal_file_list:
@@ -902,7 +910,7 @@ class Configuration:
             #         file.parse_cg_file()
             # if self.env.inc_mode == IncrementalMode.InlineLevel and not file.baseline_has_fs:
             #     file.parse_baseline_fs_file()
-            data.extend([file.csa_analyze_time, file.cg_node_num, file.cf_num, file.rf_num, file.indirect_call_num])
+            data.extend([file.csa_analyze_time, file.cg_node_num, file.cf_num, file.rf_num, file.affected_virtual_functions, file.affected_vf_indirect_calls, file.function_pointer_types, file.affected_fp_indirect_calls])
             datas.append(data)
             if file.status == FileStatus.NEW:
                 new_file_num += 1
