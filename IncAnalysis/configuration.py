@@ -304,6 +304,9 @@ class Configuration:
         if self.env.inc_mode != IncrementalMode.NoInc:
             self.preprocess_repo()
             self.diff_with_other(self.baseline, not has_init)
+        if self.env.analyze_opts.basic_info:
+            self.extract_basic_info()
+            self.file_basic_statistics()
         if self.env.analyze_opts.prep_only:
             return True
         # 3. extract inc info
@@ -413,6 +416,12 @@ class Configuration:
                 # Remove duplicate file in compile database.
                 cdb.append(file_in_cdb.compile_command.restore_to_json())
             json.dump(cdb, f, indent=4)
+
+        # update compiler environment
+        for file in self.file_list:
+            compiler = file.compile_command.compiler
+            if compiler not in self.env.system_dir:
+                self.env.prepare_compiler_path(compiler)
 
         if self.env.analyze_opts.not_update_cache:
             return True
@@ -583,6 +592,20 @@ class Configuration:
         process_file_list(FileInCDB.extract_inc_info, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
         logger.info(f"[Extract Inc Info Finish]")
         self.session_times['extract_inc_info'] = time.time() - start_time
+
+    def extract_basic_info(self):
+        '''
+        File statistics: CG nodes, Virtual functions, Function pointers, preprocess coverage, etc. 
+        '''
+        self.session_times['extract_basic_info'] = SessionStatus.Skipped
+        if not self.compile_database.exists():
+            logger.error(f"[Basic Info] can't extract basic info without file {self.compile_database}")
+            return
+        start_time = time.time()
+        makedir(self.preprocess_path, "[basic Info Files DIR exists]")
+        process_file_list(FileInCDB.extract_basic_info, self.diff_file_list if self.incrementable else self.file_list, self.env.analyze_opts.jobs)
+        logger.info(f"[Extract basic Info Finish]")
+        self.session_times['extract_basic_info'] = time.time() - start_time
 
     def generate_efm(self):
         start_time = time.time()
@@ -893,7 +916,7 @@ class Configuration:
         datas = []
         unexists_number, unknown_number = 0, 0
         for ab_file in self.abnormal_file_list:
-            datas.append([ab_file.file_name, str(ab_file.status)])
+            datas.append([ab_file.identifier, str(ab_file.status)])
             if ab_file.status == FileStatus.UNEXIST:
                 unexists_number += 1
             else:
@@ -924,3 +947,86 @@ class Configuration:
                       f"new files:{new_file_num}", f"changed files:{changed_file_num}", f"unchanged files:{unchanged_file_num}",
                       f"total csa analyze time:{total_csa_time}"])
         return headers, datas
+    
+    def file_basic_statistics(self):
+        def merge_file_statistics(sta1, sta2):
+            # Merge skipped ranges from sta2 to sta1.
+            skipped1 = sta1["Coverage"]["skipped"]
+            skipped2 = sta2["Coverage"]["skipped"]
+            new_range = []
+            idx1 = idx2 = 0
+
+            while idx1 < len(skipped1) and idx2 < len(skipped2):
+                range1 = skipped1[idx1]
+                range2 = skipped2[idx2]
+                # Chose the smaller range.
+                if range1[0] <= range2[0]:
+                    current = range1
+                    idx1 += 1
+                else:
+                    current = range2
+                    idx2 += 1
+                # Merge to new range.
+                if not new_range:
+                    new_range.append(current)
+                else:
+                    last = new_range[-1]
+                    if current[0] <= last[1] + 1:
+                        # Merge range.
+                        new_range[-1] = [last[0], max(last[1], current[1])]
+                    else:
+                        new_range.append(current)
+
+            # Handle left rages in skipped1.
+            while idx1 < len(skipped1):
+                current = skipped1[idx1]
+                idx1 += 1
+                if not new_range:
+                    new_range.append(current)
+                else:
+                    last = new_range[-1]
+                    if current[0] <= last[1] + 1:
+                        new_range[-1] = [last[0], max(last[1], current[1])]
+                    else:
+                        new_range.append(current)
+
+            # Handle left rages in skipped2.
+            while idx2 < len(skipped2):
+                current = skipped2[idx2]
+                idx2 += 1
+                if not new_range:
+                    new_range.append(current)
+                else:
+                    last = new_range[-1]
+                    if current[0] <= last[1] + 1:
+                        new_range[-1] = [last[0], max(last[1], current[1])]
+                    else:
+                        new_range.append(current)
+
+            sta1["Coverage"]["skipped"] = new_range
+            
+        statistics_summary = {}
+        
+        for file in self.file_list:
+            if file.status == FileStatus.UNCHANGED:
+                # Reuse previous result
+                if file.baseline_file:
+                    statistics_file = file.baseline_file.get_file_path(FileKind.BASIC)
+            elif file.is_changed():
+                statistics_file = file.get_file_path(FileKind.BASIC)
+            else:
+                continue
+            if statistics_file and os.path.exists(statistics_file):
+                statistics_json = json.load(open(statistics_file, "r"))
+                for filename, statistics in statistics_json.items():
+                    if filename not in statistics_summary:
+                        statistics_summary[filename] = statistics
+                    else:
+                        merge_file_statistics(statistics_summary[filename], statistics)
+                    total_lines = statistics_summary[filename]["Coverage"]["total"]
+                    skipped_lines = sum([x[1]-x[0] for x in statistics_summary[filename]["Coverage"]["skipped"]])
+                    statistics_summary[filename]["Coverage"]["skipped lines"] = skipped_lines
+                    statistics_summary[filename]["Coverage"]["coverage"] = 100.0 if total_lines == 0 else 100.0 * (total_lines - skipped_lines) / total_lines
+        
+        with open(self.preprocess_path / 'project_statistics.json', 'w') as f:
+            json.dump(statistics_summary, f, indent=4)

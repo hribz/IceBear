@@ -40,16 +40,40 @@ class Environment:
         if self.analyze_opts.file_identifier != 'file' and self.ctu:
             logger.error(f"[Option Conflict] File identidier must be \'file\' if turn on ctu analysis.")
             exit(1)
+    
+    def prepare_compiler_path(self, compiler_path):
+        if compiler_path in self.system_dir:
+            return
+        compiler = os.path.basename(compiler_path)
+        if 'cc' in compiler or 'c++' in compiler:
+            compiler = subprocess.run(["readlink", "-f", compiler_path], capture_output=True).stdout.decode('utf-8').strip()
+        if 'clang' in compiler:
+            self.system_dir[compiler_path] = subprocess.run([compiler_path, '-print-resource-dir'], capture_output=True).stdout.decode('utf-8').strip()
+        elif 'gcc' in compiler or 'g++' in compiler:
+            gcc_info = subprocess.run([compiler_path, "-print-search-dirs"], capture_output=True).stdout.decode('utf-8').strip()
+            for line in gcc_info.splitlines():
+                if line.startswith('install:'):
+                    self.system_dir[compiler_path] = line[8:].strip()
+                    break
 
     def prepare_env_path(self, ice_bear_path):
         # Environment path
         self.PWD: Path = Path(ice_bear_path).absolute()
         self.EXTRACT_II = str(self.PWD / 'build/clang_tool/collectIncInfo')
         self.PANDA = str(self.PWD / 'external/panda/panda')
-        # Environment CC/CXX Compiler
+        if self.analyze_opts.basic_info:
+            self.EXTRACT_BASIC_II = shutil.which(self.analyze_opts.basic_info)
+            if not self.EXTRACT_BASIC_II:
+                logger.error(f"Cannot find {self.analyze_opts.basic_info}")
+                exit(1)
 
+        # Environment CC/CXX Compiler
         self.CC = shutil.which(self.analyze_opts.cc)
         self.CXX = shutil.which(self.analyze_opts.cxx)
+        self.system_dir = {}
+        self.prepare_compiler_path(self.CC)
+        self.prepare_compiler_path(self.CXX)
+
         # Customized clang path.
         if self.analyze_opts.clang:
             self.CLANG = shutil.which(self.analyze_opts.clang)
@@ -68,6 +92,8 @@ class Environment:
         logger.info(f'Use clang={self.CLANG}')
         clang_bin = os.path.dirname(self.CLANG) # type: ignore
         self.CLANG_PLUS_PLUS = os.path.join(clang_bin, 'clang++')
+        self.prepare_compiler_path(self.CLANG)
+        self.prepare_compiler_path(self.CLANG_PLUS_PLUS)
         self.clang_tidy = os.path.join(clang_bin, 'clang-tidy')
         self.diagtool = os.path.join(clang_bin, 'diagtool')
         if self.analyze_opts.cppcheck:
@@ -181,6 +207,7 @@ class ArgumentParser:
         # self.parser.add_argument('--infer-config', type=str, dest='infer_config', default=None, help='Infer config file.')
         self.parser.add_argument('--file-identifier', type=str, dest='file_identifier', choices=['file', 'target'], default='file name', 
                                  help='Identify analysis unit by file or target.')
+        self.parser.add_argument('--basic-info', type=str, dest='basic_info', help='Record basic information (CG node number, etc.).')
     
     def parse_args(self, args):
         return self.parser.parse_args(args)

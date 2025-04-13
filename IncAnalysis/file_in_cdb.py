@@ -23,6 +23,7 @@ class FileKind(Enum):
     CG = auto()
     CF = auto()
     INCSUM = auto()
+    BASIC = auto()
     RF = auto()
     FS = auto()
     TM = auto()
@@ -254,6 +255,8 @@ class FileInCDB:
             return (self.prep_file) + '.cf'
         elif kind == FileKind.INCSUM:
             return (self.prep_file) + '.ics'
+        elif kind == FileKind.BASIC:
+            return (self.prep_file) + '.json'
         elif kind == FileKind.RF:
             return (self.prep_file) + '.rf'
         elif kind == FileKind.ANR:
@@ -339,8 +342,10 @@ class FileInCDB:
 
     def parse_inc_sum(self) -> bool:
         inc_sum_file = self.get_file_path(FileKind.INCSUM)
+        if self.status == FileStatus.UNCHANGED:
+            return True
         if not os.path.exists(inc_sum_file):
-            logger.error(f"[Parse Inc Sum] File {inc_sum_file} doesn't exist, It's seems file has no change.")
+            logger.error(f"[Parse Inc Sum] File {inc_sum_file} doesn't exist.")
             return False
         with open(inc_sum_file, 'r') as f:
             for line in f.readlines():
@@ -368,6 +373,33 @@ class FileInCDB:
                     self.affected_fp_indirect_calls = int(val)
         return True
 
+    def extract_basic_info(self) -> bool:
+        if not self.parent.env.EXTRACT_BASIC_II:
+            # Can not find extract basic info tool.
+            return True
+        commands = [self.parent.env.EXTRACT_BASIC_II]
+        commands.append(self.file_name)
+        commands.extend(['-o', self.get_file_path(FileKind.BASIC)])
+        commands += ['--', '-w'] + self.compile_command.arguments + ['-D__clang_analyzer__']
+        compiler = self.compile_command.compiler
+        commands += ['-isystem', os.path.join(self.parent.env.system_dir[compiler], 'include')]
+        basic_ii_script = commands_to_shell_script(commands)
+        try:
+            process = run(commands, capture_output=True, text=True, check=True, cwd=self.compile_command.directory)
+            logger.debug(f"[Basic Info Success] {basic_ii_script}")
+            statistics_json = json.load(open(self.get_file_path(FileKind.BASIC), 'r'))
+            for file, statistics in statistics_json.items():
+                if statistics['kind'] == 'SYSTEM':
+                    # Some times user header will be recognize as system header.
+                    # Fix it by checking if the file is in src or build directory.
+                    if file.startswith(str(self.parent.src_path)) or file.startswith(str(self.parent.build_path)):
+                        statistics['kind'] = 'USER'
+            json.dump(statistics_json, open(self.get_file_path(FileKind.BASIC), 'w'))
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.error(f"[Basic Info Failed] {basic_ii_script}\n stdout: {e.stdout}\n stderr: {e.stderr}")
+            return False
+        
     def parse_cg_file(self) -> Optional[CallGraph]:
         # .cg file format: 
         # caller

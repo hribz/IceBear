@@ -23,6 +23,7 @@
 
 #include "clang/AST/ParentMapContext.h"
 #include "clang/AST/RecursiveASTVisitor.h"
+#include "clang/AST/TypeOrdering.h"
 #include "clang/Analysis/AnalysisDeclContext.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Index/USRGeneration.h"
@@ -75,25 +76,6 @@ public:
 private:
   std::vector<const Decl *> FoundedDecls;
 };
-
-namespace llvm {
-template <> struct DenseMapInfo<clang::QualType> {
-  static inline clang::QualType getEmptyKey() {
-    return clang::QualType::getFromOpaquePtr(
-        reinterpret_cast<void *>(~static_cast<uintptr_t>(0)));
-  }
-  static inline clang::QualType getTombstoneKey() {
-    return clang::QualType::getFromOpaquePtr(
-        reinterpret_cast<void *>(~static_cast<uintptr_t>(1)));
-  }
-  static unsigned getHashValue(clang::QualType Val) {
-    return DenseMapInfo<void *>::getHashValue(Val.getAsOpaquePtr());
-  }
-  static bool isEqual(clang::QualType LHS, clang::QualType RHS) {
-    return LHS == RHS; // 直接使用 QualType 的判等操作符
-  }
-};
-} // namespace llvm
 
 class IncInfoCollectASTVisitor
     : public RecursiveASTVisitor<IncInfoCollectASTVisitor> {
