@@ -1,3 +1,13 @@
+# -------------------------------------------------------------------------
+#
+#  Part of the CodeChecker project, under the Apache License v2.0 with
+#  LLVM Exceptions. See LICENSE for license information.
+#  SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# -------------------------------------------------------------------------
+
+# Modified by Yu Xiao for IceBear analysis configuration on 2024-12-17.
+
 from enum import Enum
 import re
 import subprocess
