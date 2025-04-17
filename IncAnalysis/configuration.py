@@ -283,6 +283,10 @@ class Configuration:
         if self.build_type == BuildType.CMAKE or not (can_skip_configure and has_init):
             self.configure()
 
+    def clean_inc_files(self):
+        for file in self.diff_file_list:
+            file.clean_files()
+
     def process_this_config(self, can_skip_configure: bool, has_init: bool):
         # 1. configure & build
         has_init = self.read_cache()
@@ -298,7 +302,6 @@ class Configuration:
         # Record real runtime and CPU time for tasks 
         # related to incremental analysis preparation.
         start_real_time = time.time()
-        start_cpu_time = os.times()
 
         # 2. preprocess and diff
         if self.env.inc_mode != IncrementalMode.NoInc:
@@ -318,10 +321,7 @@ class Configuration:
         #     self.propagate_reanalyze_attr()
 
         end_real_time = time.time()
-        end_cpu_time = os.times()
         self.prepare_for_inc_info_real_time = end_real_time - start_real_time
-        self.prepare_for_inc_info_cpu_time_user = (end_cpu_time.user - start_cpu_time.user) 
-        self.prepare_for_inc_info_cpu_time_sys = (end_cpu_time.system - start_cpu_time.system)
 
         # 5. prepare for CSA
         if self.env.ctu:
@@ -330,16 +330,14 @@ class Configuration:
 
         # Record real runtime and CPU time for analyze tasks.
         start_real_time = time.time()
-        start_cpu_time = os.times()
 
         self.analyze()
         self.output_analysis_time()
+        if not self.env.analyze_opts.verbose:
+            self.clean_inc_files()
 
         end_real_time = time.time()
-        end_cpu_time = os.times()
         self.analyze_real_time = end_real_time - start_real_time
-        self.analyze_cpu_time_user = (end_cpu_time.user - start_cpu_time.user)
-        self.analyze_cpu_time_sys = (end_cpu_time.system - start_cpu_time.system)
 
         return True
     
@@ -356,6 +354,14 @@ class Configuration:
             return True
         logger.info("[Read Cache] No cache, do full analysis.")
         return False
+    
+    def update_cache(self):
+        if self.env.analyze_opts.not_update_cache:
+            return 
+        # update cache
+        with open(self.cache_file, 'w') as f:
+            for identifier, file_in_cdb in self.global_file_dict.items():
+                f.write(f"{identifier} {file_in_cdb.prep_file}\n")
 
     def prepare_file_list(self):
         # Don't invoke this function after `configure & build` automatically,
@@ -422,13 +428,6 @@ class Configuration:
             compiler = file.compile_command.compiler
             if compiler not in self.env.system_dir:
                 self.env.prepare_compiler_path(compiler)
-
-        if self.env.analyze_opts.not_update_cache:
-            return True
-        # update cache
-        with open(self.cache_file, 'w') as f:
-            for identifier, file_in_cdb in self.global_file_dict.items():
-                f.write(f"{identifier} {file_in_cdb.prep_file}\n")
 
         return True
 
@@ -763,7 +762,7 @@ class Configuration:
         # remake_dir(self.diff_path, "[Diff Files DIR exists]")
         makedir(self.diff_path, "[Diff Files DIR exists]")
         with mp.Pool(self.env.analyze_opts.jobs) as p:
-            p.map(replace_loc_info, [((file.prep_file, file.diff_file) if file.prep_file else (None, file.file_name)) for file in self.file_list])
+            p.map(replace_loc_info, [((file.prep_file, file.get_file_path(FileKind.DIFF)) if file.prep_file else (None, file.file_name)) for file in self.file_list])
 
     def diff_with_other(self, other, skip_diff: bool = False):
         # Replace all preprocess location info to empty lines.
@@ -771,6 +770,7 @@ class Configuration:
         if skip_diff:
             logger.info(f"[Skip Diff] Skip first diff.")
             self.session_times['diff_with_other'] = SessionStatus.Skipped
+            self.update_cache()
             return
         if not self.update_mode:
             if self == other:
@@ -791,10 +791,14 @@ class Configuration:
         for file in self.file_list:
             if file.baseline_file is not None:
                 if not self.env.analyze_opts.verbose:
-                    # Don't clean files under debug mode.
-                    file.baseline_file.clean_files()
+                    # If this file is not changed, we reuse any files in baseline path.
+                    if file.status == FileStatus.UNCHANGED:
+                        file.clean_cache()
+                        file.prep_file = file.baseline_file.prep_file
+                        file.baseline_file = None
             if file.is_changed():
                 self.diff_file_list.append(file)
+        self.update_cache()
         if self.status == 'DIFF':
             logger.info(f"[Parse Diff Result Success] diff file number: {len(self.diff_file_list)}")
             
@@ -1009,9 +1013,12 @@ class Configuration:
         
         for file in self.file_list:
             if file.status == FileStatus.UNCHANGED:
-                # Reuse previous result
-                if file.baseline_file:
-                    statistics_file = file.baseline_file.get_file_path(FileKind.BASIC)
+                # Reuse previous result.
+                if self.env.analyze_opts.verbose:
+                    if file.baseline_file:
+                        statistics_file = file.baseline_file.get_file_path(FileKind.BASIC)
+                else:
+                    statistics_file = file.get_file_path(FileKind.BASIC)
             elif file.is_changed():
                 statistics_file = file.get_file_path(FileKind.BASIC)
             else:

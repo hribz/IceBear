@@ -32,13 +32,11 @@ class Repository(ABC):
 
     def summary_one_config(self, config: Configuration):
         headers = ["project", "version", "configure", "build", "prepare for inc",
-                #    "prepare for inc(real)", "prepare for inc(user)", "prepare for inc(sys)", 
                    "prepare for CSA"]
         analyzers = [i.__class__.__name__ for i in config.analyzers]
         reports = [f"{i.__class__.__name__} reports" for i in config.analyzers]
         headers.extend(analyzers)
         headers.extend(["analyze"])
-        # headers.extend(["analyze(real)", "analyze(cpu)", "analyze(sys)"])
         headers.extend(reports)
         headers.append("reports")
 
@@ -70,14 +68,10 @@ class Repository(ABC):
         config_data.append("%.3lf" % config_time)
         config_data.append("%.3lf" % build_time)
         config_data.extend(["%.3lf" % config.prepare_for_inc_info_real_time, 
-                            # "%.3lf" % config.prepare_for_inc_info_cpu_time_user,
-                            # "%.3lf" % config.prepare_for_inc_info_cpu_time_sys
                             ])
         config_data.append("%.3lf" % prepare_csa_time)
         config_data.extend(["%.6lf" % i for i in analyzers_time])
         config_data.extend(["%.6lf" % analyze_time, 
-                            # "%.6lf" % config.analyze_cpu_time_user,
-                            # "%.6lf" % config.analyze_cpu_time_sys
                             ])
         config_data.extend(reports_number)
         config_data.append(sum(reports_number))
@@ -290,9 +284,9 @@ class UpdateConfigRepository(Repository):
         self.session_summaries += ret
     
     def summary_csv_path(self, specific = False, summary_path=None):
-        ret = str(self.default_config.workspace / f'{os.path.basename(self.name)}_{self.env.analyze_opts.inc}_{self.env.timestamp}')
+        ret = str(self.default_config.workspace / f'{os.path.basename(self.name)}_{self.env.analyze_opts.inc}_{self.default_config.version_stamp}')
         if summary_path:
-            ret = str(self.default_config.workspace / summary_path / f'{os.path.basename(self.name)}_{self.env.analyze_opts.inc}_{self.env.timestamp}')
+            ret = str(self.default_config.workspace / summary_path / f'{os.path.basename(self.name)}_{self.env.analyze_opts.inc}_{self.default_config.version_stamp}')
         ret += ("_specific.csv") if specific else (".csv")
         return ret
 
@@ -311,4 +305,4 @@ class UpdateConfigRepository(Repository):
     def file_status_to_csv(self):
         config = self.default_config
         headers, data = config.file_status()
-        add_to_csv(headers, data, str(config.preprocess_path / f'file_status_{self.env.timestamp}.csv'))
+        add_to_csv(headers, data, str(config.preprocess_path / f'file_status_{self.default_config.version_stamp}.csv'))

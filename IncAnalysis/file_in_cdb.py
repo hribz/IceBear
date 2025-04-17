@@ -18,6 +18,7 @@ def get_sha256_hash(data, encoding='utf-8'):
 class FileKind(Enum):
     Preprocessed = auto()
     DIFF = auto()
+    DIFF_INFO = auto(),
     AST = auto()
     EFM = auto()
     CG = auto()
@@ -175,18 +176,16 @@ class FileInCDB:
         self.basline_fs_num = 'Skip'
         self.baseline_has_fs = False # Analysis finished successfully.
         self.csa_analyze_time = "Unknown"
-        extname = ''
+        self.extname = ''
         if self.compile_command.language == 'c++':
-            extname = '.ii'
+            self.extname = '.ii'
         elif self.compile_command.language == 'c':
-            extname = '.i'
+            self.extname = '.i'
         else:
             logger.error(f"[Create FileInCDB] Encounter unknown extname when parse {self.file_name}")
 
-        if extname:
-            self.prep_file = str(self.parent.preprocess_path) + self.identifier + extname
-            self.diff_file = str(self.parent.diff_path) + self.identifier + extname
-            self.diff_info_file = str(self.parent.preprocess_path) + self.identifier + '.txt'
+        if self.extname:
+            self.prep_file = str(self.parent.preprocess_path) + self.identifier + self.extname
         else:
             self.status = FileStatus.UNKNOWN
             return
@@ -202,7 +201,7 @@ class FileInCDB:
                 # We don't need old version file before baseline_file,
                 # so just deref its baseline_file and let GC collect file version older than it.
                 if old_file.baseline_file is not None:
-                    old_file.baseline_file.clean_files()
+                    old_file.baseline_file.clean_cache()
                 old_file.baseline_file = None
             else:
                 pass
@@ -217,9 +216,16 @@ class FileInCDB:
                     pass
                     # logger.debug(f"[FileInCDB Init] Find new file {self.file_name}")
     
-    def clean_files(self):
+    def clean_cache(self):
         if hasattr(self, "prep_file"):
             remove_file(self.prep_file)
+    
+    def clean_files(self):
+        # These files don't need to be cached.
+        remove_file(self.get_file_path(FileKind.DIFF_INFO))
+        remove_file(self.get_file_path(FileKind.RF))
+        remove_file(self.get_file_path(FileKind.CPPRF))
+        remove_file(self.get_file_path(FileKind.INCSUM))
 
     def is_new(self):
         return self.status == FileStatus.NEW or self.status == FileStatus.DIFF_FAILED
@@ -233,7 +239,10 @@ class FileInCDB:
 
     def get_file_path(self, kind: FileKind):
         if kind == FileKind.DIFF:
-            return (self.diff_file)
+            return str(self.parent.diff_path) + self.identifier + self.extname
+        elif kind == FileKind.DIFF_INFO:
+            # Should not rely on the prep_file, because it may change to baseline path.
+            return str(self.parent.preprocess_path) + self.identifier + '.txt'
         elif kind == FileKind.AST:
             return (self.csa_file) + '.ast'
         elif kind == FileKind.EFM:
@@ -287,12 +296,12 @@ class FileInCDB:
     def diff_with_baseline(self) -> bool:
         if self.baseline_file is None:
             # This is a new file.
-            with open(self.diff_info_file, 'w') as f:
+            with open(self.get_file_path(FileKind.DIFF_INFO), 'w') as f:
                 f.write("new")
             return True
         commands = self.parent.env.DIFF_COMMAND.copy()
         if self.parent.env.analyze_opts.udp:
-            commands.extend([str(self.baseline_file.diff_file), str(self.diff_file)])
+            commands.extend([str(self.baseline_file.get_file_path(FileKind.DIFF)), str(self.get_file_path(FileKind.DIFF))])
         else:
             commands.extend([str(self.baseline_file.prep_file), str(self.prep_file)])
         diff_script = ' '.join(commands)
@@ -305,7 +314,7 @@ class FileInCDB:
                 return True
             self.status = FileStatus.CHANGED
             # Don't record diff_info anymore, but write them to correspond files.
-            with open(self.diff_info_file, 'w') as f:
+            with open(self.get_file_path(FileKind.DIFF_INFO), 'w') as f:
                 f.write(process.stdout)
             # logger.debug(f"[Diff Files Output] \n{process.stdout}")
         else:
@@ -318,7 +327,7 @@ class FileInCDB:
         commands = [self.parent.env.EXTRACT_II]
         commands.append(self.prep_file)
         if self.parent.incrementable:
-            commands.extend(['-diff', self.diff_info_file])
+            commands.extend(['-diff', self.get_file_path(FileKind.DIFF_INFO)])
         if self.parent.env.ctu:
             commands += ['-ctu']
         commands.extend(["-rf-file", self.get_file_path(FileKind.RF)])
