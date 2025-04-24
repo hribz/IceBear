@@ -46,8 +46,9 @@ class IncInfoCollectConsumer : public clang::ASTConsumer {
 public:
   explicit IncInfoCollectConsumer(CompilerInstance &CI, std::string &diffPath,
                                   const IncOptions &incOpt)
-      : CG(), IncOpt(incOpt), DLM(CI.getASTContext().getSourceManager()),
-        PP(CI.getPreprocessor()), SM(CI.getASTContext().getSourceManager()),
+      : Context(CI.getASTContext()), CG(), IncOpt(incOpt),
+        DLM(CI.getASTContext().getSourceManager()), PP(CI.getPreprocessor()),
+        SM(CI.getASTContext().getSourceManager()),
         IncVisitor(&CI.getASTContext(), DLM, CG, FunctionsChanged, AffectedVFs,
                    AN, IncOpt) {
     std::unique_ptr<llvm::Timer> consumerTimer = std::make_unique<llvm::Timer>(
@@ -60,11 +61,11 @@ public:
     MainFilePath = FE->tryGetRealPathName();
     DLM.Initialize(diffPath, MainFilePath.str());
     // Don't print location information.
-    // auto PrintPolicy = Context->getPrintingPolicy();
-    // PrintPolicy.FullyQualifiedName = true;
-    // PrintPolicy.TerseOutput = true;
-    // PrintPolicy.PrintInjectedClassNameWithArguments = true;
-    // Context->setPrintingPolicy(PrintPolicy);
+    auto PrintPolicy = Context.getPrintingPolicy();
+    PrintPolicy.TerseOutput = false;
+    PrintPolicy.SuppressInlineNamespace = false;
+    PrintPolicy.UseVoidForZeroParams = false;
+    Context.setPrintingPolicy(PrintPolicy);
 
     consumerTimer->stopTimer();
     llvm::TimeRecord consumerStop = consumerTimer->getTotalTime();
@@ -149,9 +150,7 @@ public:
           if (MD->isVirtual()) {
             // Record changed virtual function and all functions it overrides.
             AffectedVFs.insert(D);
-            llvm::outs() << MD->getQualifiedNameAsString() << "\n";
             for (auto method : MD->overridden_methods()) {
-              llvm::outs() << method->getQualifiedNameAsString() << "\n";
               AffectedVFs.insert(method);
             }
           }
@@ -179,6 +178,7 @@ public:
     DumpIncSummary(2);
     DumpAffectedNodesRanges();
     DumpFunctionsNeedReanalyzeForCppcheck();
+    DumpFunctionsNeedReanalyzeForGCC();
   }
 
   void Propogate() {
@@ -338,33 +338,61 @@ public:
     if (IncOpt.CppcheckRFPath.empty()) {
       return;
     }
-    std::ostream *OS = &std::cout;
-    std::shared_ptr<std::ofstream> outFile;
-    if (IncOpt.DumpToFile) {
-      std::string ReanalyzeFunctionsFile = IncOpt.CppcheckRFPath;
-      outFile = std::make_shared<std::ofstream>(ReanalyzeFunctionsFile);
-      if (!outFile->is_open()) {
-        llvm::errs() << "Error: Could not open file " << ReanalyzeFunctionsFile
-                     << " for writing.\n";
-        return;
-      }
-      OS = outFile.get();
-    } else {
-      *OS << "--- Functions Cppcheck Need to Reanalyze ---\n";
+    std::ofstream outFile;
+    std::string ReanalyzeFunctionsFile = IncOpt.CppcheckRFPath;
+    outFile = std::ofstream(ReanalyzeFunctionsFile);
+    if (!outFile.is_open()) {
+      llvm::errs() << "Error: Could not open file " << ReanalyzeFunctionsFile
+                   << " for writing.\n";
+      return;
     }
 
-    *OS << IncOpt.FilePath << ":\n";
+    outFile << IncOpt.FilePath << ":\n";
 
     for (auto &D : FunctionsNeedReanalyze) {
       if (auto *FD = llvm::dyn_cast<FunctionDecl>(D->getCanonicalDecl())) {
         // Cppcheck use raw name.
-        *OS << FD->getNameAsString();
-        *OS << "\n";
+        outFile << FD->getNameAsString();
+        outFile << "\n";
       }
     }
-    (*OS).flush();
-    if (IncOpt.DumpToFile)
-      outFile->close();
+    (outFile).flush();
+    outFile.close();
+  }
+
+  void DumpFunctionsNeedReanalyzeForGCC() {
+    if (IncOpt.GCCRFPath.empty()) {
+      return;
+    }
+    std::ofstream outFile;
+    std::string ReanalyzeFunctionsFile = IncOpt.GCCRFPath;
+    outFile = std::ofstream(ReanalyzeFunctionsFile);
+    if (!outFile.is_open()) {
+      llvm::errs() << "Error: Could not open file " << ReanalyzeFunctionsFile
+                   << " for writing.\n";
+      return;
+    }
+
+    for (auto &D : FunctionsNeedReanalyze) {
+      if (auto *FD = llvm::dyn_cast<FunctionDecl>(D->getCanonicalDecl())) {
+        std::string Str;
+        llvm::raw_string_ostream SOS(Str);
+        auto PrintPolicy = Context.getPrintingPolicy();
+        FD->printQualifiedName(SOS, PrintPolicy);
+
+        SOS << '(';
+        // Only match paramter numbers.
+        SOS << FD->getNumParams();
+        SOS << ')';
+        
+        if (!Str.empty()) {
+          outFile << Str;
+          outFile << "\n";
+        }
+      }
+    }
+    (outFile).flush();
+    outFile.close();
   }
 
   void DumpAffectedNodesRanges() {
@@ -456,9 +484,12 @@ public:
           << "\n";
       *OS << "cg nodes" << ":" << CG.size() - 1 << "\n";
       *OS << "affected virtual functions" << ":" << AffectedVFs.size() << "\n";
-      *OS << "affected vf indirect calls" << ":" << IncVisitor.AffectedIndirectCallByVF << "\n";
-      *OS << "function pointer types" << ":" << IncVisitor.TypesMayUsedByFP.size() << "\n";
-      *OS << "affected fp indirect calls" << ":" << IncVisitor.AffectedIndirectCallByFP << "\n";
+      *OS << "affected vf indirect calls" << ":"
+          << IncVisitor.AffectedIndirectCallByVF << "\n";
+      *OS << "function pointer types" << ":"
+          << IncVisitor.TypesMayUsedByFP.size() << "\n";
+      *OS << "affected fp indirect calls" << ":"
+          << IncVisitor.AffectedIndirectCallByFP << "\n";
     }
 
     (*OS).flush();
@@ -467,6 +498,7 @@ public:
   }
 
 private:
+  ASTContext &Context;
   const IncOptions &IncOpt;
   llvm::StringRef MainFilePath;
   DiffLineManager DLM;
@@ -558,6 +590,9 @@ static llvm::cl::opt<std::string> CppcheckRFPath(
     "cppcheck-rf-file", llvm::cl::desc("Output Cppcheck RF to the path"),
     llvm::cl::value_desc("dump cppcheck rf file"), llvm::cl::init(""));
 static llvm::cl::opt<std::string>
+    GCCRFPath("gcc-rf-file", llvm::cl::desc("Output GCC RF to the path"),
+              llvm::cl::value_desc("dump gcc rf file"), llvm::cl::init(""));
+static llvm::cl::opt<std::string>
     FilePath("file-path", llvm::cl::desc("File path before preprocess"),
              llvm::cl::value_desc("origin file"), llvm::cl::init(""));
 
@@ -587,6 +622,7 @@ int main(int argc, const char **argv) {
                     .CTU = CTU,
                     .RFPath = RFPath,
                     .CppcheckRFPath = CppcheckRFPath,
+                    .GCCRFPath = GCCRFPath,
                     .FilePath = FilePath};
   IncInfoCollectActionFactory Factory(DiffPath, FSPath, IncOpt);
 

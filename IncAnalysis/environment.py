@@ -91,9 +91,10 @@ class Environment:
         assert self.CLANG is not None
         logger.info(f'Use clang={self.CLANG}')
         clang_bin = os.path.dirname(self.CLANG) # type: ignore
-        self.CLANG_PLUS_PLUS = os.path.join(clang_bin, 'clang++')
+        self.CLANG_PLUS_PLUS = os.path.join(clang_bin, os.path.basename(self.CLANG).replace('clang', 'clang++'))
         self.prepare_compiler_path(self.CLANG)
         self.prepare_compiler_path(self.CLANG_PLUS_PLUS)
+        # Other tools.
         self.clang_tidy = os.path.join(clang_bin, 'clang-tidy')
         self.diagtool = os.path.join(clang_bin, 'diagtool')
         if self.analyze_opts.cppcheck:
@@ -101,6 +102,18 @@ class Environment:
         else:
             self.cppcheck = shutil.which('cppcheck')
         self.infer = shutil.which('infer')
+        # Customized gcc path.
+        if self.analyze_opts.gcc:
+            self.GCC = shutil.which(self.analyze_opts.gcc)
+        else:
+            self.GCC = shutil.which('gcc')
+        if self.GCC is None or not os.path.exists(self.GCC):
+            logger.error(f'Please ensure that {self.GCC} exists in your environment')
+        else:
+            gcc_bin = os.path.dirname(self.GCC)
+            self.GXX = os.path.join(gcc_bin, os.path.basename(self.GCC).replace('gcc', 'g++'))
+            self.prepare_compiler_path(self.GCC)
+            self.prepare_compiler_path(self.GXX)
 
         self.analyzers = ['clangsa']
         if os.path.exists(self.clang_tidy):
@@ -110,6 +123,8 @@ class Environment:
         # Don't support infer.
         # if os.path.exists(self.infer):
         #     self.analyzers.append('infer')
+        if self.GCC and os.path.exists(self.GCC):
+            self.analyzers.append('gsa')
 
         self.example_compiler_action_plugin = {
             "comment": "Example plugin for Panda driver.",
@@ -190,7 +205,7 @@ class ArgumentParser:
         self.parser.add_argument('--cxx', type=str, dest='cxx', default='clang++', help='Customize the C++ compiler for configure & build.')
         self.parser.add_argument('-j', '--jobs', type=int, dest='jobs', default=1, help='Number of jobs can be executed in parallel.')
         self.parser.add_argument('-d', '--udp', action='store_true', dest='udp', help='Use files in diff path to `diff`.')
-        supported_analyzers = ['clangsa', 'clang-tidy', 'cppcheck']
+        supported_analyzers = ['clangsa', 'clang-tidy', 'cppcheck', 'gsa']
         self.parser.add_argument('--analyzers', nargs='+', dest='analyzers', metavar='ANALYZER', required=False, choices=supported_analyzers,
                                default=None, help="Run analysis only with the analyzers specified. Currently supported analyzers "
                                     "are: " + ', '.join(supported_analyzers) + ".")
@@ -198,6 +213,8 @@ class ArgumentParser:
                                  help='Customize the Clang compiler for CSA func level incremental analysis.')
         self.parser.add_argument('--cppcheck', type=str, dest='cppcheck', default=None, 
                                  help='Customize the Cppcheck path for func level incremental analysis.')
+        self.parser.add_argument('--gcc', type=str, dest='gcc', default=None, 
+                                 help='Customize the Gcc compiler for GSA func level incremental analysis.')
         self.parser.add_argument('--csa-config', type=str, dest='csa_config', default=None, 
                                  help='CSA config file, an example is config/clangsa_config.json.')
         self.parser.add_argument('--clang-tidy-config', type=str, dest='clang_tidy_config', default=None, 
@@ -205,9 +222,14 @@ class ArgumentParser:
         self.parser.add_argument('--cppcheck-config', type=str, dest='cppcheck_config', default=None, 
                                  help='Cppcheck config file, an example is config/cppcheck_config.json.')
         # self.parser.add_argument('--infer-config', type=str, dest='infer_config', default=None, help='Infer config file.')
+        self.parser.add_argument('--gsa-config', type=str, dest='gsa_config', default=None, 
+                                 help='GSA config file, an example is config/gsa_config.json.')
         self.parser.add_argument('--file-identifier', type=str, dest='file_identifier', choices=['file', 'target'], default='file name', 
                                  help='Identify analysis unit by file or target.')
-        self.parser.add_argument('--basic-info', type=str, dest='basic_info', help='Record basic information (CG node number, etc.).')
+        self.parser.add_argument('--basic-info', type=str, dest='basic_info', 
+                                 help='Record basic information (CG node number, etc.).')
+        self.parser.add_argument('--clean-inc', type=bool, dest='clean_inc', default=True, 
+                                 help='Clean incremental information files after analysis.')
     
     def parse_args(self, args):
         return self.parser.parse_args(args)

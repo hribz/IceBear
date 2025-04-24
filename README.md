@@ -1,8 +1,8 @@
 ![logo](assets/logo.drawio.svg)
 
 # The IceBear Tool
-*IceBear* is a scheduler for C/C++ static analysis tools, built on [*Bear*](https://github.com/rizsotto/Bear) and [*Panda*](https://github.com/SQUARE-RG/panda), supports static analyzers as follow: [CSA(Clang Static Analyzer)](https://clang-analyzer.llvm.org/), [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/), [CppCheck](https://cppcheck.sourceforge.io/).
-*IceBear* can incrementally schedule these tools, with all tools supporting *file-level* incremental scheduling, and *CSA, CppCheck* supporting *function-level* incremental analysis (need install our modified version).
+*IceBear* is a scheduler for C/C++ static analysis tools, built on [*Bear*](https://github.com/rizsotto/Bear) and [*Panda*](https://github.com/SQUARE-RG/panda), supports static analyzers as follow: [CSA(Clang Static Analyzer)](https://clang-analyzer.llvm.org/), [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/), [CppCheck](https://cppcheck.sourceforge.io/), [GSA(GCC Static Analyzer)](https://gcc.gnu.org/wiki/StaticAnalyzer).
+*IceBear* can incrementally schedule these tools, with all tools supporting *file-level* incremental scheduling, and *CSA, CppCheck, GSA* supporting *function-level* incremental analysis (need install our modified version).
 
 ## Installation
 *IceBear* is an analysis tools scheduler, so it's neccessary that the tools you want to use is available in your environment.
@@ -56,7 +56,7 @@ You can use *IceBear* to build the project, and the analysis will automatically 
 
 ```bash
 cd path/to/project
-icebear --repo . --build 'make -j16' -o ice-bear-output -j 16 --inc func --clang /path/to/LLVM-19.1.5-Linux/bin/clang --cppcheck /path/to/cppcheck-ica/bin/cppcheck
+icebear --repo . --build 'make -j16' -o ice-bear-output -j 16 --inc func --analyzers csa cppcheck --clang /path/to/LLVM-19.1.5-Linux/bin/clang --cppcheck /path/to/cppcheck-ica/bin/cppcheck
 ```
 
 You can also use [Bear (Build EAR)](https://github.com/rizsotto/Bear) to record the [JSON Compilation Database](https://clang.llvm.org/docs/JSONCompilationDatabase.html) from the build process. Then, pass the compilation database to IceBear, and IceBear will analyze the files recorded in the compilation database.
@@ -64,7 +64,7 @@ You can also use [Bear (Build EAR)](https://github.com/rizsotto/Bear) to record 
 ```bash
 cd path/to/project
 bear --output compile_commands.json -- make -j16
-icebear --repo . -f compile_commands.json -o ice-bear-output -j 16 --inc func --clang /path/to/LLVM-19.1.5-Linux/bin/clang --cppcheck /path/to/cppcheck-ica/bin/cppcheck
+icebear --repo . -f compile_commands.json -o ice-bear-output -j 16 --inc func --analyzers csa cppcheck --clang --clang /path/to/LLVM-19.1.5-Linux/bin/clang --cppcheck /path/to/cppcheck-ica/bin/cppcheck
 ```
 
 The meanings of the *IceBear* parameters are as follows:
@@ -78,6 +78,7 @@ The meanings of the *IceBear* parameters are as follows:
   - `noinc`: all files recorded in compilation database will be analyzed. 
   - `file`: only files whose corresponding preprocessed file changed will be analyzed.
   - `func`: only changed code and affected components (e.g. AST nodes, functions) will be analyzed and generate reports.
+- `--analyzers`: the analyzers used to do analyze, selecting from [csa, clang-tidy, cppcheck, gsa].
 - `--clang`: the clang used to analyze (CSA is a part of clang). Please use our modified version of clang if `--inc` is set to `func`.
 - `--cppcheck`: the cppcheck used to analyze. Please use our modified version of cppcheck if `--inc` is set to `func`.
 

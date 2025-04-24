@@ -214,7 +214,8 @@ class Configuration:
             analyzers = self.env.analyze_opts.analyzers
         self.analyzers: List[Analyzer] = []
         self.enable_clangtidy = False
-        self.enable_cppcheck = True
+        self.enable_cppcheck = False
+        self.enable_gsa = False
         for analyzer_name in analyzers:
             analyzer = None
             if analyzer_name == 'clangsa':
@@ -225,6 +226,10 @@ class Configuration:
             elif analyzer_name == 'cppcheck':
                 self.enable_cppcheck = True
                 analyzer = CppCheck(CppCheckConfig(self.env, self.cppcheck_path, self.env.analyze_opts.cppcheck_config), [])
+            elif analyzer_name == 'gsa':
+                self.enable_gsa = True
+                analyzer = GSA(GSAConfig(self.env, self.gsa_path, self.env.analyze_opts.gsa_config), [])
+                print(f'gsa creating {analyzer.analyzer_config.ready_to_run}')
             else:
                 logger.error(f"Don't support {analyzer_name}.")
                 continue
@@ -266,6 +271,9 @@ class Configuration:
         # Infer Path
         self.infer_path = self.workspace / 'infer'
         self.infer_output_path = self.infer_path / 'infer-reports' / self.version_stamp
+        # GSA Path
+        self.gsa_path = self.workspace / 'gsa'
+        self.gsa_output_path = self.gsa_path / 'gsa-reports' / self.version_stamp
         # CodeChecker workspace.
         self.codechecker_path = self.workspace / self.version_stamp
         # Reports statistics
@@ -333,7 +341,7 @@ class Configuration:
 
         self.analyze()
         self.output_analysis_time()
-        if not self.env.analyze_opts.verbose:
+        if self.env.analyze_opts.clean_inc:
             self.clean_inc_files()
 
         end_real_time = time.time()
@@ -790,12 +798,15 @@ class Configuration:
         process_file_list(FileInCDB.diff_with_baseline, self.file_list, self.env.analyze_opts.jobs)
         for file in self.file_list:
             if file.baseline_file is not None:
-                if not self.env.analyze_opts.verbose:
-                    # If this file is not changed, we reuse any files in baseline path.
-                    if file.status == FileStatus.UNCHANGED:
-                        file.clean_cache()
-                        file.prep_file = file.baseline_file.prep_file
-                        file.baseline_file = None
+                # If this file is not changed, we reuse any files in baseline path.
+                if file.status == FileStatus.UNCHANGED:
+                    file.clean_cache()
+                    file.prep_file = file.baseline_file.prep_file
+                    file.baseline_file = None
+                # If this file has changed, clean the baseline cache.
+                else:
+                    if not self.env.analyze_opts.verbose:
+                        file.baseline_file.clean_cache()
             if file.is_changed():
                 self.diff_file_list.append(file)
         self.update_cache()
@@ -1012,17 +1023,7 @@ class Configuration:
         statistics_summary = {}
         
         for file in self.file_list:
-            if file.status == FileStatus.UNCHANGED:
-                # Reuse previous result.
-                if self.env.analyze_opts.verbose:
-                    if file.baseline_file:
-                        statistics_file = file.baseline_file.get_file_path(FileKind.BASIC)
-                else:
-                    statistics_file = file.get_file_path(FileKind.BASIC)
-            elif file.is_changed():
-                statistics_file = file.get_file_path(FileKind.BASIC)
-            else:
-                continue
+            statistics_file = file.get_file_path(FileKind.BASIC)
             if statistics_file and os.path.exists(statistics_file):
                 statistics_json = json.load(open(statistics_file, "r"))
                 for filename, statistics in statistics_json.items():

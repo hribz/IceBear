@@ -31,8 +31,10 @@ class FileKind(Enum):
     FIX = auto() # clang-tidy fixit file.
     CPPCHECK = auto()
     INFER = auto()
+    GCC = auto()
     ANR = auto()
     CPPRF = auto()
+    GCCRF = auto()
 
 class FileStatus(Enum):
     # Abnormal status
@@ -225,6 +227,7 @@ class FileInCDB:
         remove_file(self.get_file_path(FileKind.DIFF_INFO))
         remove_file(self.get_file_path(FileKind.RF))
         remove_file(self.get_file_path(FileKind.CPPRF))
+        remove_file(self.get_file_path(FileKind.GCCRF))
         remove_file(self.get_file_path(FileKind.INCSUM))
 
     def is_new(self):
@@ -255,9 +258,11 @@ class FileInCDB:
             return str((self.parent.clang_tidy_output_path)) + '/' + os.path.basename(self.identifier) + "_clang-tidy_" + self.sha256 + ".yaml"
         elif kind == FileKind.CPPCHECK:
             # Cppcheck cannot specify output plist file, but the output plist directory.
-            return str((self.parent.cppcheck_output_path)) + '/' + self.sha256
+            return str(self.parent.cppcheck_output_path) + '/' + self.sha256
         elif kind == FileKind.INFER:
-            return str((self.parent.infer_output_path)) + '/' + self.sha256
+            return str(self.parent.infer_output_path) + '/' + self.sha256
+        elif kind == FileKind.GCC:
+            return str(self.parent.gsa_output_path) + '/' + self.sha256 + ".sarif"
         elif kind == FileKind.CG:
             return (self.prep_file) + '.cg'
         elif kind == FileKind.CF:
@@ -272,6 +277,8 @@ class FileInCDB:
             return (self.prep_file) + '.anr'
         elif kind == FileKind.CPPRF:
             return (self.prep_file) + '.cpprf'
+        elif kind == FileKind.GCCRF:
+            return (self.prep_file) + '.gccrf'
         else:
             logger.error(f"[Get File Path] Unknown file kind {kind}")
             return ""
@@ -338,11 +345,15 @@ class FileInCDB:
         if self.parent.enable_cppcheck:
             commands.extend(['-file-path', self.identifier])
             commands.extend(["-cppcheck-rf-file", self.get_file_path(FileKind.CPPRF)])
+        # GSA function-level incremental.
+        if self.parent.enable_gsa:
+            commands.extend(['-gcc-rf-file', self.get_file_path(FileKind.GCCRF)])
         commands += ['--', '-w'] + self.compile_command.arguments + ['-D__clang_analyzer__']
         ii_script = commands_to_shell_script(commands)
         try:
             process = run(commands, capture_output=True, text=True, check=True)
             logger.debug(f"[File Inc Info Success] {ii_script}")
+            # Parse rf_num to skip some files not need to be reanalyzed.
             self.parse_inc_sum()
             return True
         except subprocess.CalledProcessError as e:

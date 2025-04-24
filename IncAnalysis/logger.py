@@ -36,8 +36,8 @@ class Logger(object):
         
     def start_log(self, timestamp, workspace):
         ensure_dir(workspace)
-        debug_file = "{}/debug.log".format(workspace)
-        info_file = "{}/info.log".format(workspace)
+        debug_file = "{}/debug_{}.log".format(workspace, timestamp)
+        info_file = "{}/info_{}.log".format(workspace, timestamp)
         remake_file(debug_file)
         remake_file(info_file)
         handler = {
@@ -46,6 +46,8 @@ class Logger(object):
             # logging.ERROR: "{}/{}_error.log".format(timestamp)
         }
         self.__loggers = {}
+        if not self.verbose:
+            handler.pop(logging.DEBUG)
         logLevels = handler.keys()
         fmt = logging.Formatter('%(asctime)s [%(levelname)s]: %(message)s')
         for level in logLevels:

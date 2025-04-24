@@ -4,9 +4,11 @@ from abc import ABC, abstractmethod
 import os
 from pathlib import Path
 from typing import Optional
+import tempfile
 
 from IncAnalysis.environment import Environment, IncrementalMode
 from IncAnalysis.analyzer_utils import *
+from IncAnalysis.utils import remove_file
 
 class AnalyzerConfig(ABC):
     def __init__(self, env: Environment, workspace: Path, checker_file: Optional[str] = None, config_file: Optional[str] = None):
@@ -22,6 +24,7 @@ class AnalyzerConfig(ABC):
         self.workspace: Path = workspace
         self.args = None
         self.ready_to_run = True
+        self.max_workers = -1 # The max parallel workers for this analyzer, -1 means no limit.
         if config_file is not None:
             self.init_from_file(config_file)
         if checker_file is not None:
@@ -73,6 +76,9 @@ clang_tidy_default_config = {
 }
 
 infer_default_config = {
+}
+
+gsa_default_config = {
 }
 
 class IPAKind(Enum):
@@ -227,7 +233,6 @@ class ClangTidyConfig(AnalyzerConfig):
         self.args.append("-config=" + str(clang_tidy_default_config))
         return self.args
 
-
 class CppCheckConfig(AnalyzerConfig):
     def __init__(self, env: Environment, cppcheck_workspace: Path, config_file: Optional[str]=None):
         checker_file = str(env.PWD / "config/cppcheck_checkers.json")
@@ -323,4 +328,57 @@ class InferConfig(AnalyzerConfig):
             return self.args
         self.args = []
 
+        return self.args
+    
+class GSAConfig(AnalyzerConfig):
+    def __init__(self, env: Environment, gsa_workspace: Path, config_file: Optional[str]=None, checker_file: str="config/gsa_checkers.json"):
+        checker_file = str(env.PWD / "config/gsa_checkers.json")
+        super().__init__(env, gsa_workspace, checker_file, config_file)
+        self.max_workers = 4 # GCC Static Analyzer doesn't scale well.
+        self.compilers = {
+            'c': env.GCC,
+            'c++': env.GXX
+        }
+        if not os.path.exists(env.GCC) or not os.path.exists(env.GCC): # type: ignore
+            logger.error(f"GSA need command `gcc/g++` exists in environment.")
+            self.ready_to_run = False
+        self.inc_level_check()
+
+        if not config_file:
+            self.json_config = gsa_default_config.copy()
+
+    def inc_level_check(self):
+        # func-level incremental mode need to build custom gcc from 'gcc-ica'.
+        if self.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+            gcc = self.compilers['c']
+            with tempfile.NamedTemporaryFile(suffix=".tmp", delete=False) as tmp_file:
+                param_value = tmp_file.name
+            with tempfile.NamedTemporaryFile(suffix=".tmp", delete=False) as main_file:
+                main_file_path = main_file.name
+                main_file.write("int main() { return 0; }".encode())
+            
+            result = subprocess.run([gcc, f'--param=analyzer-function-file={param_value}', '-x', 'c', '-o/dev/null', main_file_path],
+                text=True,
+                capture_output=True,
+                timeout=5
+            )
+            func_level_enable = result.returncode == 0
+            if not func_level_enable:
+                logger.error(f"[GSA Inc Level Check] {result.stderr}")
+            
+            os.unlink(param_value)
+            os.unlink(main_file_path)
+            
+            if self.inc_mode == IncrementalMode.FuncitonLevel and not func_level_enable:
+                logger.error(f"[GSA Inc Level Check] Please use customized gcc build from gcc-ica,"
+                             " and make sure `gcc --param=analyzer-function-file=file.tmp -x -c -o/dev/null main.c`"
+                             " returncode is right.")
+                self.ready_to_run = False
+    
+    def analyze_args(self):
+        if self.args is not None:
+            return self.args
+        self.args = []
+        self.args.append('-fdiagnostics-format=sarif-stderr')
+        self.args.append('-Wno-analyzer-too-complex')
         return self.args

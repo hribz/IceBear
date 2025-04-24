@@ -22,13 +22,18 @@ class RepoParser(ArgumentParser):
         self.parser.add_argument('-f', '--compilation-database', type=str, dest='cdb',
                                  help='Customize the input compilation database',
                                  default=None)
-        self.parser.add_argument('-c', '--cache', type=str, dest='cache', 
-                                 help='Cache file path')
+        self.parser.add_argument('-c', '--cache', type=str, dest='cache', help='Cache file path')
+        self.parser.add_argument('--tag', type=str, dest='tag', help='Specific version stamp')
         self.parser.add_argument('--preprocess-only', dest='prep_only', action='store_true', 
                                  help='Only preprocess and diff')
         self.parser.add_argument('--not-update-cache', dest='not_update_cache', action='store_true',
                                  help='Do not record or update cache')
-
+        self.parser.add_argument('--report-hash', dest='hash_type', required=False, choices=['path', 'context'],
+                               default='path', help="The way to calculate report hash. Currently supported modes "
+                                    "are: [path, context].")
+        self.parser.add_argument('--only-process-reports', dest='only_process_reports', action='store_true',
+                                 help='Only postprocess reports')
+        
 def main(argv):
     parser = RepoParser()
     opts = parser.parse_args(argv)
@@ -58,10 +63,10 @@ def main(argv):
     if opts.cdb is not None and os.path.exists(opts.cdb):
         cdb = os.path.abspath(opts.cdb)
 
-    if opts.cache is None:
-        version_stamp = env.timestamp
+    if opts.tag:
+        version_stamp = opts.tag
     else:
-        version_stamp = 'version'
+        version_stamp = env.timestamp
 
     Repo = UpdateConfigRepository(os.path.basename(repo), repo, env, 
                                   workspace=workspace,
@@ -74,9 +79,12 @@ def main(argv):
                                   version_stamp=version_stamp,
                                   default_build_type="unknown"
                                 )
-    success = Repo.process_one_config(summary_path="logs", reports_statistics=False)
-    if success and opts.cache is None:
-        postprocess_workspace(workspace=workspace, this_versions=set(env.timestamp))
+    success = True
+    if not opts.only_process_reports:
+        success = Repo.process_one_config(summary_path="logs", reports_statistics=False)
+    if success:
+        postprocess_workspace(workspace=workspace, this_version=version_stamp, hash_ty=env.analyze_opts.hash_type, output_news=True)
+
 
 if __name__ == '__main__':
     main(sys.argv[1:])

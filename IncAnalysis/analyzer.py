@@ -38,7 +38,10 @@ class Analyzer(ABC):
         
         # Open one process in every thread to simulate multi-process.
         ret = True
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.analyzer_config.jobs) as executor:
+        workers = self.analyzer_config.jobs
+        if self.analyzer_config.max_workers > 0:
+            workers = max(workers, self.analyzer_config.max_workers)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             futures = [executor.submit(self.analyze_one_file, file) for file in self.file_list]
 
             for idx, future in enumerate(concurrent.futures.as_completed(futures), start=1):
@@ -52,19 +55,17 @@ class Analyzer(ABC):
         if analyzer_cmd is None:
             return Process.Stat.skipped, file.identifier
         script = commands_to_shell_script(analyzer_cmd)
-        
-        process = Process(analyzer_cmd, file.compile_command.directory)
         if not isinstance(self, ClangTidy):
             # ClangTidy commands are too long to be printed.
             logger.debug(f"[{self.get_analyzer_name()} Analyze Script] {script}")
+        
+        process = Process(analyzer_cmd, file.compile_command.directory)
         if process.stat == Process.Stat.ok:
             stat = Process.Stat.ok
-            logger.debug(f"[{self.get_analyzer_name()} Analyze Success] {file.identifier}")
-            if self.analyzer_config.verbose:
-                logger.debug(f"[{self.get_analyzer_name()} Analyze Output]\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+            # logger.debug(f"[{self.get_analyzer_name()} Analyze OK]\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         else:
             stat = (process.stat)[0]
-            logger.error(f"[{self.get_analyzer_name()} Analyze {stat}]\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
+            logger.error(f"[{self.get_analyzer_name()} Analyze {stat}] {script}\nstdout:\n{process.stdout}\nstderr:\n{process.stderr}")
         
         # Record time cost.
         if isinstance(self, CSA):
@@ -73,6 +74,11 @@ class Analyzer(ABC):
                     if line.startswith("  Total Execution Time"): # type: ignore
                         file.csa_analyze_time = (line.split(' ')[5]) # type: ignore
                         break
+        elif isinstance(self, GSA):
+            if process.stat == Process.Stat.ok and process.stderr:
+                makedir(file.parent.gsa_output_path)
+                with open(file.get_file_path(FileKind.GCC), 'w') as f:
+                    f.write(process.stderr) # type: ignore
         return stat, file.identifier
 
     @staticmethod
@@ -145,6 +151,9 @@ class ClangTidy(Analyzer):
                             for s_and_e in line.split(";"):
                                 if len(s_and_e) != 0:
                                     line_filter_json[-1]["lines"].append([int(i) for i in s_and_e.split(",")])
+                if len(line_filter_json) == 0:
+                    logger.debug(f"[{__class__.__name__} No ANR] Don't need to analyze {file.identifier}")
+                    return None
                 line_filter_str = json.dumps(line_filter_json, separators=(",", ":"))
                 analyzer_cmd.append("-line-filter=" + line_filter_str)
         analyzer_cmd.append("--")
@@ -194,7 +203,7 @@ class CppCheck(Analyzer):
 
         cppcheck_script = commands_to_shell_script(analyzer_cmd)
         logger.info(f"[Cppcheck Analyzing] ......")
-        logger.debug(f"[{__class__.__name__} Analyze Script] {cppcheck_script}")
+        logger.info(f"[{__class__.__name__} Analyze Script] {cppcheck_script}")
         process = run(analyzer_cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=config.cppcheck_output_path)
         logger.info(f"[{__class__.__name__} Stdout] {process.stdout}")
         # logger.info(f"[{__class__.__name__} Stderr] {process.stderr}")
@@ -274,5 +283,62 @@ class Infer(Analyzer):
             return None
         return analyzer_cmd
     
+    def get_analyzer_name(self):
+        return __class__.__name__
+
+class GSA(Analyzer):
+    def __init__(self, analyzer_config: GSAConfig, file_list: List[FileInCDB]):
+        super().__init__(analyzer_config, file_list)
+        self.analyzer_config: GSAConfig
+        self.clang_to_gcc = {
+            "-fopenmp=libomp": "-fopenmp",
+            "-stdlib=libc++": "-lstdc++",
+            "-flto=thin": "-flto",
+            "-mllvm": None,
+            "-fcoroutines-ts": "-fcoroutines",
+            "-fopenacc": None,
+            "-fsanitize=memory": None,
+            "-static-libstdc++": None,
+            "-rdynamic": "-Wl,-export-dynamic",
+            "-foptimize-sibling-calls": None,
+            "-fmodules": None,
+            "-fprofile-instr-generate": "-fprofile-generate",
+            "-fprofile-instr-use": "-fprofile-use",
+            "-fcolor-diagnostics": "-fdiagnostics-color=always",
+            "-fobjc-arc": "-fobjc-arc",
+            "-fobjc-weak": "-fobjc-weak",
+            "-Xclang": None,
+            "-Wdeprecated": "-Wno-deprecated-declarations",
+            "-Weverything": "-Wall -Wextra",
+            "-Wno-error=deprecated": "-Wno-error=deprecated-declarations",
+            "-Qunused-arguments": "-Wno-unused-command-line-argument"
+        }
+        self.skip_argument_headers = [
+            "-fsanitize-coverage",
+            "-mstack-alignment"
+        ]
+
+    def generate_analyzer_cmd(self, file: FileInCDB):
+        compiler = self.analyzer_config.compilers[file.compile_command.language]
+        analyzer_cmd = [compiler] + ['-fanalyzer', '-c', '-o/dev/null'] 
+        for argument in file.compile_command.arguments:
+            for skip_header in self.skip_argument_headers:
+                if argument.startswith(skip_header):
+                    continue
+            if argument in self.clang_to_gcc:
+                if self.clang_to_gcc[argument] is not None:
+                    analyzer_cmd.append(self.clang_to_gcc[argument])
+            else:
+                analyzer_cmd.append(argument)
+        analyzer_cmd.extend(self.analyzer_config.analyze_args())
+        # Add file specific args.
+        if self.analyzer_config.inc_mode.value >= IncrementalMode.FuncitonLevel.value:
+            if file.cf_num == 0 or file.rf_num == 0:
+                logger.debug(f"[{__class__.__name__} No Functions] Don't need to analyze {file.identifier}")
+                return None
+            if file.parent.incrementable and file.has_rf:
+                analyzer_cmd.extend([f'--param=analyzer-function-file={file.get_file_path(FileKind.GCCRF)}'])
+        return analyzer_cmd
+
     def get_analyzer_name(self):
         return __class__.__name__
