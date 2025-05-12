@@ -14,6 +14,20 @@ class IncrementalMode(Enum):
     FileLevel = auto()
     FuncitonLevel = auto()
     InlineLevel = auto()
+    ALL = auto() # Experiment option, executing [noinc, file, func] incremental strategies.
+
+    def __str__(self) -> str:
+        if self == IncrementalMode.NoInc:
+            return 'noinc'
+        elif self == IncrementalMode.FileLevel:
+            return 'file'
+        elif self == IncrementalMode.FuncitonLevel:
+            return 'func'
+        elif self == IncrementalMode.InlineLevel:
+            return 'inline'
+        elif self == IncrementalMode.ALL:
+            return 'all'
+        return 'unknown'
 
 class Environment:
     def __init__(self, opts, ice_bear_path):
@@ -26,6 +40,8 @@ class Environment:
             self.inc_mode = IncrementalMode.FuncitonLevel
         elif opts.inc == 'inline':
             self.inc_mode = IncrementalMode.InlineLevel
+        elif opts.inc == 'all':
+            self.inc_mode = IncrementalMode.ALL
         
         self.ctu = opts.analyze == 'ctu'
         self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -196,7 +212,7 @@ class Environment:
 class ArgumentParser:
     def __init__(self):
         self.parser = argparse.ArgumentParser(prog='IceBear', formatter_class=argparse.RawTextHelpFormatter)
-        self.parser.add_argument('--inc', type=str, dest='inc', choices=['noinc', 'file', 'func'], default='file',
+        self.parser.add_argument('--inc', type=str, dest='inc', choices=['noinc', 'file', 'func', 'all'], default='file',
                                  help='Incremental analysis mode: noinc, file, func')
         self.parser.add_argument('--verbose', action='store_true', dest='verbose', help='Record debug information.')
         self.parser.add_argument('--analyze', type=str, dest='analyze', choices=['ctu', 'no-ctu'], default='no-ctu',
@@ -228,8 +244,8 @@ class ArgumentParser:
                                  help='Identify analysis unit by file or target.')
         self.parser.add_argument('--basic-info', type=str, dest='basic_info', 
                                  help='Record basic information (CG node number, etc.).')
-        self.parser.add_argument('--clean-inc', type=bool, dest='clean_inc', default=True, 
-                                 help='Clean incremental information files after analysis.')
+        self.parser.add_argument('--no-clean-inc', dest='clean_inc', action='store_false',
+                                 help='Disable cleaning incremental files after analysis.')
     
     def parse_args(self, args):
         return self.parser.parse_args(args)

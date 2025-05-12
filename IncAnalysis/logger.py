@@ -38,8 +38,6 @@ class Logger(object):
         ensure_dir(workspace)
         debug_file = "{}/debug_{}.log".format(workspace, timestamp)
         info_file = "{}/info_{}.log".format(workspace, timestamp)
-        remake_file(debug_file)
-        remake_file(info_file)
         handler = {
             logging.DEBUG: debug_file,
             logging.INFO: info_file,
@@ -54,7 +52,10 @@ class Logger(object):
             logger = logging.getLogger(str(level))
             logger.setLevel(level)
             
+            logger.handlers.pop()
+            
             log_path = os.path.abspath(handler[level])
+            remake_file(log_path)
             fh = logging.FileHandler(log_path)
             fh.setFormatter(fmt)
             fh.setLevel(level)

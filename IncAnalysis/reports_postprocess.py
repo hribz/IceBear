@@ -76,7 +76,7 @@ def parse_yaml(result_file):
     return unique_reports
 
 
-def parse_sarif(result_file):
+def parse_sarif(result_file, is_gsa=False):
     if not os.path.exists(result_file):
         return None
     if os.path.getsize(result_file) == 0:
@@ -90,18 +90,23 @@ def parse_sarif(result_file):
             return None
         results = sarif_json["runs"][0]["results"]
         for result in results:
+            if is_gsa and not result['ruleId'].startswith('-Wanalyzer'):
+                continue
             message = result['message']['text']
             file = 'UNKNOWN'
             region = "-"
-            if 'physicalLocation' in result['locations'][-1]:
-                file = result['locations'][-1]['physicalLocation']['artifactLocation']['uri']
-                if hash_type == HashType.CONTEXT:
-                    if 'region' in result['locations'][-1]['physicalLocation']:
-                        region = result['locations'][-1]['physicalLocation']['region']
-            else:
-                # Find file path in artifacts
-                if 'artifacts' in sarif_json["runs"][0]:
-                    file = sarif_json["runs"][0]['artifacts'][-1]['location']['uri']
+            # Find file path in artifacts
+            if 'artifacts' in sarif_json["runs"][0]:
+                file = sorted([artifact['location']['uri'] for artifact in sarif_json["runs"][0]['artifacts'] 
+                              if 'location' in artifact and 'uri' in artifact['location']])
+            elif 'physicalLocation' in result['locations'][-1]:
+                file = sorted([i['physicalLocation']['artifactLocation']['uri'] for i in result['locations'] if 'physicalLocation' in i])
+            if hash_type == HashType.CONTEXT:
+                if 'physicalLocation' in result['locations'][-1] and 'region' in result['locations'][-1]['physicalLocation']:
+                    region = {
+                        'file': result['locations'][-1]['physicalLocation']['artifactLocation']['uri'],
+                        'region': result['locations'][-1]['physicalLocation']['region']
+                    }
             if hash_type == HashType.PATH and message.rfind("at line") != -1:
                 # Ignore line number if under context-free mode.
                 result['message']['text'] = message[:message.rfind("at line")]
@@ -119,12 +124,12 @@ def parse_sarif(result_file):
             unique_reports[report_hash] = report
     return unique_reports
 
-analyzers = ['clang-tidy', 'cppcheck', 'csa', 'gsa']
+analyzers = ['CSA', 'GSA', 'ClangTidy', 'CppCheck']
 
-def get_statistics_from_workspace(workspace, this_version):
-    analyzers_floder = [os.path.join(workspace, analyzer) for analyzer in list_dir(workspace, analyzers)]
+def get_statistics_from_workspace(workspace, this_version, inc):
+    analyzers_folder = [os.path.join(workspace, analyzer) for analyzer in list_dir(workspace, analyzers)]
     
-    all_reports_file= os.path.join(workspace, 'all_reports.json')
+    all_reports_file= os.path.join(workspace, f'all_reports_{inc}.json')
     if os.path.exists(all_reports_file):
         statistics = json.load(open(all_reports_file, 'r'))
     else:
@@ -140,22 +145,12 @@ def get_statistics_from_workspace(workspace, this_version):
         if k not in statistics:
             statistics[k] = [] # type: ignore
 
-    for analyzer in analyzers_floder:
-        if analyzer.endswith('csa'):
-            reports_path = os.path.join(analyzer, 'csa-reports')
-            analyzer_name = 'csa'
-        elif analyzer.endswith('clang-tidy'):
-            analyzer_name = 'clang-tidy'
-            reports_path = os.path.join(analyzer, 'clang-tidy-reports')
-        elif analyzer.endswith('cppcheck'):
-            analyzer_name = 'cppcheck'
-            reports_path = os.path.join(analyzer, 'cppcheck-reports')
-        elif analyzer.endswith('infer'):
-            analyzer_name = 'infer'
-            reports_path = os.path.join(analyzer, 'infer-reports')
-        elif analyzer.endswith('gsa'):
-            analyzer_name = 'gsa'
-            reports_path = os.path.join(analyzer, 'gsa-reports')
+    for analyzer in analyzers_folder:
+        reports_dir = f'{inc}-reports'
+        reports_path = os.path.join(analyzer, reports_dir)
+        analyzer_name = os.path.basename(analyzer)
+        if analyzer_name not in analyzers:
+            continue
 
         if analyzer_name not in statistics['summary']:
             statistics['summary'][analyzer_name] = { # type: ignore
@@ -164,7 +159,7 @@ def get_statistics_from_workspace(workspace, this_version):
 
         output_path = os.path.join(reports_path, this_version)
         reports = []
-        if analyzer.endswith('csa'):
+        if analyzer.endswith('CSA'):
             if not os.path.exists(output_path):
                 continue
             for report in list_files(output_path):
@@ -175,7 +170,7 @@ def get_statistics_from_workspace(workspace, this_version):
                     },
                     "hash": os.path.basename(report)
                 })
-        elif analyzer.endswith('clang-tidy'):
+        elif analyzer.endswith('ClangTidy'):
             if not os.path.exists(output_path):
                 continue
             unique_reports = dict()
@@ -186,32 +181,34 @@ def get_statistics_from_workspace(workspace, this_version):
                     continue
                 unique_reports.update(yaml_result)
             reports = list(unique_reports.values())
-        elif analyzer.endswith('cppcheck'):
+        elif analyzer.endswith('CppCheck'):
             result_file = os.path.join(output_path, 'result.json')
             sarif_result = parse_sarif(result_file)
             if sarif_result is None:
                 continue
             reports = list(sarif_result.values())
-        elif analyzer.endswith('infer'):
+        elif analyzer.endswith('Infer'):
             if not os.path.exists(os.path.join(output_path, 'report.json')):
                 continue
             with open(os.path.join(output_path, 'report.json'), 'r') as f:
                 infer_result = json.load(f)
                 key_set = {'bug_type', 'qualifier', 'severity', 'category', 'procedure', 'file', 'key', 'bug_type_hum'}
                 reports = [{k: v for k, v in result.items() if k in key_set} for result in infer_result]
-        elif analyzer.endswith('gsa'):
+        elif analyzer.endswith('GSA'):
             if not os.path.exists(output_path):
                 continue
             unique_reports = dict()
             for file in list_files(output_path):
                 sarif_file = os.path.join(output_path, file)
-                sarif_result = parse_sarif(sarif_file)
+                sarif_result = parse_sarif(sarif_file, is_gsa=True)
                 if sarif_result is None:
                     continue
+                sarif_result = {k: v for k, v in sarif_result.items() 
+                              if v['specific_info']['ruleId'].startswith('-Wanalyzer')}
                 unique_reports.update(sarif_result)
             reports = list(unique_reports.values())
 
-        if len(statistics[analyzer_name]) > 1 and this_version == statistics[analyzer_name][-1]['version']: # type: ignore
+        if len(statistics[analyzer_name]) > 0 and this_version == statistics[analyzer_name][-1]['version']: # type: ignore
             old_reports = statistics[analyzer_name][-1]['reports'] # type: ignore
             statistics['summary'][analyzer_name]['total'] -= len(old_reports) # type: ignore
             statistics['summary'][analyzer_name][this_version] -= len(old_reports) # type: ignore
@@ -271,11 +268,11 @@ def get_versions_and_reports(statistics):
             versions_and_reports[version] = versions_and_reports[version].union(reports)
     return versions_and_reports, first_version
 
-def postprocess_workspace(workspace, this_version, hash_ty, output_news=True):
+def postprocess_workspace(workspace, this_version, hash_ty, inc, output_news=True):
     global hash_type
     logger.info("[Postprocessing Reports]")
     hash_type = HashType.CONTEXT if hash_ty == 'context' else HashType.PATH
-    statistics = get_statistics_from_workspace(workspace, this_version)
+    statistics = get_statistics_from_workspace(workspace, this_version, inc)
     
     versions_and_reports, baseline_version = get_versions_and_reports(statistics)
 
@@ -295,7 +292,7 @@ def postprocess_workspace(workspace, this_version, hash_ty, output_news=True):
     def clang_tidy_diag_distribution(reports):
         kinds = {}
         for report in reports:
-            if report.analyzer == 'clang-tidy':
+            if report.analyzer == 'ClangTidy':
                 kind = report.specific_info['DiagnosticName']
                 if kind in kinds.keys():
                     kinds[kind] += 1
@@ -304,7 +301,7 @@ def postprocess_workspace(workspace, this_version, hash_ty, output_news=True):
         return sorted(kinds.items(), key=lambda item: item[1], reverse=True)
     
     kinds = clang_tidy_diag_distribution(reports)
-    statistics['summary']['clang-tidy distribution'] = { kind[0]: kind[1] for kind in kinds } # type: ignore
+    statistics['summary']['ClangTidy Distribution'] = { kind[0]: kind[1] for kind in kinds } # type: ignore
     
     def new_reports(old_reports: set, now_reports:set, output_file, now_file):
         new_reports = now_reports.difference(old_reports)
@@ -327,8 +324,8 @@ def postprocess_workspace(workspace, this_version, hash_ty, output_news=True):
 
     if output_news:
         classified_new_reports = new_reports(old_reports, now_reports
-                                , os.path.join(workspace, 'new_reports.json')
-                                , os.path.join(workspace, 'reports.json'))
+                                , os.path.join(workspace, f'new_reports_{inc}.json')
+                                , os.path.join(workspace, f'reports_{inc}.json'))
         statistics['diff']['total'] = 0
         for analyzer_name in analyzers:
             if analyzer_name not in statistics['diff']:
@@ -339,5 +336,5 @@ def postprocess_workspace(workspace, this_version, hash_ty, output_news=True):
             statistics['diff'][analyzer_name][this_version] = len(classified_new_reports[analyzer_name]) # type: ignore
             statistics['diff']['total'] += statistics['diff'][analyzer_name]['total'] # type: ignore
 
-    with open(os.path.join(workspace, 'all_reports.json'), 'w') as f:
+    with open(os.path.join(workspace, f'all_reports_{inc}.json'), 'w') as f:
         json.dump(statistics, f, indent=3)

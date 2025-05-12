@@ -81,9 +81,10 @@ def main(argv):
                                 )
     success = True
     if not opts.only_process_reports:
-        success = Repo.process_one_config(summary_path="logs", reports_statistics=False)
+        success = Repo.process_one_config(summary_path="logs")
     if success:
-        postprocess_workspace(workspace=workspace, this_version=version_stamp, hash_ty=env.analyze_opts.hash_type, output_news=True)
+        for inc in Repo.default_config.inc_levels:
+            postprocess_workspace(workspace, version_stamp, env.analyze_opts.hash_type, inc, output_news=True)
 
 
 if __name__ == '__main__':

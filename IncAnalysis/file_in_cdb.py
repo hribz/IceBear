@@ -178,6 +178,9 @@ class FileInCDB:
         self.basline_fs_num = 'Skip'
         self.baseline_has_fs = False # Analysis finished successfully.
         self.csa_analyze_time = "Unknown"
+        self.analyzers_time = {
+            i: 0.0 for i in self.parent.analyzers_keys
+        }
         self.extname = ''
         if self.compile_command.language == 'c++':
             self.extname = '.ii'
@@ -229,6 +232,7 @@ class FileInCDB:
         remove_file(self.get_file_path(FileKind.CPPRF))
         remove_file(self.get_file_path(FileKind.GCCRF))
         remove_file(self.get_file_path(FileKind.INCSUM))
+        remove_file(self.get_file_path(FileKind.ANR))
 
     def is_new(self):
         return self.status == FileStatus.NEW or self.status == FileStatus.DIFF_FAILED
@@ -284,7 +288,7 @@ class FileInCDB:
             return ""
 
     def preprocess_file(self) -> bool:
-        commands = [self.compile_command.compiler]
+        commands = [self.parent.env.analyze_opts.cc if self.compile_command.language == 'c' else self.parent.env.analyze_opts.cxx]
         commands.extend(self.compile_command.arguments + ['-D__clang_analyzer__'])
         commands.extend(['-E'])
         commands.extend(['-o', f'{self.prep_file}'])
@@ -295,7 +299,7 @@ class FileInCDB:
             process = run(commands_to_shell_script(commands), capture_output=True, text=True, check=True, shell=True, cwd=self.compile_command.directory)
         except subprocess.CalledProcessError as e:
             self.status = FileStatus.PREPROCESS_FAILED
-            logger.debug(f"[Preprocess Failed] {self.prep_file}\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}")
+            logger.error(f"[Preprocess Failed] {self.prep_file}\nscript:\n{commands_to_shell_script(commands)}\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}")
             return False
 
         return True

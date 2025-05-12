@@ -1,3 +1,4 @@
+from collections import defaultdict
 from pathlib import Path
 import subprocess
 import shutil
@@ -196,6 +197,7 @@ class Configuration:
 
         makedir(str(self.workspace))
         self.update_workspace_path()
+        self.update_analyzers_path(self.env.inc_mode)
 
         self.diff_file_list = []
         self.status = 'WAIT'
@@ -208,6 +210,11 @@ class Configuration:
         # Update One Configuration.
         self.update_mode = update_mode
         self.global_efm: Dict[str, FileInCDB] = {}
+
+        if self.env.inc_mode == IncrementalMode.ALL:
+            self.inc_levels = [IncrementalMode.NoInc, IncrementalMode.FileLevel, IncrementalMode.FuncitonLevel]
+        else:
+            self.inc_levels = [self.env.inc_mode]
 
         analyzers = self.env.analyzers
         if self.env.analyze_opts.analyzers:
@@ -229,12 +236,12 @@ class Configuration:
             elif analyzer_name == 'gsa':
                 self.enable_gsa = True
                 analyzer = GSA(GSAConfig(self.env, self.gsa_path, self.env.analyze_opts.gsa_config), [])
-                print(f'gsa creating {analyzer.analyzer_config.ready_to_run}')
             else:
                 logger.error(f"Don't support {analyzer_name}.")
                 continue
             if analyzer.analyzer_config.ready_to_run:
                 self.analyzers.append(analyzer)
+        self.analyzers_keys = [f"{i.get_analyzer_name()} ({inc_level})" for i in self.analyzers for inc_level in self.inc_levels]
 
     def update_workspace_path(self):
         # Compile database.
@@ -257,27 +264,27 @@ class Configuration:
         self.diff_path = self.workspace / 'diff' / self.version_stamp
         # Compile database used by analysers.
         self.compile_commands_used_by_analyzers = self.preprocess_path / 'compile_commands_used_by_analyzers.json'
-        # CSA Path.
-        self.csa_path = self.workspace / 'csa'
-        self.csa_output_path = self.csa_path / 'csa-reports' / self.version_stamp
-        # Clang-tidy Path.
-        self.clang_tidy_path = self.workspace / 'clang-tidy'
-        self.clang_tidy_output_path = self.clang_tidy_path / 'clang-tidy-reports' / self.version_stamp
-        self.clang_tidy_fixit = self.clang_tidy_output_path / 'fixit'
-        # Cppcheck Path.
-        self.cppcheck_path = self.workspace / 'cppcheck'
-        self.cppcheck_build_path = self.cppcheck_path / 'build'
-        self.cppcheck_output_path = self.cppcheck_path / 'cppcheck-reports' / self.version_stamp
-        # Infer Path
-        self.infer_path = self.workspace / 'infer'
-        self.infer_output_path = self.infer_path / 'infer-reports' / self.version_stamp
-        # GSA Path
-        self.gsa_path = self.workspace / 'gsa'
-        self.gsa_output_path = self.gsa_path / 'gsa-reports' / self.version_stamp
         # CodeChecker workspace.
         self.codechecker_path = self.workspace / self.version_stamp
-        # Reports statistics
-        self.reports_statistics_path = self.workspace / 'reports_statistics.json'
+
+    def update_analyzers_path(self, inc: IncrementalMode):
+        # CSA Path.
+        self.csa_path = self.workspace / 'CSA'
+        self.csa_output_path = self.csa_path / f'{inc}-reports' / self.version_stamp
+        # Clang-tidy Path.
+        self.clang_tidy_path = self.workspace / 'ClangTidy'
+        self.clang_tidy_output_path = self.clang_tidy_path / f'{inc}-reports' / self.version_stamp
+        self.clang_tidy_fixit = self.clang_tidy_output_path / 'fixit'
+        # Cppcheck Path.
+        self.cppcheck_path = self.workspace / 'CppCheck'
+        self.cppcheck_build_path = self.cppcheck_path / f'build_{inc}'
+        self.cppcheck_output_path = self.cppcheck_path / f'{inc}-reports' / self.version_stamp
+        # Infer Path
+        self.infer_path = self.workspace / 'Infer'
+        self.infer_output_path = self.infer_path / f'{inc}-reports' / self.version_stamp
+        # GSA Path
+        self.gsa_path = self.workspace / 'GSA'
+        self.gsa_output_path = self.gsa_path / f'{inc}-reports' / self.version_stamp
     
     def update_version(self, version_stamp):
         self.version_stamp = version_stamp
@@ -330,11 +337,6 @@ class Configuration:
 
         end_real_time = time.time()
         self.prepare_for_inc_info_real_time = end_real_time - start_real_time
-
-        # 5. prepare for CSA
-        if self.env.ctu:
-            self.generate_efm()
-            self.merge_efm()
 
         # Record real runtime and CPU time for analyze tasks.
         start_real_time = time.time()
@@ -447,12 +449,6 @@ class Configuration:
                 logger.error(f"[Get File] {file_path} not exists in file_list_index")
             return None
         return self.file_list[idx]
-
-    def get_file_path(self, kind: FileKind, file_path: str) -> Optional[str]:
-        file = self.get_file(file_path)
-        if file is None:
-            return None
-        return file.get_file_path(kind)
     
     def clean_build(self):
         makedir((self.build_path))
@@ -702,66 +698,26 @@ class Configuration:
         self.session_times['merge_efm'] = time.time() - start_time
 
     def analyze(self):
-        start_time = time.time()
-        for analyzer in self.analyzers:
-            analyzer_time = time.time()
-            self.session_times[analyzer.__class__.__name__] = SessionStatus.Skipped
-            if self.incrementable:
-                analyzer.file_list = self.diff_file_list
-            else:
-                analyzer.file_list = self.file_list
-            analyzer.analyze_all_files()
-            self.session_times[analyzer.__class__.__name__] = time.time() - analyzer_time
-        self.session_times['analyze'] = time.time() - start_time
-    
-    def reports_statistics(self):
-        def list_files(directory):
-            if not os.path.exists(directory):
-                return []
-            return [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
-
-        if not os.path.exists(self.reports_statistics_path):
-            statistics = {
-            }
-        else:
-            statistics = json.load(open(self.reports_statistics_path, 'r'))
-
-        for analyzer in self.analyzers:
-            reports = []
-            if analyzer.__class__.__name__ not in statistics:
-                statistics[analyzer.__class__.__name__] = []
-            self.session_times[f"{analyzer.__class__.__name__} reports"] = 0
-            if isinstance(analyzer, CSA):
-                if not os.path.exists(self.csa_output_path):
-                    continue
-                reports = list_files(self.csa_output_path)
-            elif isinstance(analyzer, ClangTidy):
-                if not os.path.exists(self.clang_tidy_output_path):
-                    continue
-                reports = list_files(self.clang_tidy_output_path)
-            elif isinstance(analyzer, CppCheck):
-                if not os.path.exists(self.cppcheck_output_path / 'result.json'):
-                    continue
-                with open(self.cppcheck_output_path / 'result.json', 'r') as f:
-                    cppcheck_result = json.load(f)
-                    results = cppcheck_result["runs"][0]["results"]
-                    reports = [{k: v for k, v in result.items() if k != 'locations'} for result in results]
-            elif isinstance(analyzer, Infer):
-                if not os.path.exists(self.infer_output_path / 'report.json'):
-                    continue
-                with open(self.infer_output_path / 'report.json', 'r') as f:
-                    infer_result = json.load(f)
-                    key_set = {'bug_type', 'qualifier', 'severity', 'category', 'procedure', 'file', 'key', 'bug_type_hum'}
-                    reports = [{k: v for k, v in result.items() if k in key_set} for result in infer_result]
-
-            statistics[analyzer.__class__.__name__].append({
-                'version': self.version_stamp,
-                'reports': reports
-            })
-            self.session_times[f"{analyzer.__class__.__name__} reports"] = len(reports)
-
-        with open(self.reports_statistics_path, 'w') as f:
-            json.dump(statistics, f, indent=4)
+        for inc_level in self.inc_levels:
+            start_time = time.time()
+            self.update_analyzers_path(inc_level)
+            for analyzer in self.analyzers:
+                analyzer.update_inc_mode(inc_level)
+                analyzer_time = time.time()
+                self.session_times[f"{analyzer.__class__.__name__} ({inc_level})"] = SessionStatus.Skipped
+                if isinstance(analyzer, CSA):
+                    # prepare for CSA
+                    if self.env.ctu:
+                        self.generate_efm()
+                        self.merge_efm()
+                
+                if self.incrementable and inc_level.value >= IncrementalMode.FileLevel.value:
+                    analyzer.file_list = self.diff_file_list
+                else:
+                    analyzer.file_list = self.file_list
+                analyzer.analyze_all_files()
+                self.session_times[f"{analyzer.__class__.__name__} ({inc_level})"] = time.time() - analyzer_time
+            self.session_times[f'analyze ({inc_level})'] = time.time() - start_time
 
     def prepare_diff_dir(self):
         if not self.env.analyze_opts.udp:
@@ -805,8 +761,8 @@ class Configuration:
                     file.baseline_file = None
                 # If this file has changed, clean the baseline cache.
                 else:
-                    if not self.env.analyze_opts.verbose:
-                        file.baseline_file.clean_cache()
+                    # if not self.env.analyze_opts.verbose:
+                    file.baseline_file.clean_cache()
             if file.is_changed():
                 self.diff_file_list.append(file)
         self.update_cache()
@@ -892,6 +848,29 @@ class Configuration:
             if file.csa_analyze_time != 'Unknown':
                 self.total_csa_analyze_time += float(file.csa_analyze_time)
         return self.total_csa_analyze_time
+        
+    def get_each_analyzer_total_time(self):
+        self.total_analyzers_time = {}
+        self.file_analyze_status = {
+            'ok': 0, 'timeout': 0, 'error': 0
+        }
+        for file in self.file_list:
+            timeout = error = False
+            for k,v in file.analyzers_time.items():
+                if k not in self.total_analyzers_time:
+                    self.total_analyzers_time[k] = 0.0
+                if isinstance(v, float):
+                    self.total_analyzers_time[k] += v
+                elif v == 'timeout':
+                    timeout = True
+                elif v == 'error':
+                    error = True
+            if timeout:
+                self.file_analyze_status['timeout'] += 1
+            if error:
+                self.file_analyze_status['error'] += 1
+            if not (timeout or error):
+                self.file_analyze_status['ok'] += 1
 
     def output_analysis_time(self):
         if self.incrementable:
@@ -900,9 +879,11 @@ class Configuration:
         else:
             logger.info(f"[Number of analyzed files] {len(self.file_list)}")
 
-        for analyzer in self.analyzers:
-            analysis_time = round(self.session_times[analyzer.__class__.__name__], 3)
-            logger.info(f"[{analyzer.__class__.__name__} time] {analysis_time} s")
+        for inc_level in self.inc_levels:
+            for analyzer in self.analyzers:
+                analyzer_key = f"{analyzer.__class__.__name__} ({inc_level})"
+                analysis_time = round(self.session_times[analyzer_key], 3)
+                logger.info(f"[{analyzer_key} time] {analysis_time} s")
 
     def get_session_times(self):
         ret = "{\n"
@@ -925,19 +906,35 @@ class Configuration:
         ret += f"execution time: {self.get_session_times()}\n"
         return ret
 
-    def file_status(self):
-        headers = ['file', 'status', 'csa analyze time(s)', 'cg nodes', 'changed functions', 'reanalyze functions', 
-                   'affected virtual functions', 'affected vf indirect calls', 'function pointer types', 'affected fp indirect calls']
-        datas = []
+    def get_files_kind(self):
         unexists_number, unknown_number = 0, 0
         for ab_file in self.abnormal_file_list:
-            datas.append([ab_file.identifier, str(ab_file.status)])
             if ab_file.status == FileStatus.UNEXIST:
                 unexists_number += 1
             else:
                 unknown_number += 1
         new_file_num, changed_file_num, unchanged_file_num = 0, 0, 0
-        total_csa_time = 0.0
+        for file in self.file_list:
+            if file.status == FileStatus.NEW:
+                new_file_num += 1
+            elif file.status == FileStatus.CHANGED:
+                changed_file_num += 1
+            elif file.status == FileStatus.UNCHANGED:
+                unchanged_file_num += 1
+        return {
+                "unexist files": unexists_number, 
+                "unknown files": unknown_number, 
+                "merged files": self.merged_files,
+                "new files": new_file_num, 
+                "changed files": changed_file_num, 
+                "unchanged files": unchanged_file_num
+            }
+
+    def file_status(self):
+        headers = ['file', 'status', 'cg nodes', 'changed functions', 'reanalyze functions', 
+                   'affected virtual functions', 'affected vf indirect calls', 'function pointer types', 'affected fp indirect calls']
+        headers.extend(self.analyzers_keys)
+        datas = []
         for file in self.file_list:
             # file, status, analyze time, cg nodes num, cf num, rf num, baseline fs num
             data: List[Union[str, int]] = [file.identifier, str(file.status)]
@@ -948,19 +945,10 @@ class Configuration:
             #         file.parse_cg_file()
             # if self.env.inc_mode == IncrementalMode.InlineLevel and not file.baseline_has_fs:
             #     file.parse_baseline_fs_file()
-            data.extend([file.csa_analyze_time, file.cg_node_num, file.cf_num, file.rf_num, file.affected_virtual_functions, file.affected_vf_indirect_calls, file.function_pointer_types, file.affected_fp_indirect_calls])
+            data.extend([file.cg_node_num, file.cf_num, file.rf_num, file.affected_virtual_functions, file.affected_vf_indirect_calls, file.function_pointer_types, file.affected_fp_indirect_calls])
             datas.append(data)
-            if file.status == FileStatus.NEW:
-                new_file_num += 1
-            elif file.status == FileStatus.CHANGED:
-                changed_file_num += 1
-            elif file.status == FileStatus.UNCHANGED:
-                unchanged_file_num += 1
-            if file.csa_analyze_time != "Unknown":
-                total_csa_time += float(file.csa_analyze_time)
-        datas.append([f"unexist files:{unexists_number}", f"unknown files:{unknown_number}", f"merged files:{self.merged_files}",
-                      f"new files:{new_file_num}", f"changed files:{changed_file_num}", f"unchanged files:{unchanged_file_num}",
-                      f"total csa analyze time:{total_csa_time}"])
+            for analyzer in self.analyzers_keys:
+                data.append(file.analyzers_time[analyzer]) # type: ignore
         return headers, datas
     
     def file_basic_statistics(self):

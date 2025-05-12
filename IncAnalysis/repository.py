@@ -29,52 +29,33 @@ class Repository(ABC):
     def process_one_config(self, config: Configuration):
         pass
     
-
     def summary_one_config(self, config: Configuration):
-        headers = ["project", "version", "configure", "build", "prepare for inc",
-                   "prepare for CSA"]
-        analyzers = [i.__class__.__name__ for i in config.analyzers]
-        reports = [f"{i.__class__.__name__} reports" for i in config.analyzers]
+        headers = ["project", "version", "configure", "build", "files", "diff files", "prepare for inc"]
+        analyzers = self.default_config.analyzers_keys.copy()
+        analyzers.extend([f"analyze ({inc_level})" for inc_level in self.default_config.inc_levels])
         headers.extend(analyzers)
-        headers.extend(["analyze"])
-        headers.extend(reports)
-        headers.append("reports")
-
-        prepare_for_csa = {"generate_efm", "merge_efm"}
 
         config_data = [self.name, config.version_stamp]
         config_time = 0.0
         build_time = 0.0
-        prepare_csa_time = 0.0
-        analyze_time = 0.0
         analyzers_time = []
-        reports_number = []
 
         for session in config.session_times.keys():
             exe_time = config.session_times[session]
             if not isinstance(exe_time, SessionStatus):
-                if session in prepare_for_csa:
-                    prepare_csa_time += exe_time
-                elif session == "configure":
+                if session == "configure":
                     config_time = exe_time
                 elif session == "build":
                     build_time = exe_time
-                elif session == "analyze":
-                    analyze_time = exe_time
                 elif session in analyzers:
                     analyzers_time.append(exe_time)
-                elif session in reports:
-                    reports_number.append(exe_time)
         config_data.append("%.3lf" % config_time)
         config_data.append("%.3lf" % build_time)
+        config_data.append(len(config.file_list))
+        config_data.append(len(config.diff_file_list) if config.incrementable else len(config.file_list))
         config_data.extend(["%.3lf" % config.prepare_for_inc_info_real_time, 
                             ])
-        config_data.append("%.3lf" % prepare_csa_time)
         config_data.extend(["%.6lf" % i for i in analyzers_time])
-        config_data.extend(["%.6lf" % analyze_time, 
-                            ])
-        config_data.extend(reports_number)
-        config_data.append(sum(reports_number))
         return headers, config_data
     
     def summary_one_config_specific(self, config: Configuration):
@@ -85,6 +66,7 @@ class Repository(ABC):
             #     headers.extend(["diff_command_time", "diff_parse_time"])
         headers.extend(["files", "diff files", "changed function", "reanalyze function", "vf indirect call",
                         "fp indirect call", "diff but no cf", "total cg nodes", "total csa analyze time"])
+        headers.extend([f"{i} (real)" for i in self.default_config.analyzers_keys])
         config = self.default_config
         config_data = [self.name, config.version_stamp]
         for session in config.session_times.keys():
@@ -107,6 +89,10 @@ class Repository(ABC):
         config_data.append(config.diff_file_with_no_cf)
         config_data.append(config.get_total_cg_nodes_num())
         config_data.append("%.6lf" % config.get_total_csa_analyze_time())
+        config.get_each_analyzer_total_time()
+        config_data.extend(config.total_analyzers_time.values())
+        headers.extend(config.file_analyze_status.keys())
+        config_data.extend(config.file_analyze_status.values())
         return headers, config_data
     
     @abstractmethod
@@ -258,15 +244,13 @@ class UpdateConfigRepository(Repository):
     def update_version(self, version_stamp):
         self.default_config.update_version(version_stamp)
 
-    def process_one_config(self, summary_path=None, reports_statistics=True):
+    def process_one_config(self, summary_path=None):
         if not self.default_config.process_this_config(self.can_skip_configure, self.has_init):
             logger.error("Process failed.")
             return False
         if self.env.analyze_opts.prep_only:
             logger.info("Only preprocess and diff files.")
             return False
-        if reports_statistics:
-            self.default_config.reports_statistics()
         self.append_session_summary()
         self.summary_to_csv(summary_path)
         self.summary_to_csv_specific(summary_path)
