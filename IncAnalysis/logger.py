@@ -3,15 +3,18 @@ import sys
 import logging
 from datetime import datetime
 
+
 def remake_file(file):
     if os.path.isfile(file) and os.path.exists(file):
         os.remove(file)
+
 
 def ensure_dir(d, verbose=True):
     if not os.path.exists(d):
         if verbose:
             print("Directory {} do not exist; creating...".format(d))
         os.makedirs(d)
+
 
 class Logger(object):
     def __init__(self, TAG):
@@ -23,11 +26,11 @@ class Logger(object):
         }
         self.__loggers = {}
         logLevels = self.handler.keys()
-        fmt = logging.Formatter('%(asctime)s [%(levelname)s]: %(message)s')
+        fmt = logging.Formatter("%(asctime)s [%(levelname)s]: %(message)s")
         for level in logLevels:
             logger = logging.getLogger(str(level))
             logger.setLevel(level)
-            
+
             sh = logging.StreamHandler(self.handler[level])
             sh.setFormatter(fmt)
             sh.setLevel(level)
@@ -47,14 +50,14 @@ class Logger(object):
         if not self.verbose:
             self.handler.pop(logging.DEBUG)
         logLevels = self.handler.keys()
-        fmt = logging.Formatter('%(asctime)s [%(levelname)s]: %(message)s')
+        fmt = logging.Formatter("%(asctime)s [%(levelname)s]: %(message)s")
         for level in logLevels:
             logger = logging.getLogger(str(level))
             logger.setLevel(level)
-            
+
             if len(logger.handlers) > 1:
                 logger.handlers.pop()
-            
+
             log_path = os.path.abspath(self.handler[level])
             remake_file(log_path)
             fh = logging.FileHandler(log_path)
@@ -66,11 +69,14 @@ class Logger(object):
 
     def info(self, message):
         self.__loggers[logging.INFO].info(f"[{self.TAG}]" + message)
+
     def debug(self, message):
         if not self.verbose:
             return
         self.__loggers[logging.DEBUG].debug(f"[{self.TAG}]" + message)
+
     def error(self, message):
         self.__loggers[logging.INFO].error(f"[{self.TAG}]" + message)
 
-logger = Logger('Prepare Env')
+
+logger = Logger("Prepare Env")
