@@ -33,13 +33,14 @@ class RepoParser(ArgumentParser):
                                     "are: [path, context].")
         self.parser.add_argument('--only-process-reports', dest='only_process_reports', action='store_true',
                                  help='Only postprocess reports')
-        
-def main(argv):
+
+def main_impl(argv):
     parser = RepoParser()
     opts = parser.parse_args(argv)
     ice_bear_path = os.path.abspath(__file__)
     env = Environment(opts, os.path.dirname(ice_bear_path))
 
+    opts.repo = os.path.abspath(opts.repo)
     if not os.path.exists(opts.repo):
         logger.info(f"Please make sure repository {opts.repo} exists.")
         exit(1)
@@ -85,7 +86,10 @@ def main(argv):
     if success:
         for inc in Repo.default_config.inc_levels:
             postprocess_workspace(workspace, version_stamp, env.analyze_opts.hash_type, inc, output_news=True)
+    logger.info(f"Analysis finished, results are stored in {workspace}.")
 
+def main():
+    main_impl(sys.argv[1:])
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    main_impl(sys.argv[1:])

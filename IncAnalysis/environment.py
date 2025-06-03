@@ -74,7 +74,7 @@ class Environment:
 
     def prepare_env_path(self, ice_bear_path):
         # Environment path
-        self.PWD: Path = Path(ice_bear_path).absolute()
+        self.PWD: Path = Path(ice_bear_path).parent.absolute()
         self.EXTRACT_II = str(self.PWD / 'build/clang_tool/collectIncInfo')
         self.PANDA = str(self.PWD / 'external/panda/panda')
         if self.analyze_opts.basic_info:

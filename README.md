@@ -38,15 +38,16 @@ You need to install:
 - clang-19
 - bear
 - cmake >= 3.10
+- uv
 
-Follow these commands to install *IncBear*:
+Follow these commands to install *IceBear*:
 ```bash
 git clone https://github.com/hribz/IceBear.git
 cd IceBear
-pip install -r requirements.py
-python build.py -j8
+uv sync
+uv run python build.py -j8
 # Move icebear to any environment path.
-mv icebear ~/.local/bin/
+mv icebear/icebear ~/.local/bin/
 ```
 
 ## Usage

@@ -35,16 +35,27 @@ def run_cmake_build(llvm_dir, clang_dir, jobs, root_path):
 def generate_icebear_script(icebear_script_path, root_path):
     current_dir = os.path.dirname(root_path)
     
-    script_content = f"""#!/bin/bash
-
-python {os.path.join(current_dir, 'IceBear.py')} "$@"
+    # Check if uv is available and project uses uv
+    uv_available = subprocess.run(['which', 'uv'], capture_output=True, text=True).returncode == 0
+    has_uv_lock = os.path.exists(os.path.join(current_dir, 'uv.lock'))
+    
+    if uv_available and has_uv_lock:
+        script_content = f"""#!/bin/bash
+# IceBear - A scheduler for C/C++ static analysis tools
+uv run icebear "$@"
+"""
+    else:
+        # Fallback to direct Python execution
+        script_content = f"""#!/bin/bash
+# IceBear - A scheduler for C/C++ static analysis tools
+export PYTHONPATH="{current_dir}:$PYTHONPATH"
+python {os.path.join(current_dir, 'icebear/__init__.py')} "$@"
 """
 
     with open(icebear_script_path, 'w') as f:
         f.write(script_content)
 
     os.chmod(icebear_script_path, 0o755)
-
     print(f"Generated icebear script at: {icebear_script_path}")
 
 def main():
@@ -58,7 +69,7 @@ def main():
 
     run_cmake_build(args.llvm_dir, args.clang_dir, args.jobs, root_path)
 
-    icebear_script_path = os.path.join(os.path.dirname(root_path), 'icebear')
+    icebear_script_path = os.path.join(os.path.dirname(root_path), 'icebear/icebear')
     generate_icebear_script(icebear_script_path, root_path)
 
 if __name__ == "__main__":

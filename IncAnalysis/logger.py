@@ -17,44 +17,45 @@ class Logger(object):
     def __init__(self, TAG):
         self.TAG = TAG
         self.verbose = False
-        handler = {
+        self.handler = {
             logging.DEBUG: sys.stderr,
             logging.INFO: sys.stdout,
         }
         self.__loggers = {}
-        logLevels = handler.keys()
+        logLevels = self.handler.keys()
         fmt = logging.Formatter('%(asctime)s [%(levelname)s]: %(message)s')
         for level in logLevels:
             logger = logging.getLogger(str(level))
             logger.setLevel(level)
             
-            sh = logging.StreamHandler(handler[level])
+            sh = logging.StreamHandler(self.handler[level])
             sh.setFormatter(fmt)
             sh.setLevel(level)
             logger.addHandler(sh)
             self.__loggers.update({level: logger})
-        
+
     def start_log(self, timestamp, workspace):
         ensure_dir(workspace)
         debug_file = "{}/debug_{}.log".format(workspace, timestamp)
         info_file = "{}/info_{}.log".format(workspace, timestamp)
-        handler = {
+        self.handler = {
             logging.DEBUG: debug_file,
             logging.INFO: info_file,
             # logging.ERROR: "{}/{}_error.log".format(timestamp)
         }
         self.__loggers = {}
         if not self.verbose:
-            handler.pop(logging.DEBUG)
-        logLevels = handler.keys()
+            self.handler.pop(logging.DEBUG)
+        logLevels = self.handler.keys()
         fmt = logging.Formatter('%(asctime)s [%(levelname)s]: %(message)s')
         for level in logLevels:
             logger = logging.getLogger(str(level))
             logger.setLevel(level)
             
-            logger.handlers.pop()
+            if len(logger.handlers) > 1:
+                logger.handlers.pop()
             
-            log_path = os.path.abspath(handler[level])
+            log_path = os.path.abspath(self.handler[level])
             remake_file(log_path)
             fh = logging.FileHandler(log_path)
             fh.setFormatter(fmt)
