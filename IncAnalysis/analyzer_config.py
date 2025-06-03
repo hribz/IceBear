@@ -67,7 +67,7 @@ csa_default_config = {
 
 cppcheck_default_config = [
     "--check-level=exhaustive",
-    "--max-ctu-depth=2",
+    # "--max-ctu-depth=2",
     "--output-format=sarif"
 ]
 
@@ -304,6 +304,9 @@ class CppCheckConfig(AnalyzerConfig):
         # unusedFunction check is for whole program analysis,
         # which is not compatible with per source file analysis.
         # self.args.append('--suppress=unusedFunction')
+
+        # Simulate Clang compilation environment.
+        self.args.append('-D__clang__=1')
 
         return self.args
     

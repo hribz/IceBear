@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import List
 import os
@@ -290,3 +291,6 @@ class UpdateConfigRepository(Repository):
         config = self.default_config
         headers, data = config.file_status()
         add_to_csv(headers, data, str(config.preprocess_path / f'file_status_{self.default_config.version_stamp}.csv'))
+        files_kind = config.get_files_kind()
+        with open(str(config.preprocess_path / f'file_kind_{self.default_config.version_stamp}.json'), 'w') as f:
+            json.dump(files_kind, f, indent=4)
