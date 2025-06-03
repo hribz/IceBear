@@ -1,14 +1,14 @@
-import os
-from subprocess import CompletedProcess, run
-import subprocess
-from typing import List, Dict, Optional
-from enum import Enum, auto
 import hashlib
+import os
+import subprocess
+from enum import Enum, auto
+from subprocess import run
+from typing import Dict, List, Optional
 
-from IncAnalysis.utils import makedir, commands_to_shell_script, remove_file
 from IncAnalysis.analyzer_config import *
-from IncAnalysis.logger import logger
 from IncAnalysis.compile_command import CompileCommand
+from IncAnalysis.logger import logger
+from IncAnalysis.utils import commands_to_shell_script, makedir, remove_file
 
 
 def get_sha256_hash(data, encoding="utf-8"):
@@ -323,7 +323,7 @@ class FileInCDB:
 
         try:
             logger.debug(f"[Preprocess Script] {commands_to_shell_script(commands)}")
-            process = run(
+            run(
                 commands_to_shell_script(commands),
                 capture_output=True,
                 text=True,
@@ -400,7 +400,7 @@ class FileInCDB:
         )
         ii_script = commands_to_shell_script(commands)
         try:
-            process = run(commands, capture_output=True, text=True, check=True)
+            run(commands, capture_output=True, text=True, check=True)
             logger.debug(f"[File Inc Info Success] {ii_script}")
             # Parse rf_num to skip some files not need to be reanalyzed.
             self.parse_inc_sum()
@@ -461,7 +461,7 @@ class FileInCDB:
         ]
         basic_ii_script = commands_to_shell_script(commands)
         try:
-            process = run(
+            run(
                 commands,
                 capture_output=True,
                 text=True,

@@ -1,14 +1,13 @@
 import json
-from pathlib import Path
-from typing import List
 import os
 from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import List
 
+from IncAnalysis.configuration import BuildType, Configuration
+from IncAnalysis.environment import *
 from IncAnalysis.logger import logger
 from IncAnalysis.utils import *
-from IncAnalysis.environment import *
-from IncAnalysis.configuration import Configuration, Option, BuildType
-from IncAnalysis.analyzer import Analyzer
 
 
 class Repository(ABC):
@@ -193,11 +192,6 @@ class MultiConfigRepository(Repository):
                 )
 
     def add_configuration(self, options, build_dir_name=None):
-        previous_config = (
-            self.configurations[-1]
-            if len(self.configurations) > 0
-            else self.default_config
-        )
         idx = len(self.configurations)
         self.configurations.append(
             Configuration(

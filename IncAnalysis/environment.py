@@ -1,11 +1,11 @@
+import argparse
 import os
-from pathlib import Path
 import re
 import shutil
-import argparse
-from enum import Enum, auto
-from datetime import datetime
 import subprocess
+from datetime import datetime
+from enum import Enum, auto
+from pathlib import Path
 
 from IncAnalysis.logger import logger
 
@@ -59,7 +59,7 @@ class Environment:
     def check_conflict(self):
         if self.analyze_opts.file_identifier != "file" and self.ctu:
             logger.error(
-                f"[Option Conflict] File identidier must be 'file' if turn on ctu analysis."
+                "[Option Conflict] File identidier must be 'file' if turn on ctu analysis."
             )
             exit(1)
 

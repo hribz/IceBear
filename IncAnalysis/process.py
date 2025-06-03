@@ -1,6 +1,6 @@
 import subprocess
-from subprocess import TimeoutExpired, CalledProcessError
 import time
+from subprocess import CalledProcessError, TimeoutExpired
 
 
 class Process:

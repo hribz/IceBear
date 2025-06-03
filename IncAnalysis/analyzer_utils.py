@@ -8,15 +8,13 @@
 
 # Modified by Yu Xiao for IceBear analysis configuration on 2024-12-17.
 
-from enum import Enum
 import re
 import subprocess
-from typing import Iterable, List, Set, Tuple
-from abc import ABCMeta, abstractmethod
 import xml.etree.ElementTree as ET
+from enum import Enum
+from typing import Iterable, List, Set, Tuple
 
 from IncAnalysis.logger import logger
-from IncAnalysis.environment import Environment
 
 # The functions in this file is copy from CodeChecker, to make sure
 # analyzer behavior is same as CodeChecker.

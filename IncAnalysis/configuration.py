@@ -1,26 +1,20 @@
-from collections import defaultdict
-from pathlib import Path
-import subprocess
-import shutil
-import threading
-from typing import List, Dict, Optional, Union
-from subprocess import CompletedProcess, run
 import json
-import argparse
-import os
-import sys
-import re
-import time
 import multiprocessing as mp
-from functools import partial
+import os
+import shutil
+import subprocess
+import time
+from pathlib import Path
+from subprocess import run
+from typing import Dict, List, Optional, Union
 
+from IncAnalysis.analyzer import *
+from IncAnalysis.analyzer_config import *
+from IncAnalysis.compile_command import CompileCommand
+from IncAnalysis.environment import *
+from IncAnalysis.file_in_cdb import *
 from IncAnalysis.logger import logger
 from IncAnalysis.utils import *
-from IncAnalysis.analyzer_config import *
-from IncAnalysis.environment import *
-from IncAnalysis.compile_command import CompileCommand
-from IncAnalysis.file_in_cdb import *
-from IncAnalysis.analyzer import *
 
 
 class Option:
@@ -285,7 +279,7 @@ class Configuration:
         self.enable_cppcheck = False
         self.enable_gsa = False
         for analyzer_name in analyzers:
-            analyzer = None
+            analyzer: Analyzer
             if analyzer_name == "clangsa":
                 analyzer = CSA(
                     CSAConfig(
@@ -324,7 +318,7 @@ class Configuration:
             else:
                 logger.error(f"Don't support {analyzer_name}.")
                 continue
-            if analyzer.analyzer_config.ready_to_run:
+            if analyzer and analyzer.analyzer_config.ready_to_run:
                 self.analyzers.append(analyzer)
         self.analyzers_keys = [
             f"{i.get_analyzer_name()} ({inc_level})"
@@ -412,7 +406,7 @@ class Configuration:
         if self.need_build:
             self.build()
         if not self.prepare_file_list():
-            logger.info(f"[Process Config] prepare file list failed.")
+            logger.info("[Process Config] prepare file list failed.")
             return False
 
         # Record real runtime and CPU time for tasks
@@ -565,10 +559,8 @@ class Configuration:
         clean_script = f"make -C {self.build_path} clean"
         os.chdir(self.build_path)
         try:
-            process = run(
-                clean_script, shell=True, capture_output=True, text=True, check=True
-            )
-            logger.info(f"[Clean Build Success]")
+            run(clean_script, shell=True, capture_output=True, text=True, check=True)
+            logger.info("[Clean Build Success]")
         except subprocess.CalledProcessError as e:
             logger.error(
                 f"[Clean Build Failed] stdout: {e.stdout}\n stderr: {e.stderr}"
@@ -626,11 +618,9 @@ class Configuration:
         build_script = " ".join(commands)
         logger.info(f"[Repo Build Script] {build_script}")
         try:
-            process = run(
-                build_script, shell=True, capture_output=True, text=True, check=True
-            )
+            run(build_script, shell=True, capture_output=True, text=True, check=True)
             self.session_times["build"] = time.time() - start_time
-            logger.info(f"[Repo Build Success]")
+            logger.info("[Repo Build Success]")
             makedir(os.path.dirname(self.compile_commands_used_by_analyzers))
             shutil.copy(self.compile_database, self.compile_commands_used_by_analyzers)
         except subprocess.CalledProcessError as e:
@@ -708,11 +698,11 @@ class Configuration:
             with open(self.preprocess_compile_database, "w") as f:
                 json.dump(cdb, f, indent=4)
             if preprocess_result:
-                logger.debug(f"[Preprocess Files Success]")
+                logger.debug("[Preprocess Files Success]")
             else:
                 # Don't stop tasks although some file preprocess failed.
                 # self.session_times['preprocess_repo'] = SessionStatus.Failed
-                logger.debug(f"[Preprocess Files Failed]")
+                logger.debug("[Preprocess Files Failed]")
         except subprocess.CalledProcessError as e:
             self.session_times["preprocess_repo"] = SessionStatus.Failed
             logger.error(
@@ -726,7 +716,7 @@ class Configuration:
         self.session_times["extract_inc_info"] = SessionStatus.Skipped
         if not has_init:
             logger.info(
-                f"[Extract Inc Info] Don't need to extract inc info when baseline analysis."
+                "[Extract Inc Info] Don't need to extract inc info when baseline analysis."
             )
             return
         if not self.compile_database.exists():
@@ -741,7 +731,7 @@ class Configuration:
             self.diff_file_list if self.incrementable else self.file_list,
             self.env.analyze_opts.jobs,
         )
-        logger.info(f"[Extract Inc Info Finish]")
+        logger.info("[Extract Inc Info Finish]")
         self.session_times["extract_inc_info"] = time.time() - start_time
 
     def extract_basic_info(self):
@@ -761,7 +751,7 @@ class Configuration:
             self.diff_file_list if self.incrementable else self.file_list,
             self.env.analyze_opts.jobs,
         )
-        logger.info(f"[Extract basic Info Finish]")
+        logger.info("[Extract basic Info Finish]")
         self.session_times["extract_basic_info"] = time.time() - start_time
 
     def generate_efm(self):
@@ -948,7 +938,7 @@ class Configuration:
         # Replace all preprocess location info to empty lines.
         self.prepare_diff_dir()
         if skip_diff:
-            logger.info(f"[Skip Diff] Skip first diff.")
+            logger.info("[Skip Diff] Skip first diff.")
             self.session_times["diff_with_other"] = SessionStatus.Skipped
             self.update_cache()
             return
@@ -1024,7 +1014,7 @@ class Configuration:
             self.env.analyze_opts.jobs,
         )
         logger.info(
-            f"[Propagate Reanalyze Attr] Propagate reanalyze attribute successfully."
+            "[Propagate Reanalyze Attr] Propagate reanalyze attribute successfully."
         )
         self.session_times["propagate_reanalyze_attr"] = time.time() - start_time
 

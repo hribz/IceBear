@@ -1,12 +1,12 @@
-from collections import defaultdict
 import hashlib
-import os
-from pathlib import Path
-import sys
 import json
-from typing import Dict, Iterable, List, Set
-import yaml
+import os
+from collections import defaultdict
 from enum import Enum, auto
+from pathlib import Path
+from typing import Dict
+
+import yaml
 from pydantic import BaseModel, Field
 
 from IncAnalysis.logger import logger
@@ -186,7 +186,7 @@ def parse_sarif(result_file, analyzer) -> int:
     with open(result_file, "r") as f:
         try:
             sarif_json = json.load(f)
-        except Exception as e:
+        except Exception:
             logger.info(
                 f"{result_file} is not sarif format, please check gsa running status."
             )

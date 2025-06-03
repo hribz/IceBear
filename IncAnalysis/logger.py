@@ -1,7 +1,6 @@
+import logging
 import os
 import sys
-import logging
-from datetime import datetime
 
 
 def remake_file(file):

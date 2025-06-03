@@ -1,12 +1,11 @@
-import argparse
-from pathlib import Path
+import concurrent.futures
+import csv
 import os
+import re
 import shutil
 from enum import Enum, auto
+from pathlib import Path
 from typing import List
-import re
-import csv
-import concurrent.futures
 
 from IncAnalysis.logger import logger
 

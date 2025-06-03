@@ -1,18 +1,17 @@
+import concurrent.futures
+import os
 import shlex
 import shutil
-from typing import List
-import multiprocessing as mp
 import subprocess
-from subprocess import run
 from abc import ABC, abstractmethod
-import os
-import concurrent.futures
+from subprocess import run
+from typing import List
 
 from IncAnalysis.analyzer_config import *
 from IncAnalysis.file_in_cdb import FileInCDB, FileKind
-from IncAnalysis.utils import makedir, process_file_list, commands_to_shell_script
 from IncAnalysis.logger import logger
 from IncAnalysis.process import Process
+from IncAnalysis.utils import commands_to_shell_script, makedir
 
 
 class Analyzer(ABC):
@@ -252,7 +251,7 @@ class CppCheck(Analyzer):
             f"--project={cdb}",
             f"-j{config.env.analyze_opts.jobs}",
         ]
-        analyzer_cmd.append(f"--showtime=file-total")
+        analyzer_cmd.append("--showtime=file-total")
         analyzer_cmd.append(f"--cppcheck-build-dir={config.cppcheck_build_path}")
         # analyzer_cmd.append(f"--plist-output={config.cppcheck_output_path}")
         result_extname = ".json" if self.analyzer_config.Sarif else ".xml"
@@ -267,7 +266,7 @@ class CppCheck(Analyzer):
         analyzer_cmd.extend(self.analyzer_config.analyze_args())
 
         cppcheck_script = commands_to_shell_script(analyzer_cmd)
-        logger.info(f"[Cppcheck Analyzing] ......")
+        logger.info("[Cppcheck Analyzing] ......")
         logger.info(
             f"[{__class__.__name__} ({self.analyzer_config.inc_mode}) Analyze Script] {cppcheck_script}"
         )

@@ -1,14 +1,13 @@
-from enum import Enum, auto
 import json
-from abc import ABC, abstractmethod
 import os
+import tempfile
+from abc import ABC, abstractmethod
+from enum import Enum, auto
 from pathlib import Path
 from typing import Optional
-import tempfile
 
-from IncAnalysis.environment import Environment, IncrementalMode
 from IncAnalysis.analyzer_utils import *
-from IncAnalysis.utils import remove_file
+from IncAnalysis.environment import Environment, IncrementalMode
 
 
 class AnalyzerConfig(ABC):
@@ -110,7 +109,7 @@ class CSAConfig(AnalyzerConfig):
         super().__init__(env, csa_workspace, checker_file, config_file)
         self.compilers = {"c": env.CLANG, "c++": env.CLANG_PLUS_PLUS}
         if not os.path.exists(env.CLANG) or not os.path.exists(env.CLANG_PLUS_PLUS):  # type: ignore
-            logger.error(f"CSA need command `clang/clang++` exists in environment.")
+            logger.error("CSA need command `clang/clang++` exists in environment.")
             self.ready_to_run = False
         self.inc_level_check()
 
@@ -143,13 +142,13 @@ class CSAConfig(AnalyzerConfig):
 
             if self.inc_mode == IncrementalMode.FuncitonLevel and not func_level_enable:
                 logger.error(
-                    f"[CSA Inc Level Check] Please use customized clang build from llvm-project-ica,"
+                    "[CSA Inc Level Check] Please use customized clang build from llvm-project-ica,"
                     " and make sure there is `-analyze-function-file` in `clang -cc1 -help`'s output."
                 )
                 self.ready_to_run = False
             if self.inc_mode == IncrementalMode.InlineLevel and not inline_level_enable:
                 logger.error(
-                    f"[CSA Inc Level Check] Please use customized clang build from llvm-project-ica,"
+                    "[CSA Inc Level Check] Please use customized clang build from llvm-project-ica,"
                     " and make sure there are `-analyze-function-file` and `-analyzer-dump-fsum` in `clang -cc1 -help`'s output."
                 )
                 self.ready_to_run = False
@@ -239,7 +238,7 @@ class ClangTidyConfig(AnalyzerConfig):
         self.clang_tidy = env.clang_tidy
         self.diagtool = env.diagtool
         if not os.path.exists(env.clang_tidy):
-            logger.error(f"Clang-tidy need command `clang-tidy` exists in environment.")
+            logger.error("Clang-tidy need command `clang-tidy` exists in environment.")
             self.ready_to_run = False
 
         if not config_file:
@@ -278,7 +277,7 @@ class CppCheckConfig(AnalyzerConfig):
 
         self.cppcheck = env.cppcheck
         if env.cppcheck is None or not os.path.exists(env.cppcheck):
-            logger.error(f"Cppcheck need command `cppcheck` exists in environment.")
+            logger.error("Cppcheck need command `cppcheck` exists in environment.")
             self.ready_to_run = False
         self.inc_level_check()
 
@@ -308,7 +307,7 @@ class CppCheckConfig(AnalyzerConfig):
 
             if self.inc_mode == IncrementalMode.FuncitonLevel and not func_level_enable:
                 logger.error(
-                    f"[Cppcheck Inc Level Check] Please use customized cppcheck build from cppcheck-ica,"
+                    "[Cppcheck Inc Level Check] Please use customized cppcheck build from cppcheck-ica,"
                     " and make sure there is `--analyze-function-file` in `cppcheck --help`'s output."
                 )
                 self.ready_to_run = False
@@ -367,7 +366,7 @@ class InferConfig(AnalyzerConfig):
 
         self.infer = env.infer
         if env.infer is None or not os.path.exists(env.infer):
-            logger.error(f"infer need command `infer` exists in environment.")
+            logger.error("infer need command `infer` exists in environment.")
             self.ready_to_run = False
 
         if not config_file:
@@ -398,7 +397,7 @@ class GSAConfig(AnalyzerConfig):
         self.max_workers = 4  # GCC Static Analyzer doesn't scale well.
         self.compilers = {"c": env.GCC, "c++": env.GXX}
         if not os.path.exists(env.GCC) or not os.path.exists(env.GCC):  # type: ignore
-            logger.error(f"GSA need command `gcc/g++` exists in environment.")
+            logger.error("GSA need command `gcc/g++` exists in environment.")
             self.ready_to_run = False
         self.inc_level_check()
 
@@ -437,7 +436,7 @@ class GSAConfig(AnalyzerConfig):
 
             if self.inc_mode == IncrementalMode.FuncitonLevel and not func_level_enable:
                 logger.error(
-                    f"[GSA Inc Level Check] Please use customized gcc build from gcc-ica,"
+                    "[GSA Inc Level Check] Please use customized gcc build from gcc-ica,"
                     " and make sure `gcc --param=analyzer-function-file=file.tmp -x -c -o/dev/null main.c`"
                     " returncode is right."
                 )

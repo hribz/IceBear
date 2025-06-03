@@ -1,12 +1,11 @@
-import sys
 import os
-from pathlib import Path
+import sys
 
-from IncAnalysis.environment import Environment, ArgumentParser
-from IncAnalysis.repository import UpdateConfigRepository
+from IncAnalysis.environment import ArgumentParser, Environment
 from IncAnalysis.logger import logger
-from IncAnalysis.utils import makedir
 from IncAnalysis.reports_postprocess import postprocess_workspace
+from IncAnalysis.repository import UpdateConfigRepository
+from IncAnalysis.utils import makedir
 
 
 class RepoParser(ArgumentParser):
@@ -106,7 +105,7 @@ def main_impl(argv):
     if build_command is None and (opts.cdb is None or not os.path.exists(opts.cdb)):
         if opts.cdb is None:
             logger.info(
-                f"Please specify compilation database if your don't build through icebear."
+                "Please specify compilation database if your don't build through icebear."
             )
         else:
             logger.info(

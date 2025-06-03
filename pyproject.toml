@@ -24,5 +24,36 @@ dev-dependencies = [
     "pytest>=7.0.0",
     "mypy>=1.0.0",
     "black>=23.0.0",
-    "flake8>=6.0.0",
+    "ruff>=0.1.0", # 替换 flake8
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+lint.select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+]
+lint.ignore = [
+    "E203",  # whitespace before ':'
+    "E501",  # line too long (handled by black)
+    "F405",  # name may be undefined, but is defined in another module
+    "F403",  # 'from module import *' used; unable to detect undefined names
 ]
