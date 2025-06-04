@@ -46,7 +46,8 @@ def generate_icebear_script(icebear_script_path, root_path):
     if uv_available and has_uv_lock:
         script_content = f"""#!/bin/bash
 # IceBear - A scheduler for C/C++ static analysis tools
-uv run icebear "$@"
+export ICEBEAR_EXEC_DIR="$(pwd)"
+(cd "{current_dir}" && uv run icebear "$@")
 """
     else:
         # Fallback to direct Python execution

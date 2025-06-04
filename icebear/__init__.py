@@ -89,48 +89,83 @@ def main_impl(argv):
     ice_bear_path = os.path.abspath(__file__)
     env = Environment(opts, os.path.dirname(ice_bear_path))
 
-    opts.repo = os.path.abspath(opts.repo)
-    if not os.path.exists(opts.repo):
-        logger.info(f"Please make sure repository {opts.repo} exists.")
-        exit(1)
-    repo = os.path.abspath(opts.repo)
+    # icebear script execution directory
+    script_exec_dir = os.environ.get('ICEBEAR_EXEC_DIR', os.getcwd())
+    logger.info(f"Script executed from directory: {script_exec_dir}")
 
-    workspace = os.path.abspath(opts.output)
+    if not os.path.isabs(opts.repo):
+        # handle relative path based on script execution directory
+        repo_dir = os.path.join(script_exec_dir, opts.repo)
+    else:
+        repo_dir = opts.repo
+    repo_dir = os.path.abspath(repo_dir)  # 确保是规范化的绝对路径
+    print(f"Repository directory: {repo_dir}")
+    
+    # handle output path
+    if not os.path.isabs(opts.output):
+        output_dir = os.path.join(script_exec_dir, opts.output)
+    else:
+        output_dir = opts.output
+    workspace = os.path.abspath(output_dir)
+    
+    # handle build_dir path
+    build_dir = opts.build_dir
+    if build_dir is not None and not os.path.isabs(opts.build_dir):
+        build_dir = os.path.join(script_exec_dir, opts.build_dir)
+    if build_dir is not None:
+        build_dir = os.path.abspath(build_dir)
+    
+    # handle compilation database path
+    cdb_dir = opts.cdb
+    if cdb_dir is not None and not os.path.isabs(opts.cdb):
+        cdb_dir = os.path.join(script_exec_dir, opts.cdb)
+    if cdb_dir is not None:
+        cdb_dir = os.path.abspath(cdb_dir)
+
+    # handle cache path
+    cache_path = opts.cache
+    if cache_path is not None and not os.path.isabs(opts.cache):
+        cache_path = os.path.join(script_exec_dir, opts.cache)
+    if cache_path is not None:
+        cache_path = os.path.abspath(cache_path)
+
+    if not os.path.exists(repo_dir):
+        logger.info(f"Please make sure repository {repo_dir} exists.")
+        exit(1)
+
     makedir(workspace)
 
     build_command = opts.build
-    build_root = opts.build_dir
-    if build_root:
-        build_root = os.path.abspath(opts.build_dir)
-    if build_command is None and (opts.cdb is None or not os.path.exists(opts.cdb)):
-        if opts.cdb is None:
+
+    if build_command is None and (cdb_dir is None or not os.path.exists(cdb_dir)):
+        if cdb_dir is None:
             logger.info(
                 "Please specify compilation database if your don't build through icebear."
             )
         else:
             logger.info(
-                f"Please make sure compilation database file {opts.cdb} exists."
+                f"Please make sure compilation database file {cdb_dir} exists."
             )
         exit(1)
-
-    cdb = opts.cdb
-    if opts.cdb is not None and os.path.exists(opts.cdb):
-        cdb = os.path.abspath(opts.cdb)
 
     if opts.tag:
         version_stamp = opts.tag
     else:
         version_stamp = env.timestamp
 
+    # update cache path in env object
+    if cache_path is not None:
+        env.analyze_opts.cache = cache_path
+
     Repo = UpdateConfigRepository(
-        os.path.basename(repo),
-        repo,
+        os.path.basename(repo_dir),
+        repo_dir,
         env,
         workspace=workspace,
         configure_scripts=[],
         build_script=build_command,
-        build_root=build_root,
-        cdb=cdb,
+        build_root=build_dir,
+        cdb=cdb_dir,
         need_build=build_command is not None,
         need_configure=False,
         version_stamp=version_stamp,
